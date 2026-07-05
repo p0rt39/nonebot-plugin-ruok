@@ -257,11 +257,18 @@ async def _cmd_lookup(rest: str) -> None:
     lines = [
         f"{status_icon} Session: {session.session_id}",
         f"状态: {session.status} | 来源: {session.source}",
+    ]
+    if session.reporter.user_id:
+        lines.append(f"用户: {session.reporter.user_id}")
+    if session.reporter.group_id:
+        lines.append(f"群号: {session.reporter.group_id}")
+    if session.reporter.platform:
+        lines.append(f"平台: {session.reporter.platform}")
+    lines += [
         f"模块: {session.module_name}",
         f"描述: {session.description[:200]}",
         f"创建: {session.first_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')} | "
         f"最近: {session.last_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"重复次数: {len(session.occurrences)}",
     ]
     from .collector import get_linked_sessions
 

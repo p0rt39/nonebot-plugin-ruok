@@ -27,15 +27,6 @@
         </div>
     </div>
 
-    <details>
-        <summary>重复次数: {{ s.occurrences | length }}</summary>
-        <div class="occurrence-list">
-            {% for o in s.occurrences %}
-            <pre><code>{{ o.model_dump(mode='json') | tojson(indent=2) }}</code></pre>
-            {% endfor %}
-        </div>
-    </details>
-
     {% if s.link_group %}
     <p><small>👥 关联组: <code>{{ s.link_group }}</code></small></p>
     {% endif %}

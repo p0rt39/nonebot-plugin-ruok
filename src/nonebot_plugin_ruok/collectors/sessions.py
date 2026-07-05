@@ -13,7 +13,6 @@ from nonebot import logger
 
 from ..protocol import (
     Session,
-    Occurrence,
     ReporterInfo,
     SessionStats,
     SessionSource,
@@ -31,24 +30,6 @@ def _gen_session_id() -> str:
 def _make_signature(plugin: str, exc: str, msg: str) -> str:
     raw = f"{plugin}:{exc}:{msg[:100]}"
     return hashlib.md5(raw.encode()).hexdigest()[:12]
-
-
-def _record_to_dict(record: dict) -> dict[str, Any]:
-    """Extract safe fields from a loguru record (serialized format)."""
-    level: dict = record.get("level", {})
-    file_info: dict = record.get("file", {})
-    return {
-        "name": record.get("name"),
-        "level": level.get("name", ""),
-        "message": record.get("message"),
-        "exception": (
-            str(record.get("exception")) if record.get("exception") else None
-        ),
-        "file": file_info.get("name", ""),
-        "function": record.get("function"),
-        "line": record.get("line"),
-        "time": str(record.get("time", "")),
-    }
 
 
 # ────────────────────────────────
@@ -114,11 +95,6 @@ def create_session(
         module_name=module_name,
         reporter=reporter,
         description=description,
-        occurrences=[
-            Occurrence(
-                source=source,
-            )
-        ],
     )
     _save_session(data_dir, session)
     _publish_session_event("created", session)
@@ -262,14 +238,9 @@ def _handle_ruok_error(
     signature = _make_signature("ruok", type(exc).__name__, str(exc)[:100])
 
     try:
-        # ── Deduplicate: if a matching session exists, append occurrence ──
+        # ── Deduplicate: if a matching session exists, update it ──
         existing = _find_existing_session(data_dir, signature)
         if existing is not None:
-            existing.occurrences.append(
-                Occurrence(
-                    source="automatic",
-                )
-            )
             existing.last_seen_at = datetime.now(timezone.utc)
             existing.description = (
                 f"**上下文**: {context}\n"
@@ -297,7 +268,6 @@ def _handle_ruok_error(
                 f"```\n{tb_text}\n```"
             ),
             developer_notes=tb_text,
-            occurrences=[Occurrence(source="automatic")],
         )
         _save_session(data_dir, session)
     except Exception:

@@ -166,14 +166,6 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         _cache.pop("status", None)
         return session.model_dump(mode="json")
 
-    @router.get("/sessions/{session_id}/occurrences")
-    async def api_session_occurrences(session_id: str):
-        """Get occurrence history for a session."""
-        session = get_session(data_dir, session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-        return [o.model_dump(mode="json") for o in session.occurrences]
-
     @router.post("/sessions/{session_id}/link/{other_id}")
     async def api_link_sessions(session_id: str, other_id: str):
         """Link two sessions into the same link_group."""

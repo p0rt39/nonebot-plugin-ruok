@@ -41,7 +41,6 @@ from .collectors import (  # noqa: F401 — re-export
     # sessions
     _gen_session_id,
     _make_signature,
-    _record_to_dict,
     _network_tracker,
     _collect_bot_info,
     get_session_stats,

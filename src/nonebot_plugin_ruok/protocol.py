@@ -89,15 +89,6 @@ class ReporterInfo(BaseModel):
     platform: str | None = None
 
 
-class Occurrence(BaseModel):
-    """One capture / report within a session."""
-
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    record: dict[str, Any] | None = None  # full loguru record (automatic)
-    snapshot: AggregatedStatus | None = None  # health snapshot at capture time
-    source: SessionSource
-
-
 class Session(BaseModel):
     """An abnormal event record — independent, linkable."""
 
@@ -119,8 +110,6 @@ class Session(BaseModel):
 
     link_group: str | None = None  # "ruok-grp-{8 hex}" — group-based linking
     developer_notes: str | None = None
-
-    occurrences: list[Occurrence] = Field(default_factory=list)
 
 
 # ────────────────────────────────

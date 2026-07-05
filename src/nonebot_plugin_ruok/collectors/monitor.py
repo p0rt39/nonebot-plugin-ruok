@@ -15,10 +15,9 @@ from .sessions import (
     _save_session,
     _gen_session_id,
     _make_signature,
-    _record_to_dict,
     _find_existing_session,
 )
-from ..protocol import Session, Occurrence, ReporterInfo
+from ..protocol import Session, ReporterInfo
 
 
 class LogMonitor:
@@ -116,7 +115,6 @@ class _StdlibLogHandler(logging.Handler):
 
             existing = _find_existing_session(self._data_dir, signature)
             if existing is not None:
-                existing.occurrences.append(Occurrence(source="automatic"))
                 existing.last_seen_at = datetime.now(timezone.utc)
                 _save_session(self._data_dir, existing)
                 return
@@ -131,7 +129,6 @@ class _StdlibLogHandler(logging.Handler):
                 description=(
                     f"```\n{msg_text}\n{exc_text}\n```"
                 ),
-                occurrences=[Occurrence(source="automatic")],
             )
             _save_session(self._data_dir, session)
             logger.warning(
@@ -175,11 +172,6 @@ def _make_log_sink(
 
         existing = _find_existing_session(data_dir, signature)
         if existing:
-            occurrence = Occurrence(
-                record=_record_to_dict(record),
-                source="automatic",
-            )
-            existing.occurrences.append(occurrence)
             existing.last_seen_at = datetime.now(timezone.utc)
             _save_session(data_dir, existing)
             return
@@ -192,12 +184,6 @@ def _make_log_sink(
             error_signature=signature,
             reporter=ReporterInfo(type="automatic"),
             description=f"```\n{msg_text}\n{exception_str}\n```",
-            occurrences=[
-                Occurrence(
-                    record=_record_to_dict(record),
-                    source="automatic",
-                )
-            ],
         )
         _save_session(data_dir, session)
         logger.warning(

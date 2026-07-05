@@ -77,33 +77,6 @@
     </div>
 </article>
 
-<!-- Occurrences -->
-<article>
-    <h4>📋 Occurrences ({{ session.occurrences | length }})</h4>
-    {% if session.occurrences %}
-    {% for o in session.occurrences | reverse %}
-    <details {% if loop.first %}open{% endif %}>
-        <summary>
-            #{{ loop.revindex }} — {{ o.timestamp.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
-            <small>({{ o.source }})</small>
-        </summary>
-        <div style="margin-top: 0.5rem;">
-            {% if o.record %}
-            <h5>Record</h5>
-            <pre style="font-size: 0.75em; max-height: 300px; overflow-y: auto;"><code>{{ o.record | tojson(indent=2) }}</code></pre>
-            {% endif %}
-            {% if o.snapshot %}
-            <h5>Health Snapshot</h5>
-            <pre style="font-size: 0.75em; max-height: 200px; overflow-y: auto;"><code>{{ o.snapshot.model_dump(mode='json') | tojson(indent=2) }}</code></pre>
-            {% endif %}
-        </div>
-    </details>
-    {% endfor %}
-    {% else %}
-    <p>暂无 Occurrence 记录。</p>
-    {% endif %}
-</article>
-
 <!-- Linked Sessions -->
 <article>
     <h4>🔗 关联 Sessions {% if session.link_group %}<code style="font-size:0.7em;">{{ session.link_group }}</code>{% endif %}</h4>
