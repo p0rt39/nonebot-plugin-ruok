@@ -447,8 +447,8 @@ async def collect_fast_metrics() -> FastMetricsSnapshot:
     def _get():
         import psutil
 
-        # interval=0.5 gives stable per-core readings (0.1 too noisy for spikes)
-        cpu = psutil.cpu_percent(interval=0.5, percpu=True)
+        # interval=1.0 gives stable readings matching Task Manager (~1s refresh)
+        cpu = psutil.cpu_percent(interval=1.0, percpu=True)
         mem = psutil.virtual_memory()
         swap = psutil.swap_memory()
 

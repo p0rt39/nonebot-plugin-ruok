@@ -94,36 +94,30 @@
 
     {# ── Row 2: Stat tiles (Load / Network / Disk IO) ── #}
 
-    <!-- Load Tile -->
+    <!-- Load Tile (hidden on Windows — os.getloadavg unavailable) -->
+    {% if metrics.load_1m is not none %}
     <article class="sys-tile sys-tile--stat animate-in" id="tile-load"
              onclick="this.classList.toggle('expanded')">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">⚖️</div>
             <div class="sys-tile__value" id="info-load">
-                {% if metrics.load_1m is not none %}
                 {{ "%.2f"|format(metrics.load_1m) }}
-                {% else %}
-                N/A
-                {% endif %}
             </div>
             <div class="sys-tile__label">Load Average</div>
             <div class="sys-tile__sub" id="load-detail">
-                {% if metrics.load_1m is not none %}
                 {{ "%.2f"|format(metrics.load_5m) }} / {{ "%.2f"|format(metrics.load_15m) }}
-                {% else %}
-                Windows
-                {% endif %}
             </div>
         </div>
         <div class="sys-tile__expand">
             <div class="sys-expand-content">
-                <div><strong>1 分钟:</strong> <span id="load-exp-1m">{{ "%.2f"|format(metrics.load_1m or 0) }}</span></div>
-                <div><strong>5 分钟:</strong> <span id="load-exp-5m">{{ "%.2f"|format(metrics.load_5m or 0) }}</span></div>
-                <div><strong>15 分钟:</strong> <span id="load-exp-15m">{{ "%.2f"|format(metrics.load_15m or 0) }}</span></div>
+                <div><strong>1 分钟:</strong> <span id="load-exp-1m">{{ "%.2f"|format(metrics.load_1m) }}</span></div>
+                <div><strong>5 分钟:</strong> <span id="load-exp-5m">{{ "%.2f"|format(metrics.load_5m) }}</span></div>
+                <div><strong>15 分钟:</strong> <span id="load-exp-15m">{{ "%.2f"|format(metrics.load_15m) }}</span></div>
                 <div id="load-exp-ratio" style="margin-top:0.5rem;font-size:0.85em;color:var(--pico-muted-color);"></div>
             </div>
         </div>
     </article>
+    {% endif %}
 
     <!-- Network Tile -->
     <article class="sys-tile sys-tile--stat animate-in" id="tile-net"
