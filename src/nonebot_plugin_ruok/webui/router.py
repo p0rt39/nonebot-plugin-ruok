@@ -23,25 +23,28 @@ def _render_module_edit_row(mod: ModuleDefinition) -> str:
     plugins_str = ", ".join(mod.plugins)
     desc = mod.description or ""
     dname = mod.display_name or mod.name
+    fid = f"edit-frm-{mod.name}"
     return (
-        f'<tr>'
+        f'<tr id="{fid}">'
         f'<td></td>'  # status
         f'<td><strong>{mod.name}</strong></td>'  # name — readonly
         f'<td>'
         f'<input type="text" name="display_name" value="{dname}"'
-        f' style="margin-bottom:0;font-size:0.85em"'
-        f' form="edit-frm-{mod.name}">'
+        f' style="margin-bottom:0;font-size:0.85em">'
         f'</td>'
-        f'<td></td>'  # plugin count
+        f'<td>'
+        f'<input type="text" name="plugins" value="{plugins_str}"'
+        f' style="margin-bottom:0;font-size:0.85em"'
+        f' placeholder="逗号分隔">'
+        f'</td>'
         f'<td>'
         f'<input type="text" name="description" value="{desc}"'
-        f' style="margin-bottom:0;font-size:0.85em"'
-        f' form="edit-frm-{mod.name}">'
+        f' style="margin-bottom:0;font-size:0.85em">'
         f'</td>'
         f'<td style="white-space:nowrap">'
         f'<button class="outline" style="padding:2px 6px;font-size:0.78em"'
-        f' form="edit-frm-{mod.name}"'
         f' hx-post="/ruok/_actions/module-edit-save/{mod.name}"'
+        f' hx-include="#{fid} input"'
         f' hx-target="#module-list" hx-swap="outerHTML">'
         f'Save</button> '
         f'<button class="outline secondary" style="padding:2px 6px;font-size:0.78em"'
@@ -50,9 +53,6 @@ def _render_module_edit_row(mod: ModuleDefinition) -> str:
         f'Cancel</button>'
         f'</td>'
         f'</tr>'
-        f'<form id="edit-frm-{mod.name}" style="display:none">'
-        f'<input type="text" name="plugins" value="{plugins_str}">'
-        f'</form>'
     )
 from .auth import WebUIAuth
 from .jinja import render
