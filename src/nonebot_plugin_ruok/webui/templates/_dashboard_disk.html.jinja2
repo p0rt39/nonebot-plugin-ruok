@@ -1,24 +1,26 @@
-<!-- Disk partitions partial (30s polling) -->
-<h3>💾 磁盘</h3>
+{# Disk partitions — compact PicStatus-style list (15s polling) #}
+<h3>💾 磁盘分区 <span class="auto-refresh">🔄 15s</span></h3>
 {% set ns = namespace(has_disk=false) %}
 {% if status.bot and status.bot.checks %}
 {% for c in status.bot.checks %}
 {% if c.name == 'disk' and c.details %}
 {% set ns.has_disk = true %}
-<div class="card-grid">
+<div class="disk-list">
     {% for mp, d in c.details.items() if d is mapping %}
     {% set pct = (d.percent or 0)|float %}
     {% set clr = '#2ecc40' if pct < 70 else ('#ffdc00' if pct < 90 else '#ff4136') %}
-    <article>
-        <header><strong>{{ mp }}</strong></header>
-        <div class="disk-bar" style="height:8px;border-radius:4px;background:rgba(0,0,0,0.06);overflow:hidden;margin:0.5rem 0;">
-            <div style="height:100%;border-radius:4px;width:{{ pct }}%;background:{{ clr }};"></div>
-        </div>
-        <small>{{ '%.1f'|format(pct) }}%</small>
-    </article>
+    <div class="disk-row">
+        <span class="disk-mount">{{ mp }}</span>
+        {% if d.fstype %}<span class="disk-fstype">{{ d.fstype }}</span>{% endif %}
+        <span class="disk-bar-wrap">
+            <span class="disk-bar" style="width:{{ pct }}%;background:{{ clr }};"></span>
+        </span>
+        <span class="disk-pct" style="color:{{ clr }};">{{ "%.1f"|format(pct) }}%</span>
+        <span class="disk-free">剩 {{ d.free|_fmt_bytes_s }}</span>
+    </div>
     {% endfor %}
 </div>
 {% endif %}
 {% endfor %}
 {% endif %}
-{% if not ns.has_disk %}<p>⏳ 暂无磁盘数据</p>{% endif %}
+{% if not ns.has_disk %}<article><p>⏳ 暂无磁盘数据</p></article>{% endif %}

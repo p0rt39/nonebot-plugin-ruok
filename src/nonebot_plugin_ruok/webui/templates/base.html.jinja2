@@ -346,16 +346,70 @@
             vector-effect: non-scaling-stroke;
         }
 
-        /* ── Multi-row metric values (network / disk IO) ── */
-        .sys-metric-rows {
-            font-size: 0.95rem;
+        /* ── Disk partition list ── */
+        .disk-list {
+            background: var(--glass-bg);
+            backdrop-filter: blur(14px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+        }
+        .disk-row {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            padding: 0.5rem 1rem;
+            font-size: 0.9em;
+            border-bottom: 1px solid var(--glass-border);
+            transition: background 0.15s;
+        }
+        .disk-row:last-child { border-bottom: none; }
+        .disk-row:hover { background: rgba(102,126,234,0.05); }
+        .disk-mount {
             font-weight: 600;
-            line-height: 1.5;
+            min-width: 3em;
+            white-space: nowrap;
         }
-        .sys-metric-rows span {
-            font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
-            font-size: 0.95em;
+        .disk-fstype {
+            font-size: 0.72em;
+            padding: 1px 6px;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.05);
+            color: var(--pico-muted-color);
+            white-space: nowrap;
         }
+        .disk-bar-wrap {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(0,0,0,0.06);
+            overflow: hidden;
+            min-width: 60px;
+        }
+        .disk-bar {
+            display: block;
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.4s ease;
+            min-width: 2px;
+        }
+        .disk-pct {
+            font-weight: 600;
+            font-size: 0.9em;
+            min-width: 3.5em;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .disk-free {
+            font-size: 0.8em;
+            color: var(--pico-muted-color);
+            min-width: 6em;
+            text-align: right;
+            white-space: nowrap;
+        }
+
         .gauge-card {
             background: var(--glass-bg) !important; backdrop-filter: blur(16px);
             border: 1px solid var(--glass-border) !important;

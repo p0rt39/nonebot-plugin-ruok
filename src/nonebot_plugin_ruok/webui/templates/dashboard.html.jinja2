@@ -17,10 +17,10 @@
     {% include "_dashboard_system.html.jinja2" %}
 </div>
 
-<!-- Disk — polling 30s -->
+<!-- Disk — polling 15s -->
 <div id="dashboard-disk"
      hx-get="/ruok?_partial=dashboard-disk"
-     hx-trigger="load, every 30s" hx-swap="innerHTML">
+     hx-trigger="load, every 15s" hx-swap="innerHTML">
     {% include "_dashboard_disk.html.jinja2" %}
 </div>
 

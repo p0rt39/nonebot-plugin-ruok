@@ -108,6 +108,7 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
                     "used": usage.used,
                     "free": usage.free,
                     "percent": usage.percent,
+                    "fstype": getattr(part, "fstype", "") or "",
                 }
             except Exception:
                 continue
