@@ -254,9 +254,11 @@ async def _collect_connection_status(
             except asyncio.TimeoutError:
                 entry.latency_ms = None
                 entry.error = "get_status() timed out"
-            except (OSError, RuntimeError) as exc:
+            except Exception as exc:
+                # Broad catch: Console adapter (ApiNotAvailable),
+                # network errors, etc. — all are expected failures.
                 entry.latency_ms = None
-                entry.error = str(exc)
+                entry.error = f"{type(exc).__name__}: {exc}"
 
         result.append(entry)
 
@@ -369,7 +371,12 @@ async def collect_all_statuses(
         checks=all_checks,
     )
 
-    connections = await _collect_connection_status(config)
+    connections: list[BotConnectionStatus] = []
+    try:
+        connections = await _collect_connection_status(config)
+    except Exception:
+        # Connection check is best-effort; failure → empty list
+        pass
     plugins = _collect_plugin_inventory()
 
     # Derive overall — modules > connections > system health

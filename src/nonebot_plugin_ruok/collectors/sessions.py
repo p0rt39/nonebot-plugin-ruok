@@ -246,6 +246,10 @@ def _handle_ruok_error(
     """Log an unexpected internal error with full traceback and create a
     RuOK self-monitoring session under the built-in ``"ruok"`` module.
 
+    Deduplicates by *error_signature*: if a pending/unsolved session already
+    exists for this signature, appends an occurrence instead of creating
+    a new session.
+
     Returns the *session_id* for use in user-facing error messages, or
     ``"N/A"`` when even the session cannot be persisted.
     """
@@ -255,15 +259,36 @@ def _handle_ruok_error(
         f"RuOK 内部异常 [{context}]: {type(exc).__name__}: {exc}\n{tb_text}"
     )
 
+    signature = _make_signature("ruok", type(exc).__name__, str(exc)[:100])
+
     try:
+        # ── Deduplicate: if a matching session exists, append occurrence ──
+        existing = _find_existing_session(data_dir, signature)
+        if existing is not None:
+            existing.occurrences.append(
+                Occurrence(
+                    source="automatic",
+                )
+            )
+            existing.last_seen_at = datetime.now(timezone.utc)
+            existing.description = (
+                f"**上下文**: {context}\n"
+                f"**异常类型**: {type(exc).__name__}\n"
+                f"**异常信息**: {exc}\n\n"
+                f"```\n{tb_text}\n```"
+            )
+            existing.developer_notes = tb_text
+            _save_session(data_dir, existing)
+            _publish_session_event("updated", existing)
+            return existing.session_id
+
+        # ── New session ──
         session = Session(
             session_id=_gen_session_id(),
             source="automatic",
             status="pending",
             module_name="ruok",
-            error_signature=_make_signature(
-                "ruok", type(exc).__name__, str(exc)[:100]
-            ),
+            error_signature=signature,
             reporter=ReporterInfo(type="automatic"),
             description=(
                 f"**上下文**: {context}\n"
