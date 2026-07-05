@@ -8,6 +8,7 @@
             <th>显示名</th>
             <th>插件数</th>
             <th>描述</th>
+            <th>操作</th>
         </tr>
     </thead>
     <tbody>
@@ -24,6 +25,15 @@
             <td>{{ m.display_name }}</td>
             <td>{{ m.plugins | length }}</td>
             <td>{{ m.description or '—' }}</td>
+            <td>
+                <button class="outline secondary" style="padding:2px 8px;font-size:0.78em;"
+                        hx-post="/ruok/_actions/module-delete/{{ m.name }}"
+                        hx-target="#module-list"
+                        hx-swap="outerHTML"
+                        hx-confirm="确定删除模块「{{ m.display_name or m.name }}」？">
+                    🗑️ 删除
+                </button>
+            </td>
         </tr>
         {% endfor %}
     </tbody>

@@ -7,13 +7,51 @@
 <h3>🔔 通知规则管理</h3>
 <p>配置事件通知规则：哪些状态的 Session、哪些模块、通过什么渠道通知。</p>
 
-<article>
-    <p>
-        ⚙️ 通知规则目前通过 <code>.env</code> 中的 <code>RUOK__NOTIFICATION_RULES</code> JSON 数组配置。
-        可视化编辑器将在后续版本中提供。
-    </p>
-</article>
+<!-- Add / Edit Rule Form -->
+<details style="margin-bottom: 1.5rem;">
+    <summary>➕ 添加 / 编辑规则</summary>
+    <form hx-post="/ruok/_actions/notification-upsert"
+          hx-target="#notifications-container" hx-swap="outerHTML"
+          style="margin-top: 1rem;">
+        <div class="grid">
+            <label>
+                规则名称
+                <input type="text" name="name" required placeholder="e.g. 紧急通知">
+            </label>
+            <label>
+                冷却时间 (分钟)
+                <input type="number" name="cooldown_minutes" value="60" min="1" step="1">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                触发状态 (逗号分隔)
+                <input type="text" name="on_status" value="pending,unsolved"
+                       placeholder="pending, unsolved">
+            </label>
+            <label>
+                适用模块 (逗号分隔，留空=全部)
+                <input type="text" name="on_module" placeholder="weather, music">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                通知通道 (逗号分隔)
+                <input type="text" name="channels" value="bot_dm" placeholder="bot_dm, webhook">
+            </label>
+            <label>
+                Webhook URL (可选)
+                <input type="url" name="webhook_url" placeholder="https://hooks.example.com/...">
+            </label>
+        </div>
+        <label>
+            <input type="checkbox" name="enabled" checked> 启用
+        </label>
+        <button type="submit">💾 保存规则</button>
+    </form>
+</details>
 
+<div id="notifications-container">
 {% if rules %}
 <div class="card-grid">
     {% for rule in rules %}
@@ -54,15 +92,22 @@
             </tr>
             {% endif %}
         </table>
+        <footer>
+            <button class="outline secondary" style="font-size:0.8em;"
+                    hx-post="/ruok/_actions/notification-delete/{{ rule.name }}"
+                    hx-target="#notifications-container" hx-swap="outerHTML"
+                    hx-confirm="确定删除规则「{{ rule.name }}」？">
+                🗑️ 删除
+            </button>
+        </footer>
     </article>
     {% endfor %}
 </div>
 {% else %}
 <article>
-    <p>🎉 暂无通知规则。在 <code>.env</code> 中添加 <code>RUOK__NOTIFICATION_RULES</code> 配置。</p>
-    <pre><code># 示例 (.env):
-RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["pending","unsolved"],"on_module":[],"cooldown_minutes":60,"channels":["bot_dm"]}]'</code></pre>
+    <p>🎉 暂无通知规则。使用上方表单添加。</p>
 </article>
 {% endif %}
+</div>
 
 {% endblock %}

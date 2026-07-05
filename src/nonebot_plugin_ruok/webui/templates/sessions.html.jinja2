@@ -47,6 +47,36 @@
 
 <h3>📋 事件 Sessions</h3>
 
+<!-- Manual report form -->
+<details style="margin-bottom: 1.5rem;">
+    <summary>➕ 手动上报问题</summary>
+    <form hx-post="/ruok/_actions/session-create"
+          hx-target="#session-container" hx-swap="innerHTML"
+          style="margin-top: 1rem;">
+        <div class="grid">
+            <label>
+                模块名
+                <select name="module_name" required>
+                    <option value="">选择模块...</option>
+                    {% for m in all_modules %}
+                    <option value="{{ m.name }}">{{ m.display_name or m.name }}</option>
+                    {% endfor %}
+                    <option value="other">其他（手动输入）</option>
+                </select>
+            </label>
+            <label>
+                或输入自定义模块
+                <input type="text" name="module_name_custom" placeholder="自定义模块名">
+            </label>
+        </div>
+        <label>
+            问题描述
+            <textarea name="description" rows="3" required placeholder="详细描述你遇到的问题..."></textarea>
+        </label>
+        <button type="submit">📝 提交上报</button>
+    </form>
+</details>
+
 <!-- Stats overview -->
 <article style="padding: 1rem;">
     <div class="grid" style="text-align: center;">

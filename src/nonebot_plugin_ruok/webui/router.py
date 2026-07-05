@@ -203,7 +203,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.get("/ruok/notifications", response_class=HTMLResponse)
     async def page_notifications(request: Request, _guard_ok=Depends(_webui_guard)):
-        rules = config.notification_rules
+        rules = _load_notification_rules()
         return render(
             "notifications.html.jinja2",
             request=request,
@@ -246,6 +246,53 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         )
 
     # ── HTMX actions ─────────────
+
+    @router.post("/ruok/_actions/session-create")
+    async def action_session_create(
+        request: Request,
+        module_name: str = Form(""),
+        module_name_custom: str = Form(""),
+        description: str = Form(""),
+    ):
+        """Create a session from the WebUI manual report form."""
+        name = module_name_custom.strip() or module_name.strip()
+        if not name:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 请选择或输入模块名</p>',
+                status_code=400,
+            )
+        try:
+            reporter = ReporterInfo(type="user", user_id="webui")
+            create_session(
+                data_dir,
+                module_name=name,
+                description=description.strip() or "(无描述)",
+                reporter=reporter,
+                source="manual",
+            )
+            # Refresh session list
+            sessions = list_sessions(data_dir)
+            stats = get_session_stats(data_dir)
+            all_modules = list_modules(data_dir, config)
+            return render(
+                "sessions.html.jinja2",
+                request=request,
+                sessions=sessions,
+                stats=stats,
+                all_modules=all_modules,
+                current_status="",
+                current_search="",
+                current_module="",
+                current_plugin="",
+                current_after="",
+                current_before="",
+                headers={"HX-Trigger": '{"toast":"📝 Session 已创建","toastType":"success"}'},
+            )
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 创建 Session 失败</p>',
+                status_code=500,
+            )
 
     @router.post("/ruok/_actions/confirm/{session_id}")
     async def action_confirm(session_id: str):
@@ -368,5 +415,99 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=500,
             )
         return render("_modules_table.html.jinja2", request=request, modules=modules)
+
+    # ── Notification rules CRUD ──
+
+    def _load_notification_rules() -> list:
+        """Load notification rules from data file, merging config defaults."""
+        from ..protocol import NotificationRule
+
+        file_rules: list[dict] = []
+        rules_file = data_dir / "notification_rules.json"
+        if rules_file.exists():
+            try:
+                import json
+                file_rules = json.loads(rules_file.read_text("utf-8"))
+            except Exception:
+                file_rules = []
+        # Merge: file rules override config rules by name
+        config_rules = [r.model_dump(mode="json") for r in config.notification_rules]
+        merged: dict[str, dict] = {r["name"]: r for r in config_rules}
+        for r in file_rules:
+            merged[r["name"]] = r
+        return [NotificationRule(**r) for r in merged.values()]
+
+    def _save_notification_rules(rules: list) -> None:
+        """Persist notification rules to data file."""
+        import json
+
+        rules_file = data_dir / "notification_rules.json"
+        rules_file.parent.mkdir(parents=True, exist_ok=True)
+        rules_file.write_text(
+            json.dumps([r.model_dump(mode="json") for r in rules],
+                       indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    @router.post("/ruok/_actions/notification-upsert")
+    async def action_notification_upsert(
+        request: Request,
+        name: str = Form(...),
+        enabled: bool = Form(True),
+        on_status: str = Form("pending,unsolved"),
+        on_module: str = Form(""),
+        cooldown_minutes: float = Form(60.0),
+        channels: str = Form("bot_dm"),
+        webhook_url: str = Form(""),
+    ):
+        """Create or update a notification rule."""
+        from ..protocol import NotificationRule
+
+        try:
+            rules = _load_notification_rules()
+            rule = NotificationRule(
+                name=name,
+                enabled=enabled,
+                on_status=[s.strip() for s in on_status.split(",") if s.strip()],
+                on_module=[m.strip() for m in on_module.split(",") if m.strip()],
+                cooldown_minutes=cooldown_minutes,
+                channels=[c.strip() for c in channels.split(",") if c.strip()],
+                webhook_url=webhook_url or None,
+            )
+            # Upsert: replace if exists
+            existing = [r for r in rules if r.name == name]
+            if existing:
+                rules = [r for r in rules if r.name != name]
+            rules.append(rule)
+            _save_notification_rules(rules)
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 保存规则失败</p>',
+                status_code=500,
+            )
+        return render(
+            "notifications.html.jinja2",
+            request=request,
+            rules=rules,
+            headers={"HX-Trigger": '{"toast":"🔔 规则已保存","toastType":"success"}'},
+        )
+
+    @router.post("/ruok/_actions/notification-delete/{name}")
+    async def action_notification_delete(request: Request, name: str):
+        """Delete a notification rule by name."""
+        try:
+            rules = [r for r in _load_notification_rules() if r.name != name]
+            _save_notification_rules(rules)
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 删除规则失败</p>',
+                status_code=500,
+            )
+        return render(
+            "notifications.html.jinja2",
+            request=request,
+            rules=rules,
+            headers={"HX-Trigger": '{"toast":"🗑️ 规则已删除","toastType":"info"}'},
+        )
 
     return router
