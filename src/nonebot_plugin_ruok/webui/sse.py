@@ -1,4 +1,5 @@
 """SSE (Server-Sent Events) endpoint and EventBus for real-time WebUI updates."""
+
 from __future__ import annotations
 
 import json
@@ -133,8 +134,7 @@ async def sse_event_generator(
 
                 # Per-disk rates (lightweight, always collect)
                 metrics["disk_per"] = {
-                    name: dr.model_dump(mode="json")
-                    for name, dr in disk_per.items()
+                    name: dr.model_dump(mode="json") for name, dr in disk_per.items()
                 }
 
                 # Process snapshot (heavy — only on full cycles, ~3s cadence)
@@ -186,9 +186,7 @@ async def sse_event_generator(
             if _tick_counter >= tick_count:
                 _tick_counter = 0
                 if _status_task is None or _status_task.done():
-                    _status_task = asyncio.create_task(
-                        _collect_status_background()
-                    )
+                    _status_task = asyncio.create_task(_collect_status_background())
 
             # Emit cached status result if ready
             if _cached_status is not None:
@@ -220,7 +218,7 @@ async def sse_event_generator(
                     # Skip if previous task still running (overlap protection)
                     if _metrics_task is None or _metrics_task.done():
                         # Full collection (with process snapshot) every ~3s
-                        is_full = (_tick_index % 3 == 0)
+                        is_full = _tick_index % 3 == 0
                         _metrics_task = asyncio.create_task(
                             _collect_metrics_background(full=is_full)
                         )

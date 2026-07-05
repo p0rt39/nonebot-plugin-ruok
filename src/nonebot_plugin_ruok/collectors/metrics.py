@@ -1,4 +1,5 @@
 """System metrics, bot info, WS status, plugin inventory, and aggregation."""
+
 from __future__ import annotations
 
 import sys
@@ -179,9 +180,7 @@ def _collect_bot_info() -> list[CheckResult]:
             )
         )
     except (OSError, ImportError, RuntimeError) as exc:
-        results.append(
-            CheckResult(name="versions", status="unknown", error=str(exc))
-        )
+        results.append(CheckResult(name="versions", status="unknown", error=str(exc)))
 
     # Adapters
     try:
@@ -197,9 +196,7 @@ def _collect_bot_info() -> list[CheckResult]:
             )
         )
     except (AttributeError, RuntimeError) as exc:
-        results.append(
-            CheckResult(name="adapters", status="unknown", error=str(exc))
-        )
+        results.append(CheckResult(name="adapters", status="unknown", error=str(exc)))
 
     return results
 
@@ -278,9 +275,7 @@ async def _collect_connection_status(
 # ────────────────────────────────
 
 
-def _collect_plugin_inventory(
-    *, skip_ruok: bool = True
-) -> list[PluginHealthInfo]:
+def _collect_plugin_inventory(*, skip_ruok: bool = True) -> list[PluginHealthInfo]:
     """Collect loaded / metadata / matcher info for all plugins (L1-L3).
 
     Set *skip_ruok=False* to include the RuOK plugin itself (for module
@@ -354,9 +349,7 @@ async def collect_all_statuses(
     # Uptime
     uptime_sec = time.time() - _startup_time
     sys_results.append(
-        CheckResult(
-            name="uptime", status="healthy", details={"seconds": uptime_sec}
-        )
+        CheckResult(name="uptime", status="healthy", details={"seconds": uptime_sec})
     )
 
     all_checks = sys_results + bot_results
@@ -434,16 +427,10 @@ async def collect_all_statuses(
                 memory_percent=mem_pct,
                 disk_percent=disk_pct,
                 sessions_total=len(sessions),
-                sessions_pending=sum(
-                    1 for s in sessions if s.status == "pending"
-                ),
-                sessions_unsolved=sum(
-                    1 for s in sessions if s.status == "unsolved"
-                ),
+                sessions_pending=sum(1 for s in sessions if s.status == "pending"),
+                sessions_unsolved=sum(1 for s in sessions if s.status == "unsolved"),
                 connections_total=len(connections),
-                connections_online=sum(
-                    1 for c in connections if c.connected
-                ),
+                connections_online=sum(1 for c in connections if c.connected),
             ),
             retention_days=config.metrics_retention_days,
         )
@@ -490,7 +477,7 @@ async def collect_fast_metrics() -> FastMetricsSnapshot:
     """Lightweight snapshot for real-time gauges (no disk/network/plugins)."""
     import os
 
-    def _get():
+    def _get() -> dict[str, Any]:
         import psutil
 
         cpu_overall = psutil.cpu_percent(interval=1.0)
@@ -563,9 +550,7 @@ async def collect_process_snapshot() -> ProcessSnapshot:
         bot_cpu = bot_proc.cpu_percent()
 
         procs = []
-        for p in psutil.process_iter(
-            ["name", "pid", "cpu_percent", "memory_info"]
-        ):
+        for p in psutil.process_iter(["name", "pid", "cpu_percent", "memory_info"]):
             try:
                 info = p.info
                 name = info["name"] or ""

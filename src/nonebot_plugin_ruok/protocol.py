@@ -1,4 +1,5 @@
 """Data models for RuOK plugin — health, session, module definitions."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -98,14 +99,13 @@ class Session(BaseModel):
     module_name: str
     error_signature: str | None = None  # dedup key (automatic only)
 
-    reporter: ReporterInfo = Field(default_factory=
-                                   lambda: ReporterInfo(type="automatic"))
+    reporter: ReporterInfo = Field(
+        default_factory=lambda: ReporterInfo(type="automatic")
+    )
     description: str = ""
 
-    first_seen_at: datetime = Field(default_factory=
-                                    lambda: datetime.now(timezone.utc))
-    last_seen_at: datetime = Field(default_factory=
-                                   lambda: datetime.now(timezone.utc))
+    first_seen_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_seen_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     resolved_at: datetime | None = None
 
     link_group: str | None = None  # "ruok-grp-{8 hex}" — group-based linking
@@ -115,6 +115,7 @@ class Session(BaseModel):
 # ────────────────────────────────
 # 3. Module definition
 # ────────────────────────────────
+
 
 class ModuleDefinition(BaseModel):
     """A user-facing feature module that maps to plugins."""

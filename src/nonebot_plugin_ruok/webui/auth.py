@@ -2,6 +2,7 @@
 
 Protects /ruok SSR pages; does NOT affect /ruok/api/* endpoints.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -37,7 +38,7 @@ class WebUIAuth:
         return self._enabled
 
     @property
-    def middleware(self):
+    def middleware(self) -> type:
         """Starlette SessionMiddleware class (lazy import)."""
         from starlette.middleware.sessions import (
             SessionMiddleware,
@@ -56,23 +57,23 @@ class WebUIAuth:
         router = APIRouter(tags=["ruok-auth"])
 
         @router.get("/ruok/login", response_class=HTMLResponse)
-        async def login_page(request: Request):
+        async def login_page(request: Request) -> HTMLResponse:
             # Already logged in?
             if request.session.get(self._session_key):
                 return RedirectResponse(url="/ruok", status_code=302)
             return render("login.html.jinja2", request=request)
 
         @router.post("/ruok/login")
-        async def login_action(request: Request, password: str = Form(...)):
+        async def login_action(
+            request: Request, password: str = Form(...)
+        ) -> HTMLResponse:
             if verify_password(password, self._password_hash):
                 request.session[self._session_key] = True
                 return RedirectResponse(url="/ruok", status_code=302)
-            return render(
-                "login.html.jinja2", request=request, error="密码错误"
-            )
+            return render("login.html.jinja2", request=request, error="密码错误")
 
         @router.get("/ruok/logout")
-        async def logout(request: Request):
+        async def logout(request: Request) -> RedirectResponse:
             if self._enabled:
                 request.session.clear()
             return RedirectResponse(

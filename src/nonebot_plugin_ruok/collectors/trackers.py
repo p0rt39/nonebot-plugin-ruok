@@ -1,4 +1,5 @@
 """Network and disk I/O rate trackers — delta-based per-second counters."""
+
 from __future__ import annotations
 
 import time

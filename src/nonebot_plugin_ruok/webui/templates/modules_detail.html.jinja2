@@ -27,6 +27,11 @@
     {% endif %}
 </article>
 
+<!-- Actions -->
+<div style="margin-bottom:1.5rem;">
+    <a href="/ruok/modules" role="button" class="secondary outline">← Back to Modules</a>
+</div>
+
 <!-- Linked Plugins -->
 {% if linked_plugins %}
 <h4>🔌 关联插件</h4>
@@ -48,10 +53,5 @@
 <!-- Sessions -->
 <h4>📋 Sessions ({{ sessions | length }})</h4>
 {% include "_sessions_list.html.jinja2" %}
-
-<!-- Actions -->
-<div style="margin-top:2rem;display:flex;gap:0.5rem;">
-    <a href="/ruok/modules" role="button" class="secondary outline">Back to Modules</a>
-</div>
 
 {% endblock %}

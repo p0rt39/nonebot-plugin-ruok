@@ -1,4 +1,5 @@
 """RuOK plugin configuration model."""
+
 from pydantic import BaseModel
 
 from .protocol import NotificationRule

@@ -1,4 +1,5 @@
 """Module definition CRUD and real-time status derivation."""
+
 from __future__ import annotations
 
 import json
@@ -21,9 +22,7 @@ def _modules_path(data_dir: Path) -> Path:
 def _path_write_json(path: Path, data: list[dict[str, Any]]) -> None:
     """Write JSON data to path, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _builtin_module() -> ModuleDefinition:
@@ -42,9 +41,7 @@ def _builtin_module() -> ModuleDefinition:
 # ────────────────────────────────
 
 
-def list_modules(
-    data_dir: Path, config: ScopedConfig
-) -> list[ModuleDefinition]:
+def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]:
     """Return all defined modules with real-time derived status.
 
     Always includes a built-in «ruok» module representing RuOK itself.
@@ -87,9 +84,7 @@ def get_module(
     return None
 
 
-def upsert_module(
-    data_dir: Path, definition: ModuleDefinition
-) -> ModuleDefinition:
+def upsert_module(data_dir: Path, definition: ModuleDefinition) -> ModuleDefinition:
     path = _modules_path(data_dir)
     modules: list[dict[str, Any]] = []
     if path.exists():
@@ -105,9 +100,7 @@ def upsert_module(
     else:
         modules.append(data)
 
-    path.write_text(
-        json.dumps(modules, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    path.write_text(json.dumps(modules, indent=2, ensure_ascii=False), encoding="utf-8")
     return definition
 
 

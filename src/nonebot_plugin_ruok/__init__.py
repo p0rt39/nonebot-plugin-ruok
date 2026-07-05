@@ -105,7 +105,7 @@ async def handle_ruok(
     bot: Bot,
     event: Event,
     args: Annotated[Message, CommandArg()],
-):
+) -> None:
     text = args.extract_plain_text().strip()
     if not text:
         await ruok_cmd.finish(
@@ -133,8 +133,10 @@ async def handle_ruok(
     elif subcmd in ("confirm", "solve", "ignore"):
         await _cmd_admin(bot, event, subcmd, rest)
     else:
-        await ruok_cmd.finish(f"❓ 未知子命令: {subcmd}\n"+
-                              "可用: no / status / lookup / confirm / solve / ignore")
+        await ruok_cmd.finish(
+            f"❓ 未知子命令: {subcmd}\n"
+            + "可用: no / status / lookup / confirm / solve / ignore"
+        )
 
 
 # ────────────────────────────────
@@ -147,7 +149,7 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
     if not await _can_report(event):
         await ruok_cmd.finish(
             "❌ 你没有权限上报问题。需要：群管理员 / 白名单 / SUPERUSER"
-            )
+        )
         return
 
     parts = rest.split(maxsplit=1)
@@ -208,10 +210,9 @@ async def _cmd_status() -> None:
 
     lines: list[str] = []
     for m in modules:
-        icon = {"available": "🟢",
-                "degraded": "🟡",
-                "unavailable": "🔴"
-                }.get(m.status, "⚪")
+        icon = {"available": "🟢", "degraded": "🟡", "unavailable": "🔴"}.get(
+            m.status, "⚪"
+        )
         lines.append(f"{icon} {m.display_name or m.name} — {m.status}")
     await ruok_cmd.finish("\n".join(lines))
 
@@ -248,12 +249,12 @@ async def _cmd_lookup(rest: str) -> None:
         await ruok_cmd.finish(f"❌ Session `{sid}` 未找到。")
         return
 
-    status_icon = {"pending": "🟡",
-                   "unsolved": "🔴",
-                   "solved": "🟢",
-                   "ignored": "⚪"}.get(
-        session.status, "❓"
-    )
+    status_icon = {
+        "pending": "🟡",
+        "unsolved": "🔴",
+        "solved": "🟢",
+        "ignored": "⚪",
+    }.get(session.status, "❓")
     lines = [
         f"{status_icon} Session: {session.session_id}",
         f"状态: {session.status} | 来源: {session.source}",
@@ -353,7 +354,7 @@ if isinstance(driver, ASGIMixin):
         @app.exception_handler(Exception)
         async def _ruok_global_exception_handler(
             request: StarletteRequest, exc: Exception
-        ):
+        ) -> _JSONResponse:
             sid = _handle_ruok_error(
                 exc,
                 f"ASGI {request.method} {request.url.path}",
@@ -362,8 +363,7 @@ if isinstance(driver, ASGIMixin):
             return _JSONResponse(
                 {
                     "detail": (
-                        f"Internal error [{type(exc).__name__}] "
-                        f"— Session: {sid}"
+                        f"Internal error [{type(exc).__name__}] — Session: {sid}"
                     ),
                 },
                 status_code=500,
@@ -371,12 +371,13 @@ if isinstance(driver, ASGIMixin):
 
         logger.info("RuOK global exception handler registered")
     else:
-        logger.warning("RuOK: driver.server_app is not a FastAPI instance, " \
-        "skipping middleware")
+        logger.warning(
+            "RuOK: driver.server_app is not a FastAPI instance, skipping middleware"
+        )
 
 
 @driver.on_bot_connect
-async def _on_bot_connect(bot: Bot):
+async def _on_bot_connect(bot: Bot) -> None:
     _connection_history[bot.self_id] = BotConnectionStatus(
         self_id=bot.self_id,
         adapter=bot.type,
@@ -387,7 +388,7 @@ async def _on_bot_connect(bot: Bot):
 
 
 @driver.on_bot_disconnect
-async def _on_bot_disconnect(bot: Bot):
+async def _on_bot_disconnect(bot: Bot) -> None:
     entry = _connection_history.get(bot.self_id)
     if entry:
         entry.connected = False
@@ -401,7 +402,7 @@ async def _on_bot_disconnect(bot: Bot):
 
 
 @driver.on_startup
-async def _startup():
+async def _startup() -> None:
     if isinstance(driver, ASGIMixin):
         app = driver.server_app
 
@@ -443,11 +444,13 @@ async def _startup():
 
     # Ensure notification rules are initialized on first run
     from .collectors.notifications import _load_rules
+
     _load_rules(data_dir, plugin_config)
 
     # Register summary notification job (best-effort, APScheduler optional)
     try:
         from .collectors.notifications import register_summary_job
+
         register_summary_job(plugin_config, data_dir)
     except Exception as exc:
         logger.warning(f"RuOK: summary job registration failed: {exc}")
@@ -456,6 +459,6 @@ async def _startup():
 
 
 @driver.on_shutdown
-async def _shutdown():
+async def _shutdown() -> None:
     log_monitor.stop()
     logger.info("RuOK plugin stopped")

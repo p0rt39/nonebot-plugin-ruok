@@ -1,4 +1,5 @@
 """LogMonitor — intercepts ERROR/CRITICAL logs via loguru sink + stdlib logging."""
+
 from __future__ import annotations
 
 import json
@@ -7,6 +8,7 @@ import logging
 from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone
+from collections.abc import Callable
 
 from nonebot import logger
 
@@ -107,9 +109,8 @@ class _StdlibLogHandler(logging.Handler):
             exc_text = ""
             if record.exc_info:
                 import traceback
-                exc_text = "".join(
-                    traceback.format_exception(*record.exc_info)
-                )
+
+                exc_text = "".join(traceback.format_exception(*record.exc_info))
 
             signature = _make_signature(plugin_id, exc_text, msg_text)
 
@@ -126,21 +127,17 @@ class _StdlibLogHandler(logging.Handler):
                 module_name=plugin_id,
                 error_signature=signature,
                 reporter=ReporterInfo(type="automatic"),
-                description=(
-                    f"```\n{msg_text}\n{exc_text}\n```"
-                ),
+                description=(f"```\n{msg_text}\n{exc_text}\n```"),
             )
             _save_session(self._data_dir, session)
-            logger.warning(
-                f"RuOK: new session {session.session_id} for {plugin_id}"
-            )
+            logger.warning(f"RuOK: new session {session.session_id} for {plugin_id}")
         except Exception:
             pass  # logging handler must never raise
 
 
 def _make_log_sink(
     config: ScopedConfig, data_dir: Path, loop: asyncio.AbstractEventLoop
-):
+) -> Callable[[str], None]:
     """Create a loguru-compatible sink closure.
 
     With serialize=True, the sink receives a JSON string.  Session I/O runs
@@ -186,15 +183,11 @@ def _make_log_sink(
             description=f"```\n{msg_text}\n{exception_str}\n```",
         )
         _save_session(data_dir, session)
-        logger.warning(
-            f"RuOK: new session {session.session_id} for {plugin_id}"
-        )
+        logger.warning(f"RuOK: new session {session.session_id} for {plugin_id}")
         if config.notify_superusers:
             # Late import to avoid circular dependency
             from ..collector import _notify_new_session
 
-            loop.call_soon_threadsafe(
-                _notify_new_session, session, config, data_dir
-            )
+            loop.call_soon_threadsafe(_notify_new_session, session, config, data_dir)
 
     return _sink

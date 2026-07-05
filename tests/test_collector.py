@@ -33,6 +33,7 @@ class TestCollectFastMetrics:
     @pytest.mark.asyncio
     async def test_boot_time_valid(self) -> None:
         import time
+
         from nonebot_plugin_ruok.collector import collect_fast_metrics
 
         fm = await collect_fast_metrics()

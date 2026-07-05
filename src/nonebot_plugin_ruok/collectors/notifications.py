@@ -1,4 +1,5 @@
 """Notification engine — rule evaluation, cooldown, multi-channel dispatch."""
+
 from __future__ import annotations
 
 import json
@@ -21,6 +22,7 @@ from ..protocol import Session, NotificationRule
 def _fmt_time(dt: datetime, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
     """Convert a UTC datetime to local time and format it."""
     return dt.astimezone().strftime(fmt)
+
 
 # ────────────────────────────────
 # 1. Rule loading / default
@@ -138,9 +140,7 @@ def _is_cooling_down(
     return datetime.now(timezone.utc) - last < timedelta(minutes=cooldown_minutes)
 
 
-def _update_cooldown(
-    rule_name: str, cooldowns: dict[str, str], data_dir: Path
-) -> None:
+def _update_cooldown(rule_name: str, cooldowns: dict[str, str], data_dir: Path) -> None:
     cooldowns[rule_name] = datetime.now(timezone.utc).isoformat()
     _save_cooldowns(data_dir, cooldowns)
 
@@ -163,11 +163,7 @@ async def _send_bot_dm(session: Session) -> None:
         if not superusers:
             return
 
-        text = (
-            f"🔔 新的异常事件\n"
-            f"Session: {session.session_id}\n"
-            f"来源: {session.source}"
-        )
+        text = f"🔔 新的异常事件\nSession: {session.session_id}\n来源: {session.source}"
         if session.reporter.user_id:
             text += f"\n用户: {session.reporter.user_id}"
         if session.reporter.group_id:
@@ -183,9 +179,7 @@ async def _send_bot_dm(session: Session) -> None:
             try:
                 await bot.send_private_msg(user_id=int(uid), message=text)
             except (ValueError, RuntimeError) as exc:
-                logger.warning(
-                    f"RuOK: failed to notify superuser {uid}: {exc}"
-                )
+                logger.warning(f"RuOK: failed to notify superuser {uid}: {exc}")
     except (RuntimeError, KeyError) as exc:
         logger.warning(f"RuOK: bot DM notification failed: {exc}")
 
@@ -210,13 +204,10 @@ async def _send_webhook(rule: NotificationRule, session: Session) -> None:
             )
             if resp.is_error:
                 logger.warning(
-                    f"RuOK: webhook {rule.webhook_url} returned "
-                    f"{resp.status_code}"
+                    f"RuOK: webhook {rule.webhook_url} returned {resp.status_code}"
                 )
     except Exception as exc:
-        logger.warning(
-            f"RuOK: webhook {rule.webhook_url} failed: {exc}"
-        )
+        logger.warning(f"RuOK: webhook {rule.webhook_url} failed: {exc}")
 
 
 # ────────────────────────────────
@@ -269,9 +260,7 @@ def dispatch_notification(
 # ────────────────────────────────
 
 
-async def _send_summary(
-    config: ScopedConfig, data_dir: Path
-) -> None:
+async def _send_summary(config: ScopedConfig, data_dir: Path) -> None:
     """Send a summary of unresolved sessions to superusers."""
     import nonebot
 
@@ -293,8 +282,7 @@ async def _send_summary(
             return
 
         text = (
-            f"📊 RuOK 定时汇总\n"
-            f"Pending: {len(pending)} | Unsolved: {len(unsolved)}\n"
+            f"📊 RuOK 定时汇总\nPending: {len(pending)} | Unsolved: {len(unsolved)}\n"
         )
         if pending:
             text += "\n— Pending —\n"
@@ -324,18 +312,15 @@ async def _send_summary(
         logger.warning(f"RuOK: summary notification failed: {exc}")
 
 
-def register_summary_job(
-    config: ScopedConfig, data_dir: Path
-) -> None:
+def register_summary_job(config: ScopedConfig, data_dir: Path) -> None:
     """Register a periodic summary job via APScheduler, if available."""
     try:
         from nonebot import require
+
         require("nonebot_plugin_apscheduler")
         from nonebot_plugin_apscheduler import scheduler
     except Exception:
-        logger.info(
-            "RuOK: APScheduler not available, summary notifications disabled"
-        )
+        logger.info("RuOK: APScheduler not available, summary notifications disabled")
         return
 
     hours = config.summary_interval_hours or 4.0
@@ -344,6 +329,4 @@ def register_summary_job(
     async def _ruok_summary_job() -> None:
         await _send_summary(config, data_dir)
 
-    logger.info(
-        f"RuOK: summary notification job registered (every {hours}h)"
-    )
+    logger.info(f"RuOK: summary notification job registered (every {hours}h)")

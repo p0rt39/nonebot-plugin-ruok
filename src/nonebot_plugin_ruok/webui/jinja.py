@@ -3,6 +3,7 @@
 All template rendering goes through this single instance to ensure
 consistent filters, autoescape, and template caching.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

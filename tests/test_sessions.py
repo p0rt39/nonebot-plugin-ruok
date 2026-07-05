@@ -1,0 +1,394 @@
+"""Tests for collectors/sessions.py — Session CRUD, linking, statistics.
+
+All imports from nonebot_plugin_ruok are inside test functions
+to avoid __init__.py's require() before NoneBot init.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+
+
+class TestGenSessionId:
+    def test_generates_unique_ids(self) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import _gen_session_id
+
+        ids = {_gen_session_id() for _ in range(50)}
+        assert len(ids) == 50
+        for sid in ids:
+            assert sid.startswith("ruok-")
+            assert len(sid) == 13
+
+
+class TestMakeSignature:
+    def test_deterministic(self) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import _make_signature
+
+        s1 = _make_signature("plugin_a", "ValueError", "something broke")
+        s2 = _make_signature("plugin_a", "ValueError", "something broke")
+        assert s1 == s2
+        assert len(s1) == 12
+
+    def test_different_inputs(self) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import _make_signature
+
+        s1 = _make_signature("plugin_a", "ValueError", "msg a")
+        s2 = _make_signature("plugin_a", "ValueError", "msg b")
+        assert s1 != s2
+
+    def test_truncates_long_message(self) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import _make_signature
+
+        s = _make_signature("p", "e", "x" * 500)
+        assert len(s) == 12
+
+
+class TestCreateAndGetSession:
+    def test_create_and_retrieve(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            create_session,
+        )
+
+        reporter = ReporterInfo(type="user", user_id="123", platform="test")
+        session = create_session(
+            data_dir=tmp_path,
+            module_name="test-module",
+            description="test description",
+            reporter=reporter,
+            source="manual",
+        )
+        assert session.session_id.startswith("ruok-")
+        assert session.status == "pending"
+        assert session.module_name == "test-module"
+
+        fpath = tmp_path / "sessions" / f"{session.session_id}.json"
+        assert fpath.exists()
+
+        retrieved = get_session(tmp_path, session.session_id)
+        assert retrieved is not None
+        assert retrieved.session_id == session.session_id
+
+    def test_get_nonexistent(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import get_session
+
+        assert get_session(tmp_path, "ruok-nonexist") is None
+
+    def test_create_automatic(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import create_session
+
+        reporter = ReporterInfo(type="automatic")
+        session = create_session(
+            data_dir=tmp_path,
+            module_name="auto-module",
+            description="auto error",
+            reporter=reporter,
+            source="automatic",
+        )
+        assert session.source == "automatic"
+
+
+class TestListSessions:
+    def test_list_empty(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+        assert list_sessions(tmp_path) == []
+
+    def test_list_all(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+        )
+
+        reporter = ReporterInfo(type="user", user_id="u1")
+        create_session(tmp_path, "mod-a", "desc 1", reporter)
+        s2 = create_session(tmp_path, "mod-b", "desc 2", reporter)
+        result = list_sessions(tmp_path)
+        assert len(result) == 2
+        assert result[0].session_id == s2.session_id
+
+    def test_filter_by_status(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+            update_session,
+        )
+
+        reporter = ReporterInfo(type="user", user_id="u1")
+        s1 = create_session(tmp_path, "mod-a", "pend", reporter)
+        s2 = create_session(tmp_path, "mod-b", "solv", reporter)
+        update_session(tmp_path, s2.session_id, {"status": "solved"})
+
+        pending = list_sessions(tmp_path, status="pending")
+        assert len(pending) == 1
+        assert pending[0].session_id == s1.session_id
+
+        multi = list_sessions(tmp_path, status="pending,solved")
+        assert len(multi) == 2
+
+    def test_filter_by_module(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+        )
+
+        reporter = ReporterInfo(type="user", user_id="u1")
+        create_session(tmp_path, "mod-a", "desc", reporter)
+        create_session(tmp_path, "mod-b", "desc", reporter)
+        result = list_sessions(tmp_path, module_name="mod-a")
+        assert len(result) == 1
+
+    def test_filter_by_reporter(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+        )
+
+        r1 = ReporterInfo(type="user", user_id="uid-1")
+        r2 = ReporterInfo(type="user", user_id="uid-2")
+        create_session(tmp_path, "mod", "desc", r1)
+        create_session(tmp_path, "mod", "desc", r2)
+        result = list_sessions(tmp_path, reporter_user_id="uid-1")
+        assert len(result) == 1
+
+    def test_search(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+        )
+
+        reporter = ReporterInfo(type="user", user_id="uid-x")
+        create_session(tmp_path, "weather", "sunny day error", reporter)
+        create_session(tmp_path, "music", "playback failed", reporter)
+        result = list_sessions(tmp_path, search="sunny")
+        assert len(result) == 1
+        assert result[0].module_name == "weather"
+
+    def test_time_range(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+        )
+
+        now = datetime.now(timezone.utc)
+        reporter = ReporterInfo(type="user", user_id="u1")
+        create_session(tmp_path, "mod", "old", reporter)
+
+        result = list_sessions(
+            tmp_path, first_seen_after=now - timedelta(hours=1)
+        )
+        assert len(result) >= 1
+
+        result = list_sessions(
+            tmp_path, first_seen_after=now + timedelta(hours=1)
+        )
+        assert len(result) == 0
+
+
+class TestUpdateSession:
+    def test_update_status(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            create_session,
+            update_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        s = create_session(tmp_path, "mod", "desc", reporter)
+        updated = update_session(
+            tmp_path, s.session_id, {"status": "unsolved"}
+        )
+        assert updated is not None
+        assert updated.status == "unsolved"
+        reloaded = get_session(tmp_path, s.session_id)
+        assert reloaded is not None
+        assert reloaded.status == "unsolved"
+
+    def test_resolved_at_on_solve(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            update_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        s = create_session(tmp_path, "mod", "desc", reporter)
+        assert s.resolved_at is None
+        updated = update_session(
+            tmp_path, s.session_id, {"status": "solved"}
+        )
+        assert updated is not None
+        assert updated.resolved_at is not None
+
+    def test_update_notes(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            update_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        s = create_session(tmp_path, "mod", "desc", reporter)
+        updated = update_session(
+            tmp_path, s.session_id, {"developer_notes": "fixed"}
+        )
+        assert updated is not None
+        assert updated.developer_notes == "fixed"
+
+    def test_update_nonexistent(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import update_session
+
+        assert (
+            update_session(tmp_path, "ruok-nope", {"status": "solved"})
+            is None
+        )
+
+
+class TestLinkSessions:
+    def test_link_two(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            link_sessions,
+            create_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        s1 = create_session(tmp_path, "mod", "first", reporter)
+        s2 = create_session(tmp_path, "mod", "second", reporter)
+        assert (
+            link_sessions(tmp_path, s1.session_id, s2.session_id) is True
+        )
+
+        r1 = get_session(tmp_path, s1.session_id)
+        r2 = get_session(tmp_path, s2.session_id)
+        assert r1 is not None
+        assert r2 is not None
+        assert r1.link_group is not None
+        assert r1.link_group == r2.link_group
+        assert r1.link_group.startswith("ruok-grp-")
+
+    def test_link_nonexistent(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            link_sessions,
+            create_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        s1 = create_session(tmp_path, "mod", "desc", reporter)
+        assert (
+            link_sessions(tmp_path, s1.session_id, "ruok-nope") is False
+        )
+
+    def test_unlink(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            link_sessions,
+            create_session,
+            unlink_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        s1 = create_session(tmp_path, "mod", "first", reporter)
+        s2 = create_session(tmp_path, "mod", "second", reporter)
+        link_sessions(tmp_path, s1.session_id, s2.session_id)
+        assert unlink_session(tmp_path, s1.session_id) is True
+        r1 = get_session(tmp_path, s1.session_id)
+        assert r1 is not None
+        assert r1.link_group is None
+
+    def test_get_linked(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            link_sessions,
+            create_session,
+            get_linked_sessions,
+        )
+
+        reporter = ReporterInfo(type="user")
+        s1 = create_session(tmp_path, "mod", "first", reporter)
+        s2 = create_session(tmp_path, "mod", "second", reporter)
+        s3 = create_session(tmp_path, "mod", "third", reporter)
+        link_sessions(tmp_path, s1.session_id, s2.session_id)
+
+        linked = get_linked_sessions(tmp_path, s1.session_id)
+        ids = {s.session_id for s in linked}
+        assert len(linked) == 1  # excludes self
+        assert s2.session_id in ids
+        assert s3.session_id not in ids
+
+
+class TestSessionStats:
+    def test_empty(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import get_session_stats
+
+        stats = get_session_stats(tmp_path)
+        assert stats.total == 0
+
+    def test_aggregation(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            update_session,
+            get_session_stats,
+        )
+
+        reporter = ReporterInfo(type="user")
+        create_session(tmp_path, "mod-a", "p1", reporter)
+        s2 = create_session(tmp_path, "mod-a", "p2", reporter)
+        create_session(tmp_path, "mod-b", "u1", reporter)
+        update_session(tmp_path, s2.session_id, {"status": "solved"})
+
+        stats = get_session_stats(tmp_path)
+        assert stats.total == 3
+        assert stats.pending == 2
+        assert stats.solved == 1
+
+
+class TestHandleRuokError:
+    def test_creates_session(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            _handle_ruok_error,
+        )
+
+        try:
+            raise ValueError("internal test error")
+        except ValueError as exc:
+            sid = _handle_ruok_error(exc, "test_ctx", tmp_path)
+
+        assert sid.startswith("ruok-")
+        sessions = list_sessions(tmp_path, module_name="ruok")
+        assert len(sessions) == 1
+        assert "test_ctx" in sessions[0].description
+
+    def test_deduplicates(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            _handle_ruok_error,
+        )
+
+        try:
+            raise RuntimeError("dedup test")
+        except RuntimeError as exc:
+            sid1 = _handle_ruok_error(exc, "first", tmp_path)
+
+        try:
+            raise RuntimeError("dedup test")
+        except RuntimeError as exc:
+            sid2 = _handle_ruok_error(exc, "second", tmp_path)
+
+        assert sid1 == sid2
+        sessions = list_sessions(tmp_path, module_name="ruok")
+        assert len(sessions) == 1

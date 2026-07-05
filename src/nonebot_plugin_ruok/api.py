@@ -1,4 +1,5 @@
 """FastAPI routes for RuOK — health, session, module management."""
+
 from __future__ import annotations
 
 import time
@@ -54,7 +55,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     # ── Health ────────────────────
 
     @router.get("/status")
-    async def api_status():
+    async def api_status() -> dict[str, Any]:
         """Aggregated bot health status."""
         data = _cached("status", lambda: None)
         if data is None:
@@ -64,21 +65,17 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return data.model_dump(mode="json")
 
     @router.get("/health")
-    async def api_health():
+    async def api_health() -> dict[str, Any]:
         """Simple health check for K8s / Docker / Uptime."""
         data = _cached("status", lambda: None)
         if data is None:
             try:
                 data = await collect_all_statuses(config, data_dir)
             except (asyncio.TimeoutError, RuntimeError, OSError):
-                return JSONResponse(
-                    {"status": "unhealthy"}, status_code=503
-                )
+                return JSONResponse({"status": "unhealthy"}, status_code=503)
             except Exception as exc:
                 _handle_ruok_error(exc, "api_health", data_dir)
-                return JSONResponse(
-                    {"status": "unhealthy"}, status_code=503
-                )
+                return JSONResponse({"status": "unhealthy"}, status_code=503)
         if data.overall == "unavailable":
             return JSONResponse(
                 {"status": "unhealthy", "overall": data.overall}, status_code=503
@@ -86,7 +83,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return {"status": "healthy", "overall": data.overall}
 
     @router.get("/connections")
-    async def api_connections():
+    async def api_connections() -> list[dict[str, Any]]:
         """WS connection status only (lightweight)."""
         # connections are always fresh, no caching
         status = await collect_all_statuses(config, data_dir)
@@ -100,14 +97,14 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         module: str | None = Query(None),
         reporter: str | None = Query(None),
         search: str | None = Query(None),
-        after: str
-        | None = Query(None, description="ISO datetime, e.g. 2026-07-01T00:00:00"),
+        after: str | None = Query(
+            None, description="ISO datetime, e.g. 2026-07-01T00:00:00"
+        ),
         before: str | None = Query(None, description="ISO datetime"),
-        plugin: str
-        | None = Query(
+        plugin: str | None = Query(
             None, description="Filter by plugin name from ModuleDefinitions"
         ),
-    ):
+    ) -> list[dict[str, Any]]:
         """List sessions with optional filters."""
         from datetime import datetime as dt
 
@@ -126,7 +123,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return [s.model_dump(mode="json") for s in sessions]
 
     @router.post("/sessions")
-    async def api_create_session(request: Request):
+    async def api_create_session(request: Request) -> dict[str, Any]:
         """Create a session via API (for WebUI)."""
         body = await request.json()
         module_name = body.get("module_name", "")
@@ -148,7 +145,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return session.model_dump(mode="json")
 
     @router.get("/sessions/{session_id}")
-    async def api_get_session(session_id: str):
+    async def api_get_session(session_id: str) -> dict[str, Any]:
         """Get a single session with all occurrences."""
         session = get_session(data_dir, session_id)
         if session is None:
@@ -156,7 +153,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return session.model_dump(mode="json")
 
     @router.patch("/sessions/{session_id}")
-    async def api_update_session(session_id: str, request: Request):
+    async def api_update_session(session_id: str, request: Request) -> dict[str, Any]:
         """Update session status / notes."""
         body = await request.json()
         updates = {k: v for k, v in body.items() if k in ("status", "developer_notes")}
@@ -167,7 +164,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return session.model_dump(mode="json")
 
     @router.post("/sessions/{session_id}/link/{other_id}")
-    async def api_link_sessions(session_id: str, other_id: str):
+    async def api_link_sessions(session_id: str, other_id: str) -> dict[str, Any]:
         """Link two sessions into the same link_group."""
         ok = link_sessions(data_dir, session_id, other_id)
         if not ok:
@@ -178,7 +175,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return {"linked": True, "link_group": s.link_group if s else None}
 
     @router.delete("/sessions/{session_id}/link")
-    async def api_unlink_session(session_id: str):
+    async def api_unlink_session(session_id: str) -> dict[str, Any]:
         """Remove a session from its link_group."""
         ok = unlink_session(data_dir, session_id)
         if not ok:
@@ -188,7 +185,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return {"unlinked": True}
 
     @router.get("/sessions/{session_id}/linked")
-    async def api_get_linked_sessions(session_id: str):
+    async def api_get_linked_sessions(session_id: str) -> dict[str, Any]:
         """Get all sessions in the same link_group."""
         session = get_session(data_dir, session_id)
         if session is None:
@@ -202,12 +199,12 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     # ── Modules ───────────────────
 
     @router.get("/modules")
-    async def api_list_modules():
+    async def api_list_modules() -> list[dict[str, Any]]:
         """List modules with real-time status."""
         return [m.model_dump(mode="json") for m in list_modules(data_dir, config)]
 
     @router.get("/modules/{name}")
-    async def api_get_module(name: str):
+    async def api_get_module(name: str) -> dict[str, Any]:
         """Get one module."""
         mod = get_module(data_dir, config, name)
         if mod is None:
@@ -215,7 +212,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return mod.model_dump(mode="json")
 
     @router.put("/modules/{name}")
-    async def api_upsert_module(name: str, request: Request):
+    async def api_upsert_module(name: str, request: Request) -> dict[str, Any]:
         """Create or update a module definition."""
         body = await request.json()
         definition = ModuleDefinition(
@@ -230,7 +227,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return definition.model_dump(mode="json")
 
     @router.delete("/modules/{name}")
-    async def api_delete_module(name: str):
+    async def api_delete_module(name: str) -> dict[str, Any]:
         """Delete a module definition."""
         ok = delete_module(data_dir, name)
         if not ok:
@@ -241,7 +238,9 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     # ── Metrics history ───────────
 
     @router.get("/metrics/history")
-    async def api_metrics_history(hours: float = Query(24.0, ge=0.5, le=168.0)):
+    async def api_metrics_history(
+        hours: float = Query(24.0, ge=0.5, le=168.0),
+    ) -> list[dict[str, Any]]:
         """Return time-series metrics for the last *hours* hours."""
         points = MetricsStore.query(data_dir, hours=hours)
         return [p.model_dump(mode="json") for p in points]
@@ -249,7 +248,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     # ── Session statistics ────────
 
     @router.get("/sessions/stats")
-    async def api_session_stats():
+    async def api_session_stats() -> dict[str, Any]:
         """Return aggregate session statistics."""
         stats = get_session_stats(data_dir)
         return stats.model_dump(mode="json")

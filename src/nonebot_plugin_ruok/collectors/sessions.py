@@ -1,4 +1,5 @@
 """Session storage, CRUD, linking, statistics, and internal error handler."""
+
 from __future__ import annotations
 
 import json
@@ -138,9 +139,7 @@ def list_sessions(
         except (json.JSONDecodeError, ValueError, OSError):
             continue
         except Exception as exc:
-            _handle_ruok_error(
-                exc, f"list_sessions 读取文件: {f.name}", data_dir
-            )
+            _handle_ruok_error(exc, f"list_sessions 读取文件: {f.name}", data_dir)
             continue
         if statuses and s.status not in statuses:
             continue
@@ -231,9 +230,7 @@ def _handle_ruok_error(
     """
     tb_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
-    logger.error(
-        f"RuOK 内部异常 [{context}]: {type(exc).__name__}: {exc}\n{tb_text}"
-    )
+    logger.error(f"RuOK 内部异常 [{context}]: {type(exc).__name__}: {exc}\n{tb_text}")
 
     signature = _make_signature("ruok", type(exc).__name__, str(exc)[:100])
 
@@ -346,9 +343,7 @@ def get_linked_sessions(data_dir: Path, session_id: str) -> list[Session]:
         except (json.JSONDecodeError, ValueError, OSError):
             continue
         except Exception as exc:
-            _handle_ruok_error(
-                exc, f"get_linked_sessions 读取文件: {f.name}", data_dir
-            )
+            _handle_ruok_error(exc, f"get_linked_sessions 读取文件: {f.name}", data_dir)
             continue
         if other.link_group == group and other.session_id != session_id:
             linked.append(other)
@@ -364,9 +359,7 @@ def _merge_link_groups(data_dir: Path, from_group: str, to_group: str) -> None:
         except (json.JSONDecodeError, ValueError, OSError):
             continue
         except Exception as exc:
-            _handle_ruok_error(
-                exc, f"_merge_link_groups 读取文件: {f.name}", data_dir
-            )
+            _handle_ruok_error(exc, f"_merge_link_groups 读取文件: {f.name}", data_dir)
             continue
         if s.link_group == from_group:
             s.link_group = to_group

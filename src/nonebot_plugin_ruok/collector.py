@@ -15,7 +15,7 @@ from .config import ScopedConfig
 from .protocol import Session, MetricPoint
 
 # ── Re-export everything from the collectors subpackage ──
-from .collectors import (  # noqa: F401 — re-export
+from .collectors import (
     # monitor
     LogMonitor,
     # trackers
@@ -26,23 +26,16 @@ from .collectors import (  # noqa: F401 — re-export
     # modules
     list_modules,
     _disk_tracker,
-    _load_session,
-    _save_session,
-    # metrics
     _startup_time,
     delete_module,
     link_sessions,
     list_sessions,
     upsert_module,
-    _make_log_sink,
     create_session,
     unlink_session,
     update_session,
     # sessions
-    _gen_session_id,
-    _make_signature,
     _network_tracker,
-    _collect_bot_info,
     get_session_stats,
     _handle_ruok_error,
     _connection_history,
@@ -51,23 +44,49 @@ from .collectors import (  # noqa: F401 — re-export
     collect_fast_metrics,
     derive_module_status,
     dispatch_notification,
-    _find_existing_session,
-    _publish_session_event,
     resolve_module_display,
-    _collect_system_metrics,
     collect_process_snapshot,
+    # metrics (webui/router)
     _collect_plugin_inventory,
-    _collect_connection_status,
 )
+
+__all__ = [
+    "DiskRateTracker",
+    "LogMonitor",
+    "MetricsStore",
+    "NetworkRateTracker",
+    "_collect_plugin_inventory",
+    "_connection_history",
+    "_disk_tracker",
+    "_network_tracker",
+    "_notify_new_session",
+    "_startup_time",
+    "collect_all_statuses",
+    "collect_fast_metrics",
+    "collect_process_snapshot",
+    "create_session",
+    "delete_module",
+    "derive_module_status",
+    "dispatch_notification",
+    "get_linked_sessions",
+    "get_module",
+    "get_session",
+    "get_session_stats",
+    "link_sessions",
+    "list_modules",
+    "list_sessions",
+    "resolve_module_display",
+    "unlink_session",
+    "update_session",
+    "upsert_module",
+]
 
 # ────────────────────────────────
 # 10. Notification
 # ────────────────────────────────
 
 
-def _notify_new_session(
-    session: Session, config: ScopedConfig, data_dir: Path
-) -> None:
+def _notify_new_session(session: Session, config: ScopedConfig, data_dir: Path) -> None:
     """Send notifications for a new session via the rule engine."""
     dispatch_notification(session, config, data_dir)
 
@@ -153,9 +172,7 @@ class MetricsStore:
                 except (ValueError, KeyError):
                     continue
                 except Exception as exc:
-                    _handle_ruok_error(
-                        exc, "MetricsStore.query 解析记录", data_dir
-                    )
+                    _handle_ruok_error(exc, "MetricsStore.query 解析记录", data_dir)
                     continue
 
         points.sort(key=lambda p: p.ts)
