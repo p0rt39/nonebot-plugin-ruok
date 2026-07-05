@@ -278,12 +278,18 @@ async def _collect_connection_status(
 # ────────────────────────────────
 
 
-def _collect_plugin_inventory() -> list[PluginHealthInfo]:
-    """Collect loaded / metadata / matcher info for all plugins (L1-L3)."""
+def _collect_plugin_inventory(
+    *, skip_ruok: bool = True
+) -> list[PluginHealthInfo]:
+    """Collect loaded / metadata / matcher info for all plugins (L1-L3).
+
+    Set *skip_ruok=False* to include the RuOK plugin itself (for module
+    association / detail pages).
+    """
     plugins: list[PluginHealthInfo] = []
 
     for plugin in nonebot.get_loaded_plugins():
-        if plugin.id_ == "nonebot_plugin_ruok":
+        if skip_ruok and plugin.id_ == "nonebot_plugin_ruok":
             continue
 
         loaded = plugin.module is not None

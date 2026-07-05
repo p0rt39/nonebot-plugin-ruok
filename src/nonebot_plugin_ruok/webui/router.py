@@ -255,7 +255,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         try:
             modules = list_modules(data_dir, config)
             # Gather loaded plugin names for datalist suggestions
-            all_plugins = _collect_plugin_inventory()
+            all_plugins = _collect_plugin_inventory(skip_ruok=False)
             plugin_names = [p.name for p in all_plugins]
             return render(
                 "modules.html.jinja2",
@@ -284,7 +284,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             # Sessions for this module
             sessions = list_sessions(data_dir, module_name=name)
             # Plugin health for associated plugins
-            all_plugins = _collect_plugin_inventory()
+            all_plugins = _collect_plugin_inventory(skip_ruok=False)
             linked_plugins = [
                 p for p in all_plugins if p.name in mod.plugins
             ]
