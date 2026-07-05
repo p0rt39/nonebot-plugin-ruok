@@ -66,6 +66,7 @@ class AggregatedStatus(BaseModel):
     """Root API response."""
 
     overall: ModuleStatus
+    status_reasons: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     bot: StatusResult | None = None
     connections: list[BotConnectionStatus] = Field(default_factory=list)

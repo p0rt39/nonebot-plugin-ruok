@@ -389,30 +389,44 @@ async def collect_all_statuses(
     #   Degraded:    sustained CPU/RAM thresholds, OR any module degraded/unavailable
     #   Available:   otherwise
     overall: ModuleStatus = "available"
+    reasons: list[str] = []
 
     # ── 1. Unavailable ────────────────────────────────
     # 1a. No connections or all disconnected
     has_connections = len(connections) > 0
     all_disconnected = has_connections and all(not c.connected for c in connections)
-    if not has_connections or all_disconnected:
+    if not has_connections:
         overall = "unavailable"
+        reasons.append("无可用连接（未检测到任何 Bot 连接）")
+    elif all_disconnected:
+        overall = "unavailable"
+        disconnected_ids = [c.self_id for c in connections if not c.connected]
+        reasons.append(f"所有连接已断开（{', '.join(disconnected_ids)}）")
 
     # 1b. ALL modules are unavailable
     if overall != "unavailable" and modules:
         if all(m.status == "unavailable" for m in modules):
             overall = "unavailable"
+            names = [m.display_name or m.name for m in modules]
+            reasons.append(f"所有模块均不可用（{', '.join(names)}）")
 
     # ── 2. Degraded ───────────────────────────────────
     if overall == "available":
         # 2a. Any module degraded or unavailable
-        if any(m.status in ("degraded", "unavailable") for m in modules):
+        bad_modules = [m for m in modules if m.status in ("degraded", "unavailable")]
+        if bad_modules:
             overall = "degraded"
+            for m in bad_modules:
+                reasons.append(
+                    f'模块 "{m.display_name or m.name}" 状态为 {m.status}'
+                )
 
         # 2b. CPU >= 90% (instant trigger)
         if overall == "available":
             cpu_pct = _extract_cpu_percent(sys_results)
             if cpu_pct is not None and cpu_pct >= 90.0:
                 overall = "degraded"
+                reasons.append(f"CPU 使用率 {cpu_pct:.1f}% ≥ 90%（即时触发）")
 
         # 2c. CPU >= 70% sustained for 10+ minutes
         if overall == "available" and cpu_pct is not None and cpu_pct >= 70.0:
@@ -420,6 +434,10 @@ async def collect_all_statuses(
                 data_dir, "cpu_percent", 70.0, minutes=10.0
             ):
                 overall = "degraded"
+                reasons.append(
+                    f"CPU 使用率 ≥ 70% 已持续超过 10 分钟"
+                    f"（当前 {cpu_pct:.1f}%）"
+                )
 
         # 2d. RAM >= 90% sustained for 10+ minutes
         if overall == "available":
@@ -429,9 +447,17 @@ async def collect_all_statuses(
                     data_dir, "memory_percent", 90.0, minutes=10.0
                 ):
                     overall = "degraded"
+                    reasons.append(
+                        f"内存使用率 ≥ 90% 已持续超过 10 分钟"
+                        f"（当前 {mem_pct:.1f}%）"
+                    )
+
+    if overall == "available":
+        reasons.append("系统运行正常")
 
     result = AggregatedStatus(
         overall=overall,
+        status_reasons=reasons,
         bot=bot_status,
         connections=connections,
         plugins=plugins,

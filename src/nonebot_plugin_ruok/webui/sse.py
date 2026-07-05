@@ -177,6 +177,7 @@ async def sse_event_generator(
                     "timestamp": status.timestamp.isoformat(),
                     "connections_online": cached_connections["online"],
                     "connections_total": cached_connections["total"],
+                    "status_reasons": status.status_reasons,
                 }
             except Exception as exc:
                 logger.warning(f"RuOK SSE: status collection failed: {exc}")
