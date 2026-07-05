@@ -12,10 +12,8 @@
     {% include "_dashboard_hero.html.jinja2" %}
 </div>
 
-<!-- Unified System Overview — replaces gauges + info row -->
-<div id="dashboard-system"
-     hx-get="/ruok?_partial=dashboard-system"
-     hx-trigger="load" hx-swap="innerHTML">
+<!-- Unified System Overview — SSE-driven, no HTMX polling needed -->
+<div id="dashboard-system">
     {% include "_dashboard_system.html.jinja2" %}
 </div>
 
