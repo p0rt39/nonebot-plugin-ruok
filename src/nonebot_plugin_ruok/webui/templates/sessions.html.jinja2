@@ -51,7 +51,7 @@
 <details style="margin-bottom: 1.5rem;">
     <summary>➕ 手动上报问题</summary>
     <form hx-post="/ruok/_actions/session-create"
-          hx-target="#session-container" hx-swap="outerHTML"
+          hx-target="#session-content" hx-swap="outerHTML"
           style="margin-top: 1rem;">
         <div class="grid">
             <label>
@@ -77,16 +77,6 @@
     </form>
 </details>
 
-<!-- Stats overview -->
-<article style="padding: 1rem;">
-    <div class="grid" style="text-align: center;">
-        <div><span class="status-dot status-pending"></span> Pending: <strong>{{ stats.pending }}</strong></div>
-        <div><span class="status-dot status-unsolved"></span> Unsolved: <strong>{{ stats.unsolved }}</strong></div>
-        <div><span class="status-dot status-solved"></span> Solved: <strong>{{ stats.solved }}</strong></div>
-        <div><span class="status-dot status-ignored"></span> Ignored: <strong>{{ stats.ignored }}</strong></div>
-    </div>
-</article>
-
 <!-- Active filter tags -->
 {% set has_filters = current_status or current_search or current_module or current_plugin or current_after or current_before %}
 {% if has_filters %}
@@ -94,46 +84,43 @@
     {% if current_status %}
     <span class="filter-tag">
         状态: {{ current_status }}
-        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'search': current_search, 'module': current_module, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-container" hx-trigger="click">&times;</a>
+        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'search': current_search, 'module': current_module, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
     </span>
     {% endif %}
     {% if current_module %}
     <span class="filter-tag">
         模块: {{ current_module }}
-        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'search': current_search, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-container" hx-trigger="click">&times;</a>
+        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'search': current_search, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
     </span>
     {% endif %}
     {% if current_search %}
     <span class="filter-tag">
         搜索: "{{ current_search }}"
-        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'module': current_module, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-container" hx-trigger="click">&times;</a>
+        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'module': current_module, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
     </span>
     {% endif %}
     {% if current_after or current_before %}
     <span class="filter-tag">
         时间: {{ current_after or '...' }} ~ {{ current_before or '...' }}
-        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'search': current_search, 'module': current_module, 'plugin': current_plugin} | urlencode }}" hx-target="#session-container" hx-trigger="click">&times;</a>
+        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'search': current_search, 'module': current_module, 'plugin': current_plugin} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
     </span>
     {% endif %}
     <a href="/ruok/sessions" style="font-size: 0.8em; margin-left: 0.5rem;">清除全部</a>
 </div>
 {% endif %}
 
-<!-- Filter bar: all inputs auto-submit via HTMX -->
+<!-- Filter bar -->
 <form class="filter-bar"
       hx-get="/ruok/_partials/sessions"
-      hx-target="#session-container"
+      hx-target="#session-content"
       hx-trigger="input changed delay:300ms from:input[name=search], change from:select, change from:input[type=datetime-local]"
       hx-include="[name=status], [name=search], [name=module], [name=plugin], [name=after], [name=before]">
 
-    <!-- Search -->
     <label style="flex: 2; min-width: 180px;">
         🔍 搜索
         <input type="search" name="search" placeholder="session_id / 模块 / 描述 / 用户..."
                value="{{ current_search }}" autocomplete="off">
     </label>
-
-    <!-- Status -->
     <label style="flex: 1; min-width: 130px;">
         状态
         <select name="status">
@@ -144,8 +131,6 @@
             <option value="ignored" {% if current_status == 'ignored' %}selected{% endif %}>⚪ Ignored</option>
         </select>
     </label>
-
-    <!-- Module -->
     <label style="flex: 1; min-width: 130px;">
         功能模块
         <select name="module">
@@ -157,8 +142,6 @@
             {% endfor %}
         </select>
     </label>
-
-    <!-- Plugin (unique plugin list from all modules) -->
     {% set all_plugins = all_modules | map(attribute='plugins') | sum(start=[]) | unique | sort %}
     <label style="flex: 1; min-width: 130px;">
         关联插件
@@ -169,8 +152,6 @@
             {% endfor %}
         </select>
     </label>
-
-    <!-- Date range -->
     <label style="flex: 1; min-width: 140px;">
         起始时间
         <input type="datetime-local" name="after" value="{{ current_after }}">
@@ -181,14 +162,9 @@
     </label>
 </form>
 
-<!-- Results count -->
-<div class="results-count">
-    共 {{ sessions | length }} 条结果
-</div>
-
-<!-- Session List (HTMX target) -->
-<div id="session-container">
-    {% include "_sessions_list.html.jinja2" %}
+<!-- Session content (stats + count + list) — HTMX target -->
+<div id="session-content">
+{% include "_session_container.html.jinja2" %}
 </div>
 
 {% endblock %}

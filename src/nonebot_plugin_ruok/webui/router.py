@@ -361,11 +361,11 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 first_seen_before=first_seen_before,
                 plugin_name=plugin if plugin else None,
             )
+            stats = get_session_stats(data_dir)
             return render(
-                "_sessions_list.html.jinja2",
-                request=request,
+                "_session_container.html.jinja2",
                 sessions=sessions,
-                current_status=status,
+                stats=stats,
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "partial_sessions", data_dir)
@@ -402,10 +402,12 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             )
             # Refresh session list
             sessions = list_sessions(data_dir)
-            # Return session-container partial (NOT the full page)
+            stats = get_session_stats(data_dir)
+            # Return session-content partial (stats + count + list)
             return render(
                 "_session_container.html.jinja2",
                 sessions=sessions,
+                stats=stats,
                 headers={
                     "HX-Trigger": (
                         '{"toast":"Session created","toastType":"success"}'
