@@ -124,9 +124,9 @@
              onclick="this.classList.toggle('expanded')">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">🌐</div>
-            <div class="sys-tile__value" id="info-net">
-                ⬆ <span id="net-up-val">{{ net_up|_fmt_bytes_s }}</span>/s
-                ⬇ <span id="net-down-val">{{ net_down|_fmt_bytes_s }}</span>/s
+            <div class="sys-tile__value sys-metric-rows">
+                <div>⬆ <span id="net-up-val">{{ net_up|_fmt_bytes_s }}</span>/s</div>
+                <div>⬇ <span id="net-down-val">{{ net_down|_fmt_bytes_s }}</span>/s</div>
             </div>
             <div class="sys-tile__label">网络速率</div>
             <svg class="sys-sparkline" id="spark-net" viewBox="0 0 120 36" preserveAspectRatio="none">
@@ -149,8 +149,9 @@
              onclick="this.classList.toggle('expanded')">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">💾</div>
-            <div class="sys-tile__value">
-                ↕ <span id="disk-total">—</span>/s
+            <div class="sys-tile__value sys-metric-rows">
+                <div>读 <span id="disk-read-val">—</span>/s</div>
+                <div>写 <span id="disk-write-val">—</span>/s</div>
             </div>
             <div class="sys-tile__label">磁盘 I/O</div>
             <svg class="sys-sparkline" id="spark-disk" viewBox="0 0 120 36" preserveAspectRatio="none">

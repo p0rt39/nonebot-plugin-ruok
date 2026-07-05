@@ -265,6 +265,16 @@
             color: var(--pico-muted-color);
             margin-top: 0.2rem;
         }
+
+        /* ── Multi-row metric values (network / disk IO) ── */
+        .sys-metric-rows {
+            font-size: 1.1rem;
+            font-weight: 600;
+            line-height: 1.55;
+        }
+        .sys-metric-rows span {
+            font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+        }
         .sys-tile__face {
             position: relative;
             z-index: 1;
@@ -336,7 +346,16 @@
             vector-effect: non-scaling-stroke;
         }
 
-        /* ── Gauge cards (deprecated — kept for compat) ── */
+        /* ── Multi-row metric values (network / disk IO) ── */
+        .sys-metric-rows {
+            font-size: 0.95rem;
+            font-weight: 600;
+            line-height: 1.5;
+        }
+        .sys-metric-rows span {
+            font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+            font-size: 0.95em;
+        }
         .gauge-card {
             background: var(--glass-bg) !important; backdrop-filter: blur(16px);
             border: 1px solid var(--glass-border) !important;
