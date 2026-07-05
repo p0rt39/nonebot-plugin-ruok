@@ -236,6 +236,7 @@
             drawSparkline('spark-disk-read', _spark.disk_read);
             drawSparkline('spark-disk-write', _spark.disk_write);
             // Per-disk expand
+            var diskPerList = el('disk-per-list');
             if (diskPerList && m.disk_per) {
                 var html = '';
                 var keys = Object.keys(m.disk_per);
