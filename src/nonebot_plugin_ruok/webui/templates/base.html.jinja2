@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}RuOK{% endblock %} — NoneBot2 Health Monitor</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        :root {
+            --pico-font-size: 95%;
+            --glass-bg: rgba(255,255,255,0.45);
+            --glass-border: rgba(255,255,255,0.6);
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-md: 0 4px 16px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+            --shadow-lg: 0 12px 32px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.05);
+            --radius-sm: 10px;
+            --radius-md: 16px;
+            --radius-lg: 24px;
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* ── Body background gradient ── */
+        body {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4ecf7 50%, #dce8f5 100%);
+            min-height: 100vh;
+        }
+
+        /* ── Glass card ── */
+        article, .glass-card {
+            background: var(--glass-bg) !important;
+            backdrop-filter: blur(16px) saturate(140%);
+            -webkit-backdrop-filter: blur(16px) saturate(140%);
+            border: 1px solid var(--glass-border) !important;
+            border-radius: var(--radius-md) !important;
+            box-shadow: var(--shadow-sm);
+            transition: transform var(--transition), box-shadow var(--transition);
+        }
+        article:hover, .glass-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        /* ── Navigation ── */
+        nav {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px) saturate(140%);
+            -webkit-backdrop-filter: blur(16px) saturate(140%);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            padding: 0.6rem 1.2rem;
+            box-shadow: var(--shadow-sm);
+            position: sticky;
+            top: 1rem;
+            z-index: 100;
+            margin-bottom: 2rem;
+        }
+        nav a {
+            border-radius: var(--radius-sm) !important;
+            transition: background var(--transition);
+        }
+
+        /* ── Hero banner ── */
+        .hero-banner {
+            border-radius: var(--radius-lg) !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: #fff;
+            box-shadow: var(--shadow-lg);
+            padding: 2.5rem 2rem;
+            text-align: center;
+            animation: fadeInUp 0.5s ease-out;
+        }
+        .hero-banner.ok { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%) !important; }
+        .hero-banner.warn { background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%) !important; }
+        .hero-banner.error { background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%) !important; }
+
+        /* ── Animations ── */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.5; }
+        }
+        @keyframes shimmer {
+            0%   { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .animate-in {
+            animation: fadeInUp 0.4s ease-out both;
+        }
+        .pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        /* ── Status dots ── */
+        .status-dot {
+            display: inline-block; width: 12px; height: 12px;
+            border-radius: 50%; margin-right: 6px;
+            box-shadow: 0 0 8px currentColor;
+            vertical-align: middle;
+        }
+        .status-available  { background: #2ecc40; color: #2ecc40; }
+        .status-degraded   { background: #ffdc00; color: #ffdc00; }
+        .status-unavailable { background: #ff4136; color: #ff4136; }
+        .status-pending    { background: #ffdc00; color: #ffdc00; animation: pulse 1.5s ease-in-out infinite; }
+        .status-unsolved   { background: #ff4136; color: #ff4136; animation: pulse 1.5s ease-in-out infinite; }
+        .status-solved     { background: #2ecc40; color: #2ecc40; }
+        .status-ignored    { background: #aaa; color: #aaa; }
+
+        /* ── Badges ── */
+        .badge {
+            display: inline-block; padding: 3px 10px;
+            border-radius: 20px; font-size: 0.78em; font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .badge-ok    { background: linear-gradient(135deg, #2ecc40, #27ae60); color: #fff; }
+        .badge-warn  { background: linear-gradient(135deg, #ffdc00, #f39c12); color: #000; }
+        .badge-error { background: linear-gradient(135deg, #ff4136, #e74c3c); color: #fff; }
+
+        /* ── Tables ── */
+        table {
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+        }
+        thead th {
+            background: rgba(0,0,0,0.03);
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            font-size: 0.8em;
+        }
+        tbody tr {
+            transition: background var(--transition);
+        }
+        tbody tr:hover {
+            background: rgba(102,126,234,0.06);
+        }
+
+        /* ── Buttons ── */
+        button, [role="button"], input[type="submit"] {
+            border-radius: var(--radius-sm) !important;
+            transition: all var(--transition) !important;
+            font-weight: 500;
+        }
+        button:hover, [role="button"]:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        /* ── Form inputs ── */
+        input, select, textarea {
+            border-radius: var(--radius-sm) !important;
+            transition: border-color var(--transition), box-shadow var(--transition);
+        }
+        input:focus, select:focus, textarea:focus {
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.2);
+        }
+
+        /* ── Layout ── */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.2rem; margin-bottom: 2rem;
+        }
+        .metric-value { font-size: 2rem; font-weight: 700; }
+        .metric-label { font-size: 0.85em; color: var(--pico-muted-color); }
+        .auto-refresh { opacity: 0.5; font-size: 0.75em; }
+
+        /* ── Occurrence list ── */
+        .occurrence-list { max-height: 300px; overflow-y: auto; font-size: 0.85em; }
+        .occurrence-list pre {
+            margin: 4px 0; padding: 10px;
+            background: rgba(0,0,0,0.03); border-radius: var(--radius-sm);
+            font-size: 0.82em;
+        }
+
+        /* ── Loading skeleton ── */
+        .skeleton {
+            background: linear-gradient(90deg, rgba(0,0,0,0.04) 25%, rgba(0,0,0,0.08) 50%, rgba(0,0,0,0.04) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: var(--radius-sm);
+        }
+
+        /* ── HTMX indicators ── */
+        .htmx-indicator { opacity: 0; transition: opacity 0.2s ease; }
+        .htmx-request .htmx-indicator { opacity: 1; }
+        .htmx-request.htmx-indicator { opacity: 1; }
+
+        /* ── Footer ── */
+        footer {
+            margin-top: 3rem; padding: 1.5rem 0;
+            border-top: 1px solid rgba(0,0,0,0.06);
+            text-align: center; font-size: 0.85em;
+            color: var(--pico-muted-color);
+        }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <main class="container">
+        <nav>
+            <ul>
+                <li><strong>🔍 RuOK</strong></li>
+            </ul>
+            <ul>
+                <li><a href="/ruok" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>总览</a></li>
+                <li><a href="/ruok/sessions" {% if active_page == 'sessions' %}aria-current="page"{% endif %}>Sessions</a></li>
+                <li><a href="/ruok/modules" {% if active_page == 'modules' %}aria-current="page"{% endif %}>模块</a></li>
+                <li><a href="/ruok/notifications" {% if active_page == 'notifications' %}aria-current="page"{% endif %}>通知</a></li>
+            </ul>
+            <ul>
+                <li><a href="/ruok/logout" title="登出">🚪</a></li>
+            </ul>
+        </nav>
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        RuOK · NoneBot2 Health Monitor
+    </footer>
+</body>
+</html>

@@ -1,0 +1,164 @@
+{% extends "base.html.jinja2" %}
+{% set active_page = "sessions" %}
+{% block title %}Session: {{ session.session_id }}{% endblock %}
+
+{% block content %}
+
+<nav aria-label="breadcrumb" style="margin-bottom: 1rem;">
+    <ul>
+        <li><a href="/ruok/sessions">← 返回 Sessions 列表</a></li>
+    </ul>
+</nav>
+
+<!-- Basic Info Card -->
+<article>
+    <header>
+        <span class="status-dot status-{{ session.status }}"></span>
+        <strong>{{ session.session_id }}</strong>
+        <span class="badge badge-{% if session.status == 'solved' %}ok{% elif session.status in ('pending','unsolved') %}warn{% elif session.status == 'ignored' %}error{% else %}ok{% endif %}" style="margin-left: 1rem;">
+            {{ session.status }}
+        </span>
+    </header>
+
+    <div class="grid">
+        <div>
+            <h4>基本信息</h4>
+            <table>
+                <tr><td><strong>来源</strong></td><td>{{ session.source }}</td></tr>
+                <tr><td><strong>模块</strong></td><td>{{ session.module_name }}</td></tr>
+                <tr><td><strong>签名</strong></td><td><code>{{ session.error_signature or '—' }}</code></td></tr>
+                <tr><td><strong>描述</strong></td><td><pre style="white-space: pre-wrap; font-size: 0.9em;">{{ session.description }}</pre></td></tr>
+            </table>
+        </div>
+        <div>
+            <h4>上报者</h4>
+            <table>
+                <tr><td><strong>类型</strong></td><td>{{ session.reporter.type }}</td></tr>
+                <tr><td><strong>用户</strong></td><td>{{ session.reporter.user_id or '—' }}</td></tr>
+                <tr><td><strong>群组</strong></td><td>{{ session.reporter.group_id or '—' }}</td></tr>
+                <tr><td><strong>平台</strong></td><td>{{ session.reporter.platform or '—' }}</td></tr>
+            </table>
+        </div>
+    </div>
+</article>
+
+<!-- Timeline -->
+<article>
+    <h4>⏱️ 时间线</h4>
+    <div class="timeline">
+        <div class="timeline-item">
+            <span class="status-dot status-pending"></span>
+            <strong>首次发现</strong>: {{ session.first_seen_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+        </div>
+        <div class="timeline-item">
+            <span class="status-dot status-{{ session.status }}"></span>
+            <strong>最近更新</strong>: {{ session.last_seen_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+        </div>
+        {% if session.resolved_at %}
+        <div class="timeline-item">
+            <span class="status-dot status-solved"></span>
+            <strong>解决时间</strong>: {{ session.resolved_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+        </div>
+        {% endif %}
+    </div>
+</article>
+
+<!-- Developer Notes (HTMX inline edit) -->
+<article>
+    <h4>📝 开发者备注</h4>
+    <div id="notes-area">
+        <form hx-post="/ruok/_actions/session-note/{{ session.session_id }}"
+              hx-target="#notes-area" hx-swap="outerHTML">
+            <textarea name="developer_notes" rows="3" style="width: 100%;"
+                      placeholder="添加备注...">{{ session.developer_notes or '' }}</textarea>
+            <button type="submit">保存备注</button>
+        </form>
+    </div>
+</article>
+
+<!-- Occurrences -->
+<article>
+    <h4>📋 Occurrences ({{ session.occurrences | length }})</h4>
+    {% if session.occurrences %}
+    {% for o in session.occurrences | reverse %}
+    <details {% if loop.first %}open{% endif %}>
+        <summary>
+            #{{ loop.revindex }} — {{ o.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
+            <small>({{ o.source }})</small>
+        </summary>
+        <div style="margin-top: 0.5rem;">
+            {% if o.record %}
+            <h5>Record</h5>
+            <pre style="font-size: 0.75em; max-height: 300px; overflow-y: auto;"><code>{{ o.record | tojson(indent=2) }}</code></pre>
+            {% endif %}
+            {% if o.snapshot %}
+            <h5>Health Snapshot</h5>
+            <pre style="font-size: 0.75em; max-height: 200px; overflow-y: auto;"><code>{{ o.snapshot.model_dump(mode='json') | tojson(indent=2) }}</code></pre>
+            {% endif %}
+        </div>
+    </details>
+    {% endfor %}
+    {% else %}
+    <p>暂无 Occurrence 记录。</p>
+    {% endif %}
+</article>
+
+<!-- Linked Sessions -->
+<article>
+    <h4>🔗 关联 Sessions</h4>
+    {% if session.linked_sessions %}
+    <ul>
+        {% for linked_id in session.linked_sessions %}
+        <li><a href="/ruok/sessions/{{ linked_id }}">{{ linked_id }}</a></li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>暂无关联 Session。</p>
+    {% endif %}
+</article>
+
+<!-- Actions -->
+{% if session.status in ('pending', 'unsolved') %}
+<article>
+    <h4>⚡ 操作</h4>
+    <div class="grid">
+        {% if session.status == 'pending' %}
+        <button class="secondary"
+                hx-post="/ruok/_actions/confirm/{{ session.session_id }}"
+                hx-swap="none"
+                onclick="setTimeout(() => location.reload(), 300)">
+            ✅ 确认 (pending → unsolved)
+        </button>
+        {% endif %}
+        <button class="secondary"
+                hx-post="/ruok/_actions/solve/{{ session.session_id }}"
+                hx-swap="none"
+                onclick="setTimeout(() => location.reload(), 300)">
+            🟢 解决
+        </button>
+        <button class="contrast"
+                hx-post="/ruok/_actions/ignore/{{ session.session_id }}"
+                hx-swap="none"
+                onclick="setTimeout(() => location.reload(), 300)">
+            ⚪ 忽略 (误报)
+        </button>
+    </div>
+</article>
+{% endif %}
+
+<style>
+    .timeline {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    .timeline-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid rgba(0,0,0,0.06);
+    }
+</style>
+
+{% endblock %}

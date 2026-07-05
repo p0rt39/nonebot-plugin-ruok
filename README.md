@@ -23,7 +23,11 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 - 🚨 **日志错误自动捕获**：loguru sink 全局拦截 ERROR，自动创建追踪 Session
 - 📝 **手动问题上报**：用户通过 `/ruok no <模块> <描述>` 主动报告，自动捕获上报者信息
 - 🔄 **Session 状态机**：`pending(🟡)→unsolved(🔴)→solved(🟢)`，支持忽略误报
-- 🌐 **HTTP API + WebUI**：`/ruok/api/*` JSON 接口 + `/ruok` 可视化面板，运行在同一端口
+- 🌐 **HTTP API + WebUI**：`/ruok/api/*` JSON 接口 + `/ruok` 可视化面板，同一端口
+- 📡 **SSE 实时推送**：Dashboard 实时状态更新 + Session 变更即时通知
+- 📊 **数据可视化**：CPU/内存趋势折线图 + Session 状态饼图（Chart.js）
+- 🔐 **WebUI 登录认证**：可选 session-based 登录，与 API Key 分离管理
+- 🔎 **高级筛选**：Session 支持全文搜索、时间范围、模块、关联插件多维过滤
 
 ## 💿 安装
 
@@ -132,6 +136,27 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 | :----- | :--: | :----: | :--- |
 | `RUOK__CORS_ORIGINS` | `list[str]` | `["*"]` | CORS 允许的源列表 |
 | `RUOK__API_KEY` | `str` | `""` | API 密钥（为空则不校验） |
+| `RUOK__WEBUI_PASSWORD` | `str` | `""` | WebUI 登录密码（为空则不启用认证） |
+
+### 时间序列指标
+
+| 配置项 | 类型 | 默认值 | 说明 |
+| :----- | :--: | :----: | :--- |
+| `RUOK__METRICS_RETENTION_DAYS` | `int` | `7` | Dashboard 趋势图数据保留天数 |
+
+### 通知规则
+
+`RUOK__NOTIFICATION_RULES` 为 JSON 数组，每项结构：
+
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `name` | `str` | 规则名称 |
+| `enabled` | `bool` | 是否启用（默认 `true`） |
+| `on_status` | `list[str]` | 触发通知的 Session 状态，如 `["pending", "unsolved"]` |
+| `on_module` | `list[str]` | 适用模块名列表（空 = 全部） |
+| `cooldown_minutes` | `float` | 同规则冷却时间（分钟，默认 `60.0`） |
+| `channels` | `list[str]` | 通知通道：`bot_dm`（Bot 私聊）、`webhook`（HTTP POST） |
+| `webhook_url` | `str` | `webhook` 通道的目标 URL
 
 ### 配置示例
 
@@ -144,6 +169,9 @@ RUOK__AUTO_SESSION_ENABLED=true
 RUOK__NOTIFY_SUPERUSERS=true
 RUOK__REPORT_WHITELIST_USERS=["123456789", "987654321"]
 RUOK__REPORT_WHITELIST_GROUPS=["1000000"]
+RUOK__WEBUI_PASSWORD=mysecret
+RUOK__METRICS_RETENTION_DAYS=7
+RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["pending","unsolved"],"on_module":[],"cooldown_minutes":60,"channels":["bot_dm"]}]'
 ```
 
 ## 🎉 使用
@@ -173,14 +201,31 @@ RUOK__REPORT_WHITELIST_GROUPS=["1000000"]
 | `/ruok/api/sessions` | GET | Session 列表，支持 `?status=&module=&reporter=` 过滤 |
 | `/ruok/api/sessions` | POST | 创建 Session（WebUI 用） |
 | `/ruok/api/sessions/{id}` | GET | Session 详情 + 全部 Occurrence |
-| `/ruok/api/sessions/{id}` | PATCH | 更新 status / developer_notes |
+| `/ruok/api/sessions/{id}/link/{other}` | POST | 关联两个 Session |
+| `/ruok/api/sessions/stats` | GET | Session 聚合统计（pending/unsolved/solved/ignored 数量） |
 | `/ruok/api/modules` | GET | 模块列表（含实时派生状态） |
 | `/ruok/api/modules/{name}` | GET / PUT / DELETE | 模块 CRUD |
+| `/ruok/api/metrics/history` | GET | 时间序列指标，`?hours=24`（Dashboard 图表数据源） |
 
 ### WebUI
 
 启动机器人后，浏览器访问 `http://<host>:<port>/ruok` 即可打开可视化面板。
 
-### 🎨 效果图
+**页面功能**：
 
-> 待补充
+| 页面 | 路由 | 说明 |
+| :--- | :--- | :--- |
+| 📊 总览 | `/ruok` | 整体状态 + 系统指标卡片 + 连接状态 + CPU/内存趋势图 + Session 统计饼图 + 模块状态表（HTMX 10s 自动刷新） |
+| 📋 Sessions | `/ruok/sessions` | Session 列表 + 高级筛选（全文搜索、状态、模块、关联插件、时间范围）+ 统计概览 |
+| 📝 Session 详情 | `/ruok/sessions/{id}` | 完整信息 + 状态时间线 + Occurrence 列表 + 关联 Session + 开发者备注（HTMX inline edit） |
+| 📦 模块管理 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件、启用状态） |
+| 🔔 通知规则 | `/ruok/notifications` | 查看已配置的通知规则（触发条件、冷却时间、通道） |
+| 🔐 登录 | `/ruok/login` | WebUI 登录页（仅当 `RUOK__WEBUI_PASSWORD` 非空时启用） |
+
+**技术特性**：
+
+- 🧩 **SSR + HTMX + Pico.css**：服务端渲染 Jinja2 模板，HTMX 局部更新，零前端构建
+- 📡 **SSE 实时推送**：定时心跳 + 事件驱动，Dashboard 状态实时同步
+- 📈 **Chart.js 可视化**：CPU/内存趋势折线图 + Session 状态饼图，CDN 引入
+- 🔎 **高级筛选**：搜索框 300ms 防抖 + 下拉框即时过滤 + 日期范围选择器
+- 🔐 **可选认证**：SessionMiddleware + SHA256 密码哈希，与 API Key 分离管理

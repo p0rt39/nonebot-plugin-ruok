@@ -1,0 +1,35 @@
+<!-- HTMX partial: auto-refreshing module status table -->
+{% if modules %}
+<table class="striped">
+    <thead>
+        <tr>
+            <th>状态</th>
+            <th>模块名</th>
+            <th>显示名</th>
+            <th>插件数</th>
+            <th>描述</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for m in modules %}
+        <tr>
+            <td>
+                {% if m.status == 'available' %}🟢
+                {% elif m.status == 'degraded' %}🟡
+                {% elif m.status == 'unavailable' %}🔴
+                {% else %}⚪{% endif %}
+                {{ m.status }}
+            </td>
+            <td><strong>{{ m.name }}</strong></td>
+            <td>{{ m.display_name }}</td>
+            <td>{{ m.plugins | length }}</td>
+            <td>{{ m.description or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<article>
+    <p>⚠️ 暂无功能模块定义。使用 <code>PUT /ruok/api/modules/{name}</code> 添加。</p>
+</article>
+{% endif %}

@@ -7,7 +7,7 @@ import json
 import secrets
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +19,14 @@ from .protocol import (
     AggregatedStatus,
     BotConnectionStatus,
     CheckResult,
+    MetricPoint,
     ModuleDefinition,
     ModuleStatus,
     Occurrence,
     PluginHealthInfo,
     ReporterInfo,
     Session,
+    SessionStats,
     StatusResult,
 )
 
@@ -35,18 +37,9 @@ from .protocol import (
 
 async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
     """Collect CPU / memory / swap / disk / network metrics."""
-    results: list[CheckResult] = []
+    import psutil
 
-    try:
-        import psutil
-    except ImportError:
-        return [
-            CheckResult(
-                name="psutil",
-                status="unknown",
-                message="psutil not installed — hardware metrics unavailable",
-            )
-        ]
+    results: list[CheckResult] = []
 
     # CPU
     try:
@@ -382,12 +375,59 @@ async def collect_all_statuses(config: ScopedConfig, data_dir: Path) -> Aggregat
     if overall == "available" and worst_status in ("unhealthy", "degraded"):
         overall = "degraded"
 
-    return AggregatedStatus(
+    result = AggregatedStatus(
         overall=overall,
         bot=bot_status,
         connections=connections,
         plugins=plugins,
     )
+
+    # ── Append time-series metric point ──
+    try:
+        cpu_pct = _extract_cpu_percent(sys_results)
+        mem_pct = _extract_memory_percent(sys_results)
+        disk_pct = _extract_disk_percent(sys_results)
+        sessions = list_sessions(data_dir)
+        MetricsStore.append(
+            data_dir,
+            MetricPoint(
+                ts=datetime.now(timezone.utc).isoformat(),
+                cpu_percent=cpu_pct,
+                memory_percent=mem_pct,
+                disk_percent=disk_pct,
+                sessions_total=len(sessions),
+                sessions_pending=sum(1 for s in sessions if s.status == "pending"),
+                sessions_unsolved=sum(1 for s in sessions if s.status == "unsolved"),
+                connections_total=len(connections),
+                connections_online=sum(1 for c in connections if c.connected),
+            ),
+            retention_days=config.metrics_retention_days,
+        )
+    except Exception:
+        pass  # Metrics are best-effort
+
+    return result
+
+
+def _extract_cpu_percent(checks: list[CheckResult]) -> float | None:
+    for c in checks:
+        if c.name == "cpu" and c.details:
+            return c.details.get("total_percent")
+    return None
+
+
+def _extract_memory_percent(checks: list[CheckResult]) -> float | None:
+    for c in checks:
+        if c.name == "memory" and c.details:
+            return c.details.get("percent")
+    return None
+
+
+def _extract_disk_percent(checks: list[CheckResult]) -> float | None:
+    for c in checks:
+        if c.name == "disk" and c.details:
+            return max((d.get("percent", 0) for d in c.details.values() if isinstance(d, dict)), default=None)
+    return None
 
 
 # ────────────────────────────────
@@ -402,6 +442,7 @@ class LogMonitor:
         self.config = config
         self.data_dir = data_dir
         self._handler_id: int | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # ── lifecycle ──
 
@@ -410,9 +451,12 @@ class LogMonitor:
             return
         from nonebot.log import logger as nb_logger
 
+        self._loop = asyncio.get_running_loop()
         self._handler_id = nb_logger.add(
-            _make_log_sink(self.config, self.data_dir),
+            _make_log_sink(self.config, self.data_dir, self._loop),
             level="ERROR",
+            enqueue=True,
+            serialize=True,
         )
         logger.info("RuOK LogMonitor started (level=ERROR)")
 
@@ -424,19 +468,35 @@ class LogMonitor:
             self._handler_id = None
 
 
-def _make_log_sink(config: ScopedConfig, data_dir: Path):
-    """Create a loguru-compatible sink closure."""
+def _make_log_sink(config: ScopedConfig, data_dir: Path, loop: asyncio.AbstractEventLoop):
+    """Create a loguru-compatible sink closure.
 
-    def _sink(record: Any) -> None:
-        level_name: str = record["level"].name
+    With serialize=True, the sink receives a JSON string.  Session I/O runs
+    in the worker thread; notification is dispatched to the main event loop
+    via call_soon_threadsafe.
+    """
+
+    def _sink(message: str) -> None:
+        try:
+            record: dict = json.loads(message)
+        except (json.JSONDecodeError, TypeError):
+            return
+
+        level_info: dict = record.get("level", {})
+        if not isinstance(level_info, dict):
+            return
+        level_name: str = level_info.get("name", "")
         if level_name not in ("ERROR", "CRITICAL"):
             return
 
         plugin_id: str = record["name"]
-        message: str = record["message"]
+        msg_text: str = record["message"]
         exception: Any = record.get("exception")
+        exception_str = ""
+        if isinstance(exception, dict):
+            exception_str = exception.get("value", "")
 
-        signature = _make_signature(plugin_id, str(exception), message)
+        signature = _make_signature(plugin_id, exception_str, msg_text)
 
         existing = _find_existing_session(data_dir, signature)
         if existing:
@@ -456,7 +516,7 @@ def _make_log_sink(config: ScopedConfig, data_dir: Path):
             module_name=plugin_id,
             error_signature=signature,
             reporter=ReporterInfo(type="automatic"),
-            description=f"```\n{message}\n{exception}\n```",
+            description=f"```\n{msg_text}\n{exception_str}\n```",
             occurrences=[
                 Occurrence(
                     record=_record_to_dict(record),
@@ -467,7 +527,7 @@ def _make_log_sink(config: ScopedConfig, data_dir: Path):
         _save_session(data_dir, session)
         logger.warning(f"RuOK: new session {session.session_id} for {plugin_id}")
         if config.notify_superusers:
-            _notify_new_session(session)
+            loop.call_soon_threadsafe(_notify_new_session, session)
 
     return _sink
 
@@ -482,13 +542,15 @@ def _gen_session_id() -> str:
 
 
 def _record_to_dict(record: dict) -> dict[str, Any]:
-    """Extract safe fields from a loguru record."""
+    """Extract safe fields from a loguru record (serialized format)."""
+    level: dict = record.get("level", {})
+    file_info: dict = record.get("file", {})
     return {
         "name": record.get("name"),
-        "level": record["level"].name,
+        "level": level.get("name", ""),
         "message": record.get("message"),
         "exception": str(record.get("exception")) if record.get("exception") else None,
-        "file": str(record.get("file", {}).get("name", "")),
+        "file": file_info.get("name", ""),
         "function": record.get("function"),
         "line": record.get("line"),
         "time": str(record.get("time", "")),
@@ -558,6 +620,8 @@ def create_session(
         ],
     )
     _save_session(data_dir, session)
+    # Publish event for SSE
+    _publish_session_event("created", session)
     return session
 
 
@@ -570,9 +634,29 @@ def list_sessions(
     status: str | None = None,
     module_name: str | None = None,
     reporter_user_id: str | None = None,
+    search: str | None = None,
+    first_seen_after: datetime | None = None,
+    first_seen_before: datetime | None = None,
+    plugin_name: str | None = None,
 ) -> list[Session]:
+    """List sessions with optional advanced filters.
+
+    Args:
+        search: Full-text search across session_id, module_name, description,
+                reporter user_id, error_signature.
+        first_seen_after: Only sessions first seen after this time (UTC).
+        first_seen_before: Only sessions first seen before this time.
+        plugin_name: Only sessions whose module_name matches a ModuleDefinition
+                     that includes this plugin in its ``plugins`` list.
+    """
     sessions: list[Session] = []
     statuses = set(s.strip() for s in status.split(",")) if status else None
+
+    # Pre-compute module→plugin mapping if needed
+    module_plugin_names: dict[str, set[str]] | None = None
+    if plugin_name:
+        module_plugin_names = _build_module_plugin_map(data_dir)
+
     for f in _sessions_dir(data_dir).glob("*.json"):
         try:
             s = Session.model_validate_json(f.read_text(encoding="utf-8"))
@@ -584,9 +668,61 @@ def list_sessions(
             continue
         if reporter_user_id and s.reporter.user_id != reporter_user_id:
             continue
+
+        # ── time range ──
+        if first_seen_after and s.first_seen_at < first_seen_after:
+            continue
+        if first_seen_before and s.first_seen_at > first_seen_before:
+            continue
+
+        # ── plugin filter ──
+        if plugin_name and module_plugin_names:
+            allowed_modules = module_plugin_names.get(plugin_name, set())
+            if s.module_name not in allowed_modules:
+                continue
+
+        # ── full-text search ──
+        if search:
+            q = search.lower()
+            if not _session_matches_search(s, q):
+                continue
+
         sessions.append(s)
     sessions.sort(key=lambda s: s.last_seen_at, reverse=True)
     return sessions
+
+
+def _build_module_plugin_map(data_dir: Path) -> dict[str, set[str]]:
+    """Build mapping: plugin_name → set of module_names that reference it."""
+    mapping: dict[str, set[str]] = {}
+    modules_path = _modules_path(data_dir)
+    if not modules_path.exists():
+        return mapping
+    try:
+        modules_data = json.loads(modules_path.read_text("utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return mapping
+    for m in modules_data:
+        mod_name = m.get("name", "")
+        plugins = m.get("plugins", [])
+        for p in plugins:
+            mapping.setdefault(p, set()).add(mod_name)
+    return mapping
+
+
+def _session_matches_search(s: Session, q: str) -> bool:
+    """Check if *q* appears in any searchable field of *s*."""
+    if q in s.session_id.lower():
+        return True
+    if q in s.module_name.lower():
+        return True
+    if q in s.description.lower():
+        return True
+    if s.reporter.user_id and q in s.reporter.user_id.lower():
+        return True
+    if s.error_signature and q in s.error_signature.lower():
+        return True
+    return False
 
 
 def update_session(data_dir: Path, session_id: str, updates: dict[str, Any]) -> Session | None:
@@ -595,6 +731,7 @@ def update_session(data_dir: Path, session_id: str, updates: dict[str, Any]) -> 
         return None
 
     allowed = {"status", "developer_notes", "last_seen_at", "linked_sessions"}
+    old_status = session.status
     for k, v in updates.items():
         if k in allowed:
             setattr(session, k, v)
@@ -603,7 +740,32 @@ def update_session(data_dir: Path, session_id: str, updates: dict[str, Any]) -> 
         session.resolved_at = datetime.now(timezone.utc)
 
     _save_session(data_dir, session)
+    # Publish event for SSE if status changed
+    if "status" in updates and updates["status"] != old_status:
+        _publish_session_event("updated", session, old_status=old_status)
     return session
+
+
+def _publish_session_event(
+    action: str, session: Session, old_status: str | None = None
+) -> None:
+    """Publish a session lifecycle event to the SSE EventBus (best-effort)."""
+    try:
+        from .webui.sse import event_bus
+
+        event_bus.publish(
+            "session_update",
+            {
+                "action": action,
+                "session_id": session.session_id,
+                "module_name": session.module_name,
+                "status": session.status,
+                "old_status": old_status,
+                "last_seen_at": session.last_seen_at.isoformat(),
+            },
+        )
+    except Exception:
+        pass  # SSE is best-effort, never crash the collector
 
 
 def link_sessions(data_dir: Path, session_id_a: str, session_id_b: str) -> bool:
@@ -724,3 +886,121 @@ def _notify_new_session(session: Session) -> None:
                 logger.warning(f"RuOK: failed to notify superuser {uid}")
     except Exception as exc:
         logger.warning(f"RuOK: notification failed: {exc}")
+
+
+# ────────────────────────────────
+# 11. Time-series Metrics Store
+# ────────────────────────────────
+
+
+class MetricsStore:
+    """Time-series metrics storage backed by daily JSON files.
+
+    File layout::
+
+        {data_dir}/metrics/
+        ├── 2026-07-05.json
+        ├── 2026-07-04.json
+        └── ...
+
+    Each file is a JSON array of MetricPoint dicts.
+    """
+
+    @staticmethod
+    def _metrics_dir(data_dir: Path) -> Path:
+        d = data_dir / "metrics"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _today_file(data_dir: Path) -> Path:
+        return MetricsStore._metrics_dir(data_dir) / f"{datetime.now(timezone.utc).date().isoformat()}.json"
+
+    @staticmethod
+    def append(data_dir: Path, point: MetricPoint, retention_days: int = 7) -> None:
+        """Append one MetricPoint to today's file and clean old files."""
+        file_path = MetricsStore._today_file(data_dir)
+        records: list[dict[str, Any]] = []
+        if file_path.exists():
+            try:
+                records = json.loads(file_path.read_text("utf-8"))
+            except (json.JSONDecodeError, OSError):
+                records = []
+        records.append(point.model_dump(mode="json"))
+        file_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Clean old files
+        MetricsStore._cleanup(data_dir, retention_days)
+
+    @staticmethod
+    def query(data_dir: Path, hours: float = 24.0) -> list[MetricPoint]:
+        """Return metrics from the last *hours* hours.
+
+        Loads today's file and yesterday's if needed.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        metrics_dir = MetricsStore._metrics_dir(data_dir)
+        points: list[MetricPoint] = []
+
+        # We only look at the last 2 days of files (today + yesterday)
+        today_str = datetime.now(timezone.utc).date().isoformat()
+        yesterday_str = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+
+        for date_str in (today_str, yesterday_str):
+            fpath = metrics_dir / f"{date_str}.json"
+            if not fpath.exists():
+                continue
+            try:
+                records = json.loads(fpath.read_text("utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            for rec in records:
+                try:
+                    pt = MetricPoint.model_validate(rec)
+                    ts = datetime.fromisoformat(pt.ts)
+                    if ts >= cutoff:
+                        points.append(pt)
+                except Exception:
+                    continue
+
+        points.sort(key=lambda p: p.ts)
+        return points
+
+    @staticmethod
+    def _cleanup(data_dir: Path, retention_days: int) -> None:
+        """Remove metric files older than *retention_days*."""
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=retention_days)).date()
+        metrics_dir = MetricsStore._metrics_dir(data_dir)
+        for f in metrics_dir.glob("*.json"):
+            try:
+                file_date = datetime.strptime(f.stem, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if file_date < cutoff_date:
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+
+
+# ────────────────────────────────
+# 12. Session statistics
+# ────────────────────────────────
+
+
+def get_session_stats(data_dir: Path) -> SessionStats:
+    """Compute aggregate session statistics."""
+    all_sessions = list_sessions(data_dir)
+    stats = SessionStats(total=len(all_sessions))
+    by_module: dict[str, int] = {}
+    for s in all_sessions:
+        if s.status == "pending":
+            stats.pending += 1
+        elif s.status == "unsolved":
+            stats.unsolved += 1
+        elif s.status == "solved":
+            stats.solved += 1
+        elif s.status == "ignored":
+            stats.ignored += 1
+        by_module[s.module_name] = by_module.get(s.module_name, 0) + 1
+    stats.by_module = by_module
+    return stats

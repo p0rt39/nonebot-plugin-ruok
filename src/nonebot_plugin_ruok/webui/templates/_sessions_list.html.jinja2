@@ -1,0 +1,84 @@
+<!-- HTMX partial: session list -->
+{% if sessions %}
+{% for s in sessions %}
+<article id="session-{{ s.session_id }}" class="animate-in">
+    <header>
+        <span class="status-dot status-{{ s.status }}"></span>
+        <strong>{{ s.session_id }}</strong>
+        <small style="margin-left: auto;">
+            {{ s.source }} · {{ s.first_seen_at.strftime('%m-%d %H:%M') }}
+        </small>
+    </header>
+
+    <div class="grid">
+        <div>
+            <p><strong>模块:</strong> {{ s.module_name }}</p>
+            <p><strong>状态:</strong>
+                <span class="badge badge-{% if s.status == 'solved' %}ok{% elif s.status in ('pending','unsolved') %}warn{% else %}error{% endif %}">
+                    {{ s.status }}
+                </span>
+            </p>
+            {% if s.reporter.user_id %}
+            <p><small>上报者: {{ s.reporter.user_id }}{% if s.reporter.group_id %} (群: {{ s.reporter.group_id }}){% endif %}</small></p>
+            {% endif %}
+        </div>
+        <div>
+            <p>{{ s.description[:300] }}{% if s.description|length > 300 %}...{% endif %}</p>
+        </div>
+    </div>
+
+    <details>
+        <summary>重复次数: {{ s.occurrences | length }}</summary>
+        <div class="occurrence-list">
+            {% for o in s.occurrences %}
+            <pre><code>{{ o.model_dump(mode='json') | tojson(indent=2) }}</code></pre>
+            {% endfor %}
+        </div>
+    </details>
+
+    {% if s.linked_sessions %}
+    <p><small>🔗 关联: {{ s.linked_sessions | join(', ') }}</small></p>
+    {% endif %}
+
+    {% if s.status in ('pending', 'unsolved') %}
+    <footer>
+        <div class="grid">
+            <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline" style="text-align: center;">
+                📋 详情
+            </a>
+            {% if s.status == 'pending' %}
+            <button class="secondary"
+                    hx-post="/ruok/_actions/confirm/{{ s.session_id }}"
+                    hx-target="#session-{{ s.session_id }}"
+                    hx-swap="outerHTML">
+                ✅ 确认
+            </button>
+            {% endif %}
+            <button class="secondary"
+                    hx-post="/ruok/_actions/solve/{{ s.session_id }}"
+                    hx-target="#session-{{ s.session_id }}"
+                    hx-swap="outerHTML">
+                🟢 解决
+            </button>
+            <button class="contrast"
+                    hx-post="/ruok/_actions/ignore/{{ s.session_id }}"
+                    hx-target="#session-{{ s.session_id }}"
+                    hx-swap="outerHTML">
+                ⚪ 忽略
+            </button>
+        </div>
+    </footer>
+    {% else %}
+    <footer>
+        <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline" style="text-align: center; width: 100%;">
+            📋 查看详情
+        </a>
+    </footer>
+    {% endif %}
+</article>
+{% endfor %}
+{% else %}
+<article>
+    <p>🎉 没有匹配的 Session。</p>
+</article>
+{% endif %}

@@ -1,0 +1,43 @@
+{% extends "base.html.jinja2" %}
+{% set active_page = "modules" %}
+{% block title %}模块管理{% endblock %}
+
+{% block content %}
+
+<h3>📦 模块管理</h3>
+
+<!-- Add Module Form -->
+<details>
+    <summary>➕ 添加 / 更新模块</summary>
+    <form hx-post="/ruok/_actions/module-upsert" hx-target="#module-list" hx-swap="outerHTML" style="margin-top: 1rem;">
+        <div class="grid">
+            <label>
+                模块名
+                <input type="text" name="name" required placeholder="e.g. weather">
+            </label>
+            <label>
+                显示名
+                <input type="text" name="display_name" placeholder="天气插件">
+            </label>
+        </div>
+        <label>
+            描述
+            <input type="text" name="description" placeholder="可选描述">
+        </label>
+        <label>
+            关联插件 (逗号分隔)
+            <input type="text" name="plugins" placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">
+        </label>
+        <label>
+            <input type="checkbox" name="enabled" checked> 启用
+        </label>
+        <button type="submit">保存</button>
+    </form>
+</details>
+
+<!-- Module List -->
+<div id="module-list">
+    {% include "_modules_table.html.jinja2" %}
+</div>
+
+{% endblock %}

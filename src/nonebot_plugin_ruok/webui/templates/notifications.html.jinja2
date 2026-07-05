@@ -1,0 +1,68 @@
+{% extends "base.html.jinja2" %}
+{% set active_page = "notifications" %}
+{% block title %}通知规则{% endblock %}
+
+{% block content %}
+
+<h3>🔔 通知规则管理</h3>
+<p>配置事件通知规则：哪些状态的 Session、哪些模块、通过什么渠道通知。</p>
+
+<article>
+    <p>
+        ⚙️ 通知规则目前通过 <code>.env</code> 中的 <code>RUOK__NOTIFICATION_RULES</code> JSON 数组配置。
+        可视化编辑器将在后续版本中提供。
+    </p>
+</article>
+
+{% if rules %}
+<div class="card-grid">
+    {% for rule in rules %}
+    <article>
+        <header>
+            <strong>{{ rule.name }}</strong>
+            <span class="badge badge-{% if rule.enabled %}ok{% else %}error{% endif %}">
+                {{ '启用' if rule.enabled else '禁用' }}
+            </span>
+        </header>
+        <table>
+            <tr>
+                <td><strong>触发状态</strong></td>
+                <td>
+                    {% for s in rule.on_status %}
+                    <span class="badge badge-{% if s == 'solved' %}ok{% elif s in ('pending','unsolved') %}warn{% else %}error{% endif %}">
+                        {{ s }}
+                    </span>
+                    {% endfor %}
+                </td>
+            </tr>
+            <tr>
+                <td><strong>适用模块</strong></td>
+                <td>{{ rule.on_module | join(', ') if rule.on_module else '全部' }}</td>
+            </tr>
+            <tr>
+                <td><strong>冷却时间</strong></td>
+                <td>{{ rule.cooldown_minutes }} 分钟</td>
+            </tr>
+            <tr>
+                <td><strong>通道</strong></td>
+                <td>{{ rule.channels | join(', ') }}</td>
+            </tr>
+            {% if rule.webhook_url %}
+            <tr>
+                <td><strong>Webhook</strong></td>
+                <td><code>{{ rule.webhook_url[:50] }}{% if rule.webhook_url|length > 50 %}...{% endif %}</code></td>
+            </tr>
+            {% endif %}
+        </table>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<article>
+    <p>🎉 暂无通知规则。在 <code>.env</code> 中添加 <code>RUOK__NOTIFICATION_RULES</code> 配置。</p>
+    <pre><code># 示例 (.env):
+RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["pending","unsolved"],"on_module":[],"cooldown_minutes":60,"channels":["bot_dm"]}]'</code></pre>
+</article>
+{% endif %}
+
+{% endblock %}

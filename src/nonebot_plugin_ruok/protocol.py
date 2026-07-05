@@ -1,11 +1,10 @@
 """Data models for RuOK plugin — health, session, module definitions."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Literal
+from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
-
+from pydantic import Field, BaseModel
 
 # ────────────────────────────────
 # 1. Health check models
@@ -108,11 +107,14 @@ class Session(BaseModel):
     module_name: str
     error_signature: str | None = None  # dedup key (automatic only)
 
-    reporter: ReporterInfo = Field(default_factory=lambda: ReporterInfo(type="automatic"))
+    reporter: ReporterInfo = Field(default_factory=
+                                   lambda: ReporterInfo(type="automatic"))
     description: str = ""
 
-    first_seen_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_seen_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    first_seen_at: datetime = Field(default_factory=
+                                    lambda: datetime.now(timezone.utc))
+    last_seen_at: datetime = Field(default_factory=
+                                   lambda: datetime.now(timezone.utc))
     resolved_at: datetime | None = None
 
     linked_sessions: list[str] = Field(default_factory=list)
@@ -134,3 +136,50 @@ class ModuleDefinition(BaseModel):
     description: str | None = None
     enabled: bool = True
     status: ModuleStatus = "available"  # derived at query time
+
+
+# ────────────────────────────────
+# 4. Time-series metrics
+# ────────────────────────────────
+
+
+class MetricPoint(BaseModel):
+    """A single time-series data point for dashboard charts."""
+
+    ts: str  # ISO 8601
+    cpu_percent: float | None = None
+    memory_percent: float | None = None
+    disk_percent: float | None = None
+    sessions_total: int = 0
+    sessions_pending: int = 0
+    sessions_unsolved: int = 0
+    connections_total: int = 0
+    connections_online: int = 0
+
+
+class SessionStats(BaseModel):
+    """Aggregated session statistics."""
+
+    total: int = 0
+    pending: int = 0
+    unsolved: int = 0
+    solved: int = 0
+    ignored: int = 0
+    by_module: dict[str, int] = Field(default_factory=dict)
+
+
+# ────────────────────────────────
+# 5. Notification rules
+# ────────────────────────────────
+
+
+class NotificationRule(BaseModel):
+    """A notification rule definition."""
+
+    name: str
+    enabled: bool = True
+    on_status: list[str] = Field(default_factory=lambda: ["pending", "unsolved"])
+    on_module: list[str] = Field(default_factory=list)  # empty = all
+    cooldown_minutes: float = 60.0
+    channels: list[str] = Field(default_factory=lambda: ["bot_dm"])  # bot_dm, webhook
+    webhook_url: str | None = None

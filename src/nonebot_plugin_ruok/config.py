@@ -1,6 +1,8 @@
 """RuOK plugin configuration model."""
 from pydantic import BaseModel
 
+from .protocol import NotificationRule
+
 
 class ScopedConfig(BaseModel):
     """RuOK plugin config, scoped under ``ruok__`` in dotenv."""
@@ -24,6 +26,13 @@ class ScopedConfig(BaseModel):
     # ── API / WebUI ──
     cors_origins: list[str] = ["*"]
     api_key: str = ""
+    webui_password: str = ""  # 空字符串 = 不启用 WebUI 登录认证
+
+    # ── Time-series metrics ──
+    metrics_retention_days: int = 7
+
+    # ── Notification rules ──
+    notification_rules: list[NotificationRule] = []
 
 
 class Config(BaseModel):

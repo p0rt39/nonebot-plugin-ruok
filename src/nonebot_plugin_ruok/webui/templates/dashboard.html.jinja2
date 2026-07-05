@@ -1,0 +1,202 @@
+{% extends "base.html.jinja2" %}
+{% set active_page = "dashboard" %}
+{% block title %}总览{% endblock %}
+
+{% block head %}
+<meta hx-ext="auto-refresh">
+{% endblock %}
+
+{% block content %}
+
+<!-- Overall Status Banner -->
+<article class="hero-banner {% if status.overall == 'available' %}ok{% elif status.overall == 'degraded' %}warn{% else %}error{% endif %}">
+    <div class="metric-value" style="color: #fff;">
+        {% if status.overall == 'available' %}🟢 一切正常
+        {% elif status.overall == 'degraded' %}🟡 部分降级
+        {% else %}🔴 不可用
+        {% endif %}
+    </div>
+    <div style="color: rgba(255,255,255,0.85); margin-top: 0.5rem;">
+        {{ status.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+    </div>
+</article>
+
+<!-- System Metrics Cards -->
+<h3>🖥️ 系统状态</h3>
+<div class="card-grid" id="system-metrics">
+    {% if status.bot and status.bot.checks %}
+    {% for check in status.bot.checks %}
+    <article>
+        <header>
+            <strong>{{ check.name }}</strong>
+            <span class="badge badge-{% if check.status == 'healthy' %}ok{% elif check.status == 'degraded' %}warn{% else %}error{% endif %}">
+                {{ check.status }}
+            </span>
+        </header>
+        {% if check.message %}
+        <p>{{ check.message }}</p>
+        {% endif %}
+        {% if check.details %}
+        <details>
+            <summary>详情</summary>
+            <pre style="font-size: 0.75em;"><code>{{ check.details | tojson(indent=2) }}</code></pre>
+        </details>
+        {% endif %}
+    </article>
+    {% endfor %}
+    {% else %}
+    <p>⏳ 系统数据采集中...</p>
+    {% endif %}
+</div>
+
+<!-- Connections -->
+<h3>🔗 连接状态</h3>
+<div class="card-grid">
+    {% for conn in status.connections %}
+    <article>
+        <header>
+            <strong>{{ conn.self_id }}</strong>
+            <span class="status-dot status-{{ 'available' if conn.connected else 'unavailable' }}"></span>
+            {{ '在线' if conn.connected else '离线' }}
+        </header>
+        <p class="metric-label">适配器: {{ conn.adapter }}</p>
+        {% if conn.latency_ms is not none %}
+        <p class="metric-label">延迟: {{ '%.1f'|format(conn.latency_ms) }}ms</p>
+        {% endif %}
+        {% if conn.error %}
+        <p style="color: var(--pico-del-color);">⚠️ {{ conn.error }}</p>
+        {% endif %}
+    </article>
+    {% else %}
+    <p>暂无连接</p>
+    {% endfor %}
+</div>
+
+<!-- Module Status (auto-refresh every 10s) -->
+<h3>📦 模块状态 <span class="auto-refresh">(HTMX 自动刷新 10s)</span></h3>
+<div hx-get="/ruok/_partials/modules" hx-trigger="load, every 10s" hx-swap="outerHTML">
+    {% include "_modules_table.html.jinja2" %}
+</div>
+
+<!-- Trend Charts -->
+<h3>📈 指标趋势 (最近 1 小时)</h3>
+<div class="grid">
+    <article>
+        <canvas id="chart-cpu" style="max-height: 220px;"></canvas>
+    </article>
+    <article>
+        <canvas id="chart-memory" style="max-height: 220px;"></canvas>
+    </article>
+</div>
+
+<!-- Session Stats -->
+<h3>📊 Session 统计</h3>
+<div class="grid">
+    <article>
+        <canvas id="chart-sessions-pie" style="max-height: 250px;"></canvas>
+    </article>
+    <article>
+        <h4>概览</h4>
+        <table>
+            <tr><td>🟡 Pending</td><td><strong>{{ stats.pending }}</strong></td></tr>
+            <tr><td>🔴 Unsolved</td><td><strong>{{ stats.unsolved }}</strong></td></tr>
+            <tr><td>🟢 Solved</td><td><strong>{{ stats.solved }}</strong></td></tr>
+            <tr><td>⚪ Ignored</td><td><strong>{{ stats.ignored }}</strong></td></tr>
+            <tr><td><strong>总计</strong></td><td><strong>{{ stats.total }}</strong></td></tr>
+        </table>
+    </article>
+</div>
+
+<script>
+// ── CPU Chart ──
+(function() {
+    const metrics = {{ initial_metrics_json | safe if initial_metrics_json else '[]' }};
+    const labels = metrics.map(m => new Date(m.ts).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}));
+    const cpuData = metrics.map(m => m.cpu_percent);
+
+    const ctx = document.getElementById('chart-cpu');
+    if (ctx && cpuData.length > 0) {
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'CPU %',
+                    data: cpuData,
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102,126,234,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+                    x: { ticks: { maxTicksLimit: 8 } }
+                }
+            }
+        });
+    }
+
+    // ── Memory Chart ──
+    const memCtx = document.getElementById('chart-memory');
+    const memData = metrics.map(m => m.memory_percent);
+    if (memCtx && memData.length > 0) {
+        new Chart(memCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Memory %',
+                    data: memData,
+                    borderColor: '#11998e',
+                    backgroundColor: 'rgba(17,153,142,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+                    x: { ticks: { maxTicksLimit: 8 } }
+                }
+            }
+        });
+    }
+})();
+
+// ── Session Pie Chart ──
+(function() {
+    const ctx = document.getElementById('chart-sessions-pie');
+    if (!ctx) return;
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Pending', 'Unsolved', 'Solved', 'Ignored'],
+            datasets: [{
+                data: [{{ stats.pending }}, {{ stats.unsolved }}, {{ stats.solved }}, {{ stats.ignored }}],
+                backgroundColor: ['#ffdc00', '#ff4136', '#2ecc40', '#aaa'],
+                borderWidth: 2,
+                borderColor: '#fff',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+})();
+</script>
+
+{% endblock %}

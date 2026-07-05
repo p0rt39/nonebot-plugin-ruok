@@ -9,11 +9,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from .collector import (
+    MetricsStore,
     collect_all_statuses,
     create_session,
     delete_module,
     get_module,
     get_session,
+    get_session_stats,
     link_sessions,
     list_modules,
     list_sessions,
@@ -86,13 +88,27 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         status: str | None = Query(None),
         module: str | None = Query(None),
         reporter: str | None = Query(None),
+        search: str | None = Query(None),
+        after: str
+        | None = Query(None, description="ISO datetime, e.g. 2026-07-01T00:00:00"),
+        before: str | None = Query(None, description="ISO datetime"),
+        plugin: str
+        | None = Query(None, description="Filter by plugin name from ModuleDefinitions"),
     ):
         """List sessions with optional filters."""
+        from datetime import datetime as dt
+
+        first_seen_after = dt.fromisoformat(after) if after else None
+        first_seen_before = dt.fromisoformat(before) if before else None
         sessions = list_sessions(
             data_dir,
             status=status,
             module_name=module,
             reporter_user_id=reporter,
+            search=search,
+            first_seen_after=first_seen_after,
+            first_seen_before=first_seen_before,
+            plugin_name=plugin,
         )
         return [s.model_dump(mode="json") for s in sessions]
 
@@ -191,5 +207,21 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             raise HTTPException(status_code=404, detail="Module not found")
         _cache.pop("status", None)
         return {"deleted": True}
+
+    # ── Metrics history ───────────
+
+    @router.get("/metrics/history")
+    async def api_metrics_history(hours: float = Query(24.0, ge=0.5, le=168.0)):
+        """Return time-series metrics for the last *hours* hours."""
+        points = MetricsStore.query(data_dir, hours=hours)
+        return [p.model_dump(mode="json") for p in points]
+
+    # ── Session statistics ────────
+
+    @router.get("/sessions/stats")
+    async def api_session_stats():
+        """Return aggregate session statistics."""
+        stats = get_session_stats(data_dir)
+        return stats.model_dump(mode="json")
 
     return router

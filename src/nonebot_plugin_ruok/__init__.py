@@ -1,6 +1,7 @@
 """nonebot-plugin-ruok — Bot health monitoring, session tracking, and WebUI."""
 from __future__ import annotations
 
+import secrets
 from typing import Annotated
 from pathlib import Path
 from datetime import datetime, timezone
@@ -22,13 +23,10 @@ from .collector import (
     update_session,
     _connection_history,
 )
+from .webui.router import create_webui_router
 
 require("nonebot_plugin_localstore")
 store = __import__("nonebot_plugin_localstore")
-
-# ────────────────────────────────
-# Plugin metadata (rule 4)
-# ────────────────────────────────
 
 __plugin_meta__ = PluginMetadata(
     name="RuOK",
@@ -289,7 +287,7 @@ async def _cmd_admin(bot: Bot, event: Event, action: str, rest: str) -> None:
 
 driver = get_driver()
 
-# CORS — at module level before uvicorn starts (must follow driver init)
+# CORS + SessionMiddleware — at module level before uvicorn starts
 if isinstance(driver, ASGIMixin):
     try:
         from fastapi import FastAPI
@@ -306,6 +304,18 @@ if isinstance(driver, ASGIMixin):
             logger.info("RuOK CORS middleware registered")
     except Exception as exc:
         logger.warning(f"RuOK CORS setup failed: {exc}")
+
+    # SessionMiddleware — always added for request.session support.
+    # Auth gating (enabled/disabled) is handled at route level via require_login().
+    try:
+        from starlette.middleware.sessions import SessionMiddleware
+
+        app_raw2 = driver.server_app
+        if isinstance(app_raw2, FastAPI):
+            app_raw2.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(32))
+            logger.info("RuOK SessionMiddleware registered")
+    except Exception as exc:
+        logger.warning(f"RuOK SessionMiddleware setup failed: {exc}")
 
 
 @driver.on_bot_connect
@@ -336,38 +346,32 @@ async def _on_bot_disconnect(bot: Bot):
 @driver.on_startup
 async def _startup():
     if isinstance(driver, ASGIMixin):
-        try:
-            app = driver.server_app
+        app = driver.server_app
 
-            # API routes
+        # Auth router (login/logout)
+        try:
+            from .webui.auth import WebUIAuth
+
+            auth = WebUIAuth(plugin_config.webui_password)
+            auth_router = auth.create_router()
+            app.include_router(auth_router)
+            logger.info("RuOK Auth routes mounted")
+        except Exception as exc:
+            logger.warning(f"RuOK Auth mount failed: {exc}")
+
+        try:
             router = create_ruok_router(plugin_config, data_dir)
             app.include_router(router)
-
-            # WebUI via HTTPServerSetup (NoneBot-native)
-            from nonebot.drivers import URL, Request, Response, HTTPServerSetup
-
-            webui_index = Path(__file__).parent / "webui" / "dist" / "index.html"
-            _webui_html = (
-                webui_index.read_text(encoding="utf-8")
-                if webui_index.exists()
-                else "<h1>RuOK WebUI not found</h1>"
-            )
-
-            async def _webui_handler(request: Request) -> Response:
-                return Response(
-                    200,
-                    content=_webui_html,
-                    headers={"Content-Type": "text/html; charset=utf-8"},
-                )
-
-            driver.setup_http_server(
-                HTTPServerSetup(URL("/ruok"), "GET", "ruok_webui", _webui_handler)
-            )
-
-            logger.info("RuOK WebUI: /ruok → index.html")
             logger.info("RuOK API mounted at /ruok/api/*")
         except Exception as exc:
             logger.warning(f"RuOK API mount failed: {exc}")
+
+        try:
+            webui_router = create_webui_router(plugin_config, data_dir)
+            app.include_router(webui_router)
+            logger.info("RuOK WebUI SSR mounted at /ruok")
+        except Exception as exc:
+            logger.warning(f"RuOK WebUI mount failed: {exc}")
     else:
         logger.info("RuOK: non-ASGI driver, skipping API/WebUI mount")
 
