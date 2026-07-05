@@ -56,17 +56,17 @@ class WebUIAuth:
         """Build login/logout routes."""
         router = APIRouter(tags=["ruok-auth"])
 
-        @router.get("/ruok/login", response_class=HTMLResponse)
-        async def login_page(request: Request) -> HTMLResponse:
+        @router.get("/ruok/login", response_class=HTMLResponse, response_model=None)
+        async def login_page(request: Request) -> HTMLResponse | RedirectResponse:
             # Already logged in?
             if request.session.get(self._session_key):
                 return RedirectResponse(url="/ruok", status_code=302)
             return render("login.html.jinja2", request=request)
 
-        @router.post("/ruok/login")
+        @router.post("/ruok/login", response_model=None)
         async def login_action(
             request: Request, password: str = Form(...)
-        ) -> HTMLResponse:
+        ) -> HTMLResponse | RedirectResponse:
             if verify_password(password, self._password_hash):
                 request.session[self._session_key] = True
                 return RedirectResponse(url="/ruok", status_code=302)

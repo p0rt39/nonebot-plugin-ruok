@@ -215,15 +215,14 @@ async def _send_webhook(rule: NotificationRule, session: Session) -> None:
 # ────────────────────────────────
 
 
-def dispatch_notification(
+async def dispatch_notification(
     session: Session,
     config: ScopedConfig,
     data_dir: Path,
 ) -> None:
     """Evaluate rules and send notifications for a new/updated session.
 
-    Must be called from an async context (e.g. event loop).
-    Dispatches asyncio tasks for webhook sends to avoid blocking.
+    Must be called from an async context.
     """
     if not config.auto_session_enabled:
         return
@@ -235,17 +234,13 @@ def dispatch_notification(
 
     cooldowns = _load_cooldowns(data_dir)
 
+    tasks: list[asyncio.Task[Any]] = []
     for rule in matching:
-        # Cooldown key: per-rule + per-module (so different modules can
-        # trigger the same rule independently within cooldown window).
         cooldown_key = f"{rule.name}:{session.module_name}"
         if _is_cooling_down(cooldown_key, rule.cooldown_minutes, cooldowns):
             continue
-
-        # Fire and update cooldown
         _update_cooldown(cooldown_key, cooldowns, data_dir)
 
-        tasks: list[asyncio.Task[Any]] = []
         for channel in rule.channels:
             if channel == "bot_dm":
                 tasks.append(asyncio.create_task(_send_bot_dm(session)))
@@ -253,6 +248,9 @@ def dispatch_notification(
                 tasks.append(asyncio.create_task(_send_webhook(rule, session)))
             else:
                 logger.warning(f"RuOK: unknown notification channel: {channel}")
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # ────────────────────────────────

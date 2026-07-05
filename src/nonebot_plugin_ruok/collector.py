@@ -86,9 +86,11 @@ __all__ = [
 # ────────────────────────────────
 
 
-def _notify_new_session(session: Session, config: ScopedConfig, data_dir: Path) -> None:
+async def _notify_new_session(
+    session: Session, config: ScopedConfig, data_dir: Path
+) -> None:
     """Send notifications for a new session via the rule engine."""
-    dispatch_notification(session, config, data_dir)
+    await dispatch_notification(session, config, data_dir)
 
 
 # ────────────────────────────────

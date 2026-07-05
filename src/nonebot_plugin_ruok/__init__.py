@@ -183,7 +183,7 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
     if plugin_config.notify_superusers:
         from .collector import _notify_new_session
 
-        _notify_new_session(session, plugin_config, data_dir)
+        await _notify_new_session(session, plugin_config, data_dir)
     display = resolved.display_name if resolved is not None else user_input
     await ruok_cmd.finish(
         f"📝 已记录 | Session: {session.session_id}\n"
@@ -337,7 +337,13 @@ if isinstance(driver, ASGIMixin):
         try:
             from starlette.middleware.sessions import SessionMiddleware
 
-            app.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(32))
+            secret = plugin_config.webui_secret_key or secrets.token_hex(32)
+            if not plugin_config.webui_secret_key:
+                logger.warning(
+                    "RuOK: webui_secret_key not set — sessions invalidate on restart. "
+                    "Set RUOK__WEBUI_SECRET_KEY in .env for persistence."
+                )
+            app.add_middleware(SessionMiddleware, secret_key=secret)
             logger.info("RuOK SessionMiddleware registered")
         except (ImportError, RuntimeError) as exc:
             logger.warning(f"RuOK SessionMiddleware setup failed: {exc}")

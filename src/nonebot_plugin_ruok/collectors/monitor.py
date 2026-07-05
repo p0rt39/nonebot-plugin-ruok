@@ -132,7 +132,11 @@ class _StdlibLogHandler(logging.Handler):
             _save_session(self._data_dir, session)
             logger.warning(f"RuOK: new session {session.session_id} for {plugin_id}")
         except Exception:
-            pass  # logging handler must never raise
+            # logging handler must never raise — try best-effort logging
+            try:
+                logger.exception("RuOK LogMonitor: stdlib handler failed")
+            except Exception:
+                pass  # cannot even log, give up silently
 
 
 def _make_log_sink(
@@ -188,6 +192,8 @@ def _make_log_sink(
             # Late import to avoid circular dependency
             from ..collector import _notify_new_session
 
-            loop.call_soon_threadsafe(_notify_new_session, session, config, data_dir)
+            asyncio.run_coroutine_threadsafe(
+                _notify_new_session(session, config, data_dir), loop
+            )
 
     return _sink

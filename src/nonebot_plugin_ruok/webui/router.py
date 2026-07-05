@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import asyncio
 from typing import Any
 from pathlib import Path
 from datetime import datetime
 
 from fastapi import Form, Depends, Request, APIRouter
-from nonebot import logger
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
@@ -375,7 +373,9 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     # ── HTMX partials ────────────
 
     @router.get("/ruok/_partials/modules", response_class=HTMLResponse)
-    async def partial_modules(request: Request) -> HTMLResponse:
+    async def partial_modules(
+        request: Request, _guard_ok=Depends(_webui_guard)
+    ) -> HTMLResponse:
         try:
             modules = list_modules(data_dir, config)
             return render(
@@ -398,6 +398,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         plugin: str = "",
         after: str = "",
         before: str = "",
+        _guard_ok=Depends(_webui_guard),
     ) -> HTMLResponse:
         try:
             first_seen_after = datetime.fromisoformat(after) if after else None
@@ -433,6 +434,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         module_name: str = Form(""),
         module_name_custom: str = Form(""),
         description: str = Form(""),
+        _guard_ok=Depends(_webui_guard),
     ) -> HTMLResponse:
         """Create a session from the WebUI manual report form."""
         name = module_name_custom.strip() or module_name.strip()
@@ -453,7 +455,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             # Dispatch notifications for the new session
             from ..collectors.notifications import dispatch_notification
 
-            dispatch_notification(session, config, data_dir)
+            await dispatch_notification(session, config, data_dir)
             # Refresh session list
             sessions = list_sessions(data_dir)
             stats = get_session_stats(data_dir)
@@ -717,38 +719,16 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     # ── Notification rules CRUD ──
 
     def _load_notification_rules() -> list[NotificationRule]:
-        """Load notification rules from data file, merging config defaults."""
-        from ..protocol import NotificationRule
+        """Load notification rules — delegates to collectors/notifications.py."""
+        from ..collectors.notifications import _load_rules
 
-        file_rules: list[dict] = []
-        rules_file = data_dir / "notification_rules.json"
-        if rules_file.exists():
-            try:
-                file_rules = json.loads(rules_file.read_text("utf-8"))
-            except (json.JSONDecodeError, OSError, ValueError) as exc:
-                logger.warning(f"RuOK WebUI: load notification rules failed: {exc}")
-                file_rules = []
-            except Exception as exc:
-                _handle_ruok_error(exc, "_load_notification_rules", data_dir)
-                file_rules = []
-        # Merge: file rules override config rules by name
-        config_rules = [r.model_dump(mode="json") for r in config.notification_rules]
-        merged: dict[str, dict] = {r["name"]: r for r in config_rules}
-        for r in file_rules:
-            merged[r["name"]] = r
-        return [NotificationRule(**r) for r in merged.values()]
+        return _load_rules(data_dir, config)
 
     def _save_notification_rules(rules: list[NotificationRule]) -> None:
-        """Persist notification rules to data file."""
+        """Persist notification rules — delegates to collectors/notifications.py."""
+        from ..collectors.notifications import _save_rules
 
-        rules_file = data_dir / "notification_rules.json"
-        rules_file.parent.mkdir(parents=True, exist_ok=True)
-        rules_file.write_text(
-            json.dumps(
-                [r.model_dump(mode="json") for r in rules], indent=2, ensure_ascii=False
-            ),
-            encoding="utf-8",
-        )
+        _save_rules(data_dir, rules)
 
     @router.post("/ruok/_actions/notification-upsert")
     async def action_notification_upsert(
