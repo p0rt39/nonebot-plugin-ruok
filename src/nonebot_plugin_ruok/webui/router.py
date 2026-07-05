@@ -16,7 +16,12 @@ from .sse import event_bus, sse_event_generator
 from .auth import WebUIAuth
 from .jinja import render
 from ..config import ScopedConfig
-from ..protocol import ReporterInfo, ModuleDefinition
+from ..protocol import (
+    NetworkRate,
+    ReporterInfo,
+    ModuleDefinition,
+    FastMetricsSnapshot,
+)
 from ..collector import (
     get_session,
     list_modules,
@@ -106,24 +111,20 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
         # Initial data for full page render
         try:
-            fm = await collect_fast_metrics()
-            nr = _network_tracker.get_rate()
+            metrics_snap = await collect_fast_metrics()
+            net_rate = _network_tracker.get_rate()
         except Exception:
-            from ..protocol import (  # noqa: I001
-                FastMetricsSnapshot,
-                NetworkRate,
-            )
-            fm = FastMetricsSnapshot()
-            nr = NetworkRate()
+            metrics_snap = FastMetricsSnapshot()
+            net_rate = NetworkRate()
         return render(
             "dashboard.html.jinja2",
             request=request,
             status=status,
             modules=modules,
             stats=stats,
-            metrics=fm,
-            net_up=nr.bytes_sent_per_sec,
-            net_down=nr.bytes_recv_per_sec,
+            metrics=metrics_snap,
+            net_up=net_rate.bytes_sent_per_sec,
+            net_down=net_rate.bytes_recv_per_sec,
         )
 
     @router.get("/ruok/sessions", response_class=HTMLResponse)

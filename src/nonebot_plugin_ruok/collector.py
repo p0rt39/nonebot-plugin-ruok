@@ -28,6 +28,7 @@ from .protocol import (
     ReporterInfo,
     SessionStats,
     StatusResult,
+    SessionSource,
     ProcessSnapshot,
     AggregatedStatus,
     ModuleDefinition,
@@ -881,18 +882,18 @@ def create_session(
     module_name: str,
     description: str,
     reporter: ReporterInfo,
-    source: str = "manual",
+    source: SessionSource = "manual",
 ) -> Session:
     session = Session(
         session_id=_gen_session_id(),
-        source=source,  # type: ignore[arg-type]
+        source=source,
         status="pending",
         module_name=module_name,
         reporter=reporter,
         description=description,
         occurrences=[
             Occurrence(
-                source=source,  # type: ignore[arg-type]
+                source=source,
             )
         ],
     )

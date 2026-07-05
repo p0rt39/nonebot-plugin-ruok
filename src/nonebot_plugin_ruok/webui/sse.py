@@ -99,36 +99,36 @@ async def sse_event_generator(
             """
             nonlocal _latest_metrics, _cached_proc
             try:
-                fm = await collect_fast_metrics()
-                nr = _network_tracker.get_rate()
-                disk_agg, disk_per = _disk_tracker.get_rate()
+                metrics_snap = await collect_fast_metrics()
+                net_rate = _network_tracker.get_rate()
+                disk_io, disk_per = _disk_tracker.get_rate()
 
                 metrics: dict[str, Any] = {
-                    "cpu": fm.cpu_percent,
-                    "cpu_cores": fm.cpu_per_core,
-                    "mem_pct": fm.memory_percent,
-                    "mem_used": fm.memory_used,
-                    "mem_total": fm.memory_total,
-                    "swap_pct": fm.swap_percent,
-                    "swap_used": fm.swap_used,
-                    "swap_total": fm.swap_total,
-                    "load_1m": fm.load_1m,
-                    "load_5m": fm.load_5m,
-                    "load_15m": fm.load_15m,
-                    "procs": fm.process_count,
-                    "uptime": fm.uptime_seconds,
-                    "boot_time": fm.boot_time_epoch,
-                    "bot_start_time": fm.bot_process_create_time,
-                    "bot_rss": fm.bot_rss_bytes,
-                    "cpu_temp": fm.cpu_temp,
-                    "net_up": nr.bytes_sent_per_sec,
-                    "net_down": nr.bytes_recv_per_sec,
-                    "net_packets_up": nr.packets_sent_per_sec,
-                    "net_packets_down": nr.packets_recv_per_sec,
-                    "disk_read": disk_agg.read_bytes_per_sec,
-                    "disk_write": disk_agg.write_bytes_per_sec,
-                    "disk_read_count": disk_agg.read_count_per_sec,
-                    "disk_write_count": disk_agg.write_count_per_sec,
+                    "cpu": metrics_snap.cpu_percent,
+                    "cpu_cores": metrics_snap.cpu_per_core,
+                    "mem_pct": metrics_snap.memory_percent,
+                    "mem_used": metrics_snap.memory_used,
+                    "mem_total": metrics_snap.memory_total,
+                    "swap_pct": metrics_snap.swap_percent,
+                    "swap_used": metrics_snap.swap_used,
+                    "swap_total": metrics_snap.swap_total,
+                    "load_1m": metrics_snap.load_1m,
+                    "load_5m": metrics_snap.load_5m,
+                    "load_15m": metrics_snap.load_15m,
+                    "procs": metrics_snap.process_count,
+                    "uptime": metrics_snap.uptime_seconds,
+                    "boot_time": metrics_snap.boot_time_epoch,
+                    "bot_start_time": metrics_snap.bot_process_create_time,
+                    "bot_rss": metrics_snap.bot_rss_bytes,
+                    "cpu_temp": metrics_snap.cpu_temp,
+                    "net_up": net_rate.bytes_sent_per_sec,
+                    "net_down": net_rate.bytes_recv_per_sec,
+                    "net_packets_up": net_rate.packets_sent_per_sec,
+                    "net_packets_down": net_rate.packets_recv_per_sec,
+                    "disk_read": disk_io.read_bytes_per_sec,
+                    "disk_write": disk_io.write_bytes_per_sec,
+                    "disk_read_count": disk_io.read_count_per_sec,
+                    "disk_write_count": disk_io.write_count_per_sec,
                 }
 
                 # Per-disk rates (lightweight, always collect)
@@ -139,13 +139,14 @@ async def sse_event_generator(
 
                 # Process snapshot (heavy — only on full cycles, ~3s cadence)
                 if full:
-                    ps_snap = await collect_process_snapshot()
+                    proc_snapshot = await collect_process_snapshot()
                     _cached_proc = {
-                        "bot_vms": ps_snap.bot_vms,
-                        "bot_threads": ps_snap.bot_threads,
-                        "bot_cpu": ps_snap.bot_cpu_percent,
+                        "bot_vms": proc_snapshot.bot_vms,
+                        "bot_threads": proc_snapshot.bot_threads,
+                        "bot_cpu": proc_snapshot.bot_cpu_percent,
                         "top_processes": [
-                            p.model_dump(mode="json") for p in ps_snap.top_processes
+                            p.model_dump(mode="json")
+                            for p in proc_snapshot.top_processes
                         ],
                     }
                 # Always include process data (fresh or cached)
