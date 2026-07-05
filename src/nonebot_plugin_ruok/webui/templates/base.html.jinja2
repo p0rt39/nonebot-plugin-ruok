@@ -165,6 +165,22 @@
         .metric-label { font-size: 0.85em; color: var(--pico-muted-color); }
         .auto-refresh { opacity: 0.5; font-size: 0.75em; }
 
+        /* ── Info chips (run info row) ── */
+        .info-chip {
+            background: var(--glass-bg) !important; backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border) !important;
+            border-radius: var(--radius-sm) !important;
+            padding: 0.5rem 1rem; white-space: nowrap;
+        }
+
+        /* ── Gauge cards ── */
+        .gauge-card {
+            background: var(--glass-bg) !important; backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border) !important;
+            border-radius: var(--radius-md) !important;
+            box-shadow: var(--shadow-sm);
+        }
+
         /* ── Occurrence list ── */
         .occurrence-list { max-height: 300px; overflow-y: auto; font-size: 0.85em; }
         .occurrence-list pre {

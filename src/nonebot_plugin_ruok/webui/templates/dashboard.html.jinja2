@@ -6,23 +6,23 @@
 
 {% block content %}
 
-<!-- Hero — SSE every ~1s (idiomorph patches only changed text) -->
+<!-- Hero — SSE status event triggers HTMX refresh -->
 <div id="dashboard-hero" hx-ext="morph"
      hx-get="/ruok?_partial=dashboard-hero" hx-trigger="load" hx-swap="innerHTML">
     {% include "_dashboard_hero.html.jinja2" %}
 </div>
 
-<!-- Gauges — polling 3s -->
+<!-- Gauges — initial render via HTMX, then SSE metrics update DOM directly -->
 <div id="dashboard-gauges"
      hx-get="/ruok?_partial=dashboard-gauges"
-     hx-trigger="load, every 3s" hx-swap="innerHTML">
+     hx-trigger="load" hx-swap="innerHTML">
     {% include "_dashboard_gauges.html.jinja2" %}
 </div>
 
-<!-- Info row — polling 3s -->
+<!-- Info row — initial render via HTMX, then SSE metrics update DOM directly -->
 <div id="dashboard-info"
      hx-get="/ruok?_partial=dashboard-info"
-     hx-trigger="load, every 3s" hx-swap="innerHTML">
+     hx-trigger="load" hx-swap="innerHTML">
     {% include "_dashboard_info.html.jinja2" %}
 </div>
 
@@ -49,18 +49,115 @@
 <script>
 (function() {
     var src = new EventSource('/ruok/sse');
-    src.addEventListener('status', function() {
-        htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
-            { target: '#dashboard-hero', swap: 'innerHTML' });
+    var lastOverall = '';
+    var tickTimer = null;
+
+    // ── status event: only refresh hero when overall changes ──
+    src.addEventListener('status', function(e) {
+        try {
+            var d = JSON.parse(e.data);
+            if (d.overall !== lastOverall) {
+                lastOverall = d.overall;
+                htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
+                    { target: '#dashboard-hero', swap: 'innerHTML' });
+            }
+        } catch(_) {}
     });
-    src.addEventListener('tick', function() {
-        htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
-            { target: '#dashboard-hero', swap: 'innerHTML' });
+
+    // ── tick event: only update timestamp text (no HTTP request) ──
+    src.addEventListener('tick', function(e) {
+        try {
+            var d = JSON.parse(e.data);
+            if (d.overall !== lastOverall) {
+                lastOverall = d.overall;
+                htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
+                    { target: '#dashboard-hero', swap: 'innerHTML' });
+            }
+            // Update the UTC timestamp text in the hero banner
+            var tsEl = document.querySelector('#dashboard-hero .hero-ts');
+            if (tsEl && d.timestamp) {
+                tsEl.textContent = new Date(d.timestamp).toISOString()
+                    .replace('T', ' ').replace(/\.\d+/, '') + ' UTC';
+            }
+        } catch(_) {}
     });
+
+    // ── metrics event: update gauges & info directly via DOM ──
+    src.addEventListener('metrics', function(e) {
+        try {
+            var m = JSON.parse(e.data);
+
+            // Helper: color based on value
+            function clr(v) { return v < 70 ? '#2ecc40' : v < 90 ? '#ffdc00' : '#ff4136'; }
+
+            // Update SVG gauge circles
+            [{id:'cpu', v:m.cpu}, {id:'mem', v:m.mem_pct}, {id:'swap', v:m.swap_pct}].forEach(function(g) {
+                var svg = document.querySelector('#gauge-' + g.id);
+                var circle = document.querySelector('#gauge-' + g.id + '-arc');
+                var text = document.querySelector('#gauge-' + g.id + '-val');
+                if (circle) {
+                    var dash = (g.v * Math.PI).toFixed(1);
+                    circle.setAttribute('stroke-dasharray', dash + ' 314.159');
+                    circle.setAttribute('stroke', clr(g.v));
+                }
+                if (text) text.textContent = Math.round(g.v) + '%';
+            });
+
+            // Update memory detail
+            var memDetail = document.getElementById('mem-detail');
+            if (memDetail) {
+                memDetail.textContent = '内存: ' + fmtBytes(m.mem_used) + ' / ' + fmtBytes(m.mem_total) +
+                    (m.swap_total > 0 ? ' | Swap: ' + fmtBytes(m.swap_used) + ' / ' + fmtBytes(m.swap_total) : '');
+            }
+
+            // Update info chips
+            var loadEl = document.getElementById('info-load');
+            if (loadEl && m.load_1m != null) {
+                loadEl.textContent = '⚖️ Load: ' + m.load_1m.toFixed(2) + ' / ' + m.load_5m.toFixed(2) + ' / ' + m.load_15m.toFixed(2);
+            }
+            var procEl = document.getElementById('info-procs');
+            if (procEl) procEl.textContent = '🔧 进程: ' + m.procs;
+            var netEl = document.getElementById('info-net');
+            if (netEl) netEl.textContent = '🌐 ⬆ ' + fmtBytes(m.net_up) + '/s ⬇ ' + fmtBytes(m.net_down) + '/s';
+            var upEl = document.getElementById('info-uptime');
+            if (upEl && m.uptime != null) {
+                var d = Math.floor(m.uptime / 86400);
+                var h = Math.floor((m.uptime % 86400) / 3600);
+                var min = Math.floor((m.uptime % 3600) / 60);
+                var s = Math.floor(m.uptime % 60);
+                upEl.textContent = '⏱️ ' + (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + min + 'm ' + s + 's';
+            }
+
+            // Update CPU core indicators
+            if (m.cpu_cores && m.cpu_cores.length > 1) {
+                var cores = document.querySelectorAll('#cpu-cores span');
+                m.cpu_cores.slice(0, cores.length).forEach(function(core, i) {
+                    if (cores[i]) {
+                        cores[i].style.background = clr(core);
+                        cores[i].style.opacity = 0.2 + core / 150;
+                        cores[i].title = 'Core ' + i + ': ' + Math.round(core) + '%';
+                    }
+                });
+            }
+        } catch(_) {}
+    });
+
+    // ── session_update: refresh stats + pie chart ──
     src.addEventListener('session_update', function() {
         htmx.ajax('GET', '/ruok?_partial=dashboard-stats',
             { target: '#dashboard-stats', swap: 'innerHTML' });
     });
+
+    // ── byte formatter for JS ──
+    function fmtBytes(n) {
+        if (n < 1024) return Math.round(n) + ' B';
+        if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+        if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+        return (n / 1073741824).toFixed(2) + ' GB';
+    }
+
+    // ── Cleanup on page unload ──
+    window.addEventListener('beforeunload', function() { src.close(); });
 })();
 </script>
 

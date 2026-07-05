@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from ..collector import (
     _network_tracker,
@@ -35,11 +35,19 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     router = APIRouter(tags=["ruok-webui"])
     auth = WebUIAuth(config.webui_password)
 
-    # ── SSE endpoint (before auth — or optional auth) ──
+    # ── SSE endpoint ──
 
     @router.get("/ruok/sse")
-    async def sse_stream():
-        """Server-Sent Events stream for real-time dashboard updates."""
+    async def sse_stream(request: Request):
+        """Server-Sent Events stream for real-time dashboard updates.
+
+        Respects WebUI auth unless config.sse_public is True.
+        """
+        if auth.enabled and not config.sse_public:
+            if not await auth.require_login(request):
+                return JSONResponse(
+                    {"detail": "Unauthorized"}, status_code=401
+                )
 
         async def collect_fn():
             return await collect_all_statuses(config, data_dir)

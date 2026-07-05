@@ -2,23 +2,15 @@
 <h3>📋 运行信息</h3>
 <div style="display:flex; gap:1rem; flex-wrap:wrap; font-size:0.9em;">
     {% if metrics.load_1m is not none %}
-    <article class="info-chip">
+    <article id="info-load" class="info-chip">
         ⚖️ Load: {{ "%.2f"|format(metrics.load_1m) }} / {{ "%.2f"|format(metrics.load_5m) }} / {{ "%.2f"|format(metrics.load_15m) }}
     </article>
     {% else %}
-    <article class="info-chip">⚖️ Load: N/A (Windows)</article>
+    <article id="info-load" class="info-chip">⚖️ Load: N/A (Windows)</article>
     {% endif %}
-    <article class="info-chip">🔧 进程: {{ metrics.process_count }}</article>
-    <article class="info-chip">
+    <article id="info-procs" class="info-chip">🔧 进程: {{ metrics.process_count }}</article>
+    <article id="info-net" class="info-chip">
         🌐 ⬆ {{ net_up|_fmt_bytes_s }}/s ⬇ {{ net_down|_fmt_bytes_s }}/s
     </article>
-    <article class="info-chip">⏱️ {{ metrics.uptime_seconds|_fmt_uptime_s }}</article>
+    <article id="info-uptime" class="info-chip">⏱️ {{ metrics.uptime_seconds|_fmt_uptime_s }}</article>
 </div>
-<style>
-    .info-chip {
-        background: var(--glass-bg) !important; backdrop-filter: blur(12px);
-        border: 1px solid var(--glass-border) !important;
-        border-radius: var(--radius-sm) !important;
-        padding: 0.5rem 1rem; white-space: nowrap;
-    }
-</style>

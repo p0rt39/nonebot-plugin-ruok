@@ -27,6 +27,7 @@ class ScopedConfig(BaseModel):
     cors_origins: list[str] = ["*"]
     api_key: str = ""
     webui_password: str = ""  # 空字符串 = 不启用 WebUI 登录认证
+    sse_public: bool = False  # True 时 SSE 端点不需要登录
 
     # ── Time-series metrics ──
     metrics_retention_days: int = 7

@@ -8,16 +8,16 @@
         {"id":"swap","label":"Swap","pct":metrics.swap_percent},
     ] %}
     <article class="gauge-card" style="text-align:center; padding:1rem; min-width:150px;">
-        <svg viewBox="0 0 120 120" style="width:120px;height:120px;">
+        <svg viewBox="0 0 120 120" style="width:120px;height:120px;" id="gauge-{{ g.id }}">
             <circle cx="60" cy="60" r="50" fill="none"
                     stroke="rgba(0,0,0,0.08)" stroke-width="10"/>
-            <circle cx="60" cy="60" r="50" fill="none"
+            <circle id="gauge-{{ g.id }}-arc" cx="60" cy="60" r="50" fill="none"
                     stroke="{% if g.pct < 70 %}#2ecc40{% elif g.pct < 90 %}#ffdc00{% else %}#ff4136{% endif %}" stroke-width="10"
                     stroke-linecap="round"
                     stroke-dasharray="{{ (g.pct * 3.14159)|round(1) }} 314.159"
                     transform="rotate(-90 60 60)"
                     style="transition: stroke-dasharray 0.9s ease, stroke 0.9s ease;"/>
-            <text x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--pico-color)">{{ "%.0f"|format(g.pct) }}%</text>
+            <text id="gauge-{{ g.id }}-val" x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--pico-color)">{{ "%.0f"|format(g.pct) }}%</text>
             <text x="60" y="73" text-anchor="middle" font-size="11" fill="var(--pico-muted-color)">{{ g.label }}</text>
         </svg>
     </article>
@@ -25,13 +25,13 @@
 </div>
 
 <!-- Memory detail row -->
-<div style="text-align:center; font-size:0.8em; color:var(--pico-muted-color); margin-top:0.3rem;">
+<div id="mem-detail" style="text-align:center; font-size:0.8em; color:var(--pico-muted-color); margin-top:0.3rem;">
     内存: {{ metrics.memory_used|_fmt_bytes_s }} / {{ metrics.memory_total|_fmt_bytes_s }}
     {% if metrics.swap_total > 0 %} | Swap: {{ metrics.swap_used|_fmt_bytes_s }} / {{ metrics.swap_total|_fmt_bytes_s }}{% endif %}
 </div>
 
 {% if metrics.cpu_per_core|length > 1 %}
-<div style="display:flex; gap:3px; justify-content:center; margin-top:0.5rem;">
+<div id="cpu-cores" style="display:flex; gap:3px; justify-content:center; margin-top:0.5rem;">
     {% for core in metrics.cpu_per_core[:16] %}
     <span title="Core {{ loop.index0 }}: {{ '%.0f'|format(core) }}%"
           style="width:14px;height:14px;border-radius:2px;flex-shrink:0;
@@ -40,17 +40,3 @@
     {% endfor %}
 </div>
 {% endif %}
-
-<script>
-(function(){
-    function c(v){ return v<70?'#2ecc40':v<90?'#ffdc00':'#ff4136'; }
-    document.documentElement.style.setProperty('--gc-cpu', c({{ metrics.cpu_percent }}));
-    document.documentElement.style.setProperty('--gc-mem', c({{ metrics.memory_percent }}));
-    document.documentElement.style.setProperty('--gc-swap', c({{ metrics.swap_percent }}));
-})();
-</script>
-<style>
-    .gauge-card { background: var(--glass-bg) !important; backdrop-filter: blur(16px);
-                  border: 1px solid var(--glass-border) !important; border-radius: var(--radius-md) !important;
-                  box-shadow: var(--shadow-sm); }
-</style>
