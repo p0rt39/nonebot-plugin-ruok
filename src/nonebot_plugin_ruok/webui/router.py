@@ -780,8 +780,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=500,
             )
         return render(
-            "notifications.html.jinja2",
-            request=request,
+            "_notifications_list.html.jinja2",
             rules=rules,
             headers={"HX-Trigger": '{"toast":"Rule saved","toastType":"success"}'},
         )
@@ -802,8 +801,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=500,
             )
         return render(
-            "notifications.html.jinja2",
-            request=request,
+            "_notifications_list.html.jinja2",
             rules=rules,
             headers={"HX-Trigger": '{"toast":"Rule deleted","toastType":"info"}'},
         )

@@ -51,63 +51,6 @@
     </form>
 </details>
 
-<div id="notifications-container">
-{% if rules %}
-<div class="card-grid">
-    {% for rule in rules %}
-    <article>
-        <header>
-            <strong>{{ rule.name }}</strong>
-            <span class="badge badge-{% if rule.enabled %}ok{% else %}error{% endif %}">
-                {{ '启用' if rule.enabled else '禁用' }}
-            </span>
-        </header>
-        <table>
-            <tr>
-                <td><strong>触发状态</strong></td>
-                <td>
-                    {% for s in rule.on_status %}
-                    <span class="badge badge-{% if s == 'solved' %}ok{% elif s in ('pending','unsolved') %}warn{% else %}error{% endif %}">
-                        {{ s }}
-                    </span>
-                    {% endfor %}
-                </td>
-            </tr>
-            <tr>
-                <td><strong>适用模块</strong></td>
-                <td>{{ rule.on_module | join(', ') if rule.on_module else '全部' }}</td>
-            </tr>
-            <tr>
-                <td><strong>冷却时间</strong></td>
-                <td>{{ rule.cooldown_minutes }} 分钟</td>
-            </tr>
-            <tr>
-                <td><strong>通道</strong></td>
-                <td>{{ rule.channels | join(', ') }}</td>
-            </tr>
-            {% if rule.webhook_url %}
-            <tr>
-                <td><strong>Webhook</strong></td>
-                <td><code>{{ rule.webhook_url[:50] }}{% if rule.webhook_url|length > 50 %}...{% endif %}</code></td>
-            </tr>
-            {% endif %}
-        </table>
-        <footer>
-            <button class="outline secondary" style="font-size:0.8em;"
-                    hx-post="/ruok/_actions/notification-delete/{{ rule.name }}"
-                    hx-target="#notifications-container" hx-swap="outerHTML"
-                    hx-confirm="确定删除规则「{{ rule.name }}」？">
-                🗑️ 删除
-            </button>
-        </footer>
-    </article>
-    {% endfor %}
-</div>
-{% else %}
-<article>
-    <p>🎉 暂无通知规则。使用上方表单添加。</p>
-</article>
-{% endif %}
-</div>
+{% include "_notifications_list.html.jinja2" %}
 
 {% endblock %}
