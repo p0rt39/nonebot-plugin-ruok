@@ -1108,13 +1108,42 @@ def _modules_path(data_dir: Path) -> Path:
     return data_dir / "modules.json"
 
 
-def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]:
-    """Return all defined modules with real-time derived status."""
-    path = _modules_path(data_dir)
-    if not path.exists():
-        return []
+def _path_write_json(path: Path, data: list[dict[str, Any]]) -> None:
+    """Write JSON data to path, creating parent directories as needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    modules = [ModuleDefinition.model_validate(m) for m in json.loads(path.read_text("utf-8"))]
+
+def _builtin_module() -> ModuleDefinition:
+    """Return the built-in RuOK self-monitoring module."""
+    return ModuleDefinition(
+        name="ruok",
+        display_name="RuOK",
+        description="RuOK 插件自身 — 监控系统健康状态",
+        plugins=[],
+        enabled=True,
+    )
+
+
+def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]:
+    """Return all defined modules with real-time derived status.
+
+    Always includes a built-in «ruok» module representing RuOK itself.
+    On first run, this module is persisted to modules.json.
+    """
+    path = _modules_path(data_dir)
+    modules: list[ModuleDefinition] = []
+    if path.exists():
+        try:
+            modules = [ModuleDefinition.model_validate(m) for m in json.loads(path.read_text("utf-8"))]
+        except (json.JSONDecodeError, TypeError):
+            modules = []
+
+    has_builtin = any(m.name == "ruok" for m in modules)
+    if not has_builtin:
+        modules.insert(0, _builtin_module())
+        _path_write_json(path, [m.model_dump() for m in modules])
+
     for mod in modules:
         mod.status = derive_module_status(data_dir, mod.name)
     return modules
