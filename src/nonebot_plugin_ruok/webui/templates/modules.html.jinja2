@@ -25,8 +25,16 @@
             <input type="text" name="description" placeholder="可选描述">
         </label>
         <label>
-            关联插件 (逗号分隔)
-            <input type="text" name="plugins" placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">
+            关联插件 (逗号分隔，可输入筛选)
+            <input type="text" name="plugins" list="plugin-list"
+                   placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">
+            {% if all_plugins %}
+            <datalist id="plugin-list">
+                {% for p in all_plugins %}
+                <option value="{{ p }}">
+                {% endfor %}
+            </datalist>
+            {% endif %}
         </label>
         <button type="submit">保存</button>
     </form>

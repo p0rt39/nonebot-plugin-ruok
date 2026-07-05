@@ -41,6 +41,7 @@ from ..collector import (
     get_linked_sessions,
     collect_all_statuses,
     collect_fast_metrics,
+    _collect_plugin_inventory,
 )
 
 
@@ -214,7 +215,15 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def page_modules(request: Request, _guard_ok=Depends(_webui_guard)):
         try:
             modules = list_modules(data_dir, config)
-            return render("modules.html.jinja2", request=request, modules=modules)
+            # Gather loaded plugin names for datalist suggestions
+            all_plugins = _collect_plugin_inventory()
+            plugin_names = [p.name for p in all_plugins]
+            return render(
+                "modules.html.jinja2",
+                request=request,
+                modules=modules,
+                all_plugins=plugin_names,
+            )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_modules", data_dir)
             return HTMLResponse(
