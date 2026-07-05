@@ -10,6 +10,7 @@
     </ul>
 </nav>
 
+<div id="session-detail-content">
 <!-- Basic Info Card -->
 <article>
     <header>
@@ -132,26 +133,32 @@
         {% if session.status == 'pending' %}
         <button class="secondary"
                 hx-post="/ruok/_actions/confirm/{{ session.session_id }}"
-                hx-swap="none"
-                onclick="setTimeout(() => location.reload(), 300)">
+                hx-target="#session-detail-content"
+                hx-swap="outerHTML"
+                hx-get="/ruok/sessions/{{ session.session_id }}"
+                hx-trigger="click"
+                hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
             ✅ 确认 (pending → unsolved)
         </button>
         {% endif %}
         <button class="secondary"
                 hx-post="/ruok/_actions/solve/{{ session.session_id }}"
-                hx-swap="none"
-                onclick="setTimeout(() => location.reload(), 300)">
+                hx-target="#session-detail-content"
+                hx-swap="outerHTML"
+                hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
             🟢 解决
         </button>
         <button class="contrast"
                 hx-post="/ruok/_actions/ignore/{{ session.session_id }}"
-                hx-swap="none"
-                onclick="setTimeout(() => location.reload(), 300)">
+                hx-target="#session-detail-content"
+                hx-swap="outerHTML"
+                hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
             ⚪ 忽略 (误报)
         </button>
     </div>
 </article>
 {% endif %}
+</div><!-- /#session-detail-content -->
 
 <style>
     .timeline {

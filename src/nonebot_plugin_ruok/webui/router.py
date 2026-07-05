@@ -251,34 +251,52 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def action_confirm(session_id: str):
         try:
             update_session(data_dir, session_id, {"status": "unsolved"})
+            s = get_session(data_dir, session_id)
+            if s is None:
+                raise ValueError("Session not found after update")
         except Exception:
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
                 status_code=500,
             )
-        return HTMLResponse(status_code=200)
+        return render(
+            "_session_card.html.jinja2", s=s,
+            headers={"HX-Trigger": '{"toast":"✅ 已确认 Session","toastType":"success"}'},
+        )
 
     @router.post("/ruok/_actions/solve/{session_id}")
     async def action_solve(session_id: str):
         try:
             update_session(data_dir, session_id, {"status": "solved"})
+            s = get_session(data_dir, session_id)
+            if s is None:
+                raise ValueError("Session not found after update")
         except Exception:
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
                 status_code=500,
             )
-        return HTMLResponse(status_code=200)
+        return render(
+            "_session_card.html.jinja2", s=s,
+            headers={"HX-Trigger": '{"toast":"🟢 Session 已解决","toastType":"success"}'},
+        )
 
     @router.post("/ruok/_actions/ignore/{session_id}")
     async def action_ignore(session_id: str):
         try:
             update_session(data_dir, session_id, {"status": "ignored"})
+            s = get_session(data_dir, session_id)
+            if s is None:
+                raise ValueError("Session not found after update")
         except Exception:
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
                 status_code=500,
             )
-        return HTMLResponse(status_code=200)
+        return render(
+            "_session_card.html.jinja2", s=s,
+            headers={"HX-Trigger": '{"toast":"⚪ Session 已忽略","toastType":"info"}'},
+        )
 
     @router.post("/ruok/_actions/session-note/{session_id}")
     async def action_session_note(session_id: str, developer_notes: str = Form("")):

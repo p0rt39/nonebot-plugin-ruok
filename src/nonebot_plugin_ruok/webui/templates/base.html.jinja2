@@ -215,10 +215,32 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+
+        /* ── Toast notifications ── */
+        #toast-container {
+            position: fixed; top: 1rem; right: 1rem; z-index: 9999;
+            display: flex; flex-direction: column; gap: 0.5rem;
+            max-width: 360px;
+        }
+        .toast {
+            padding: 0.75rem 1.25rem;
+            border-radius: var(--radius-sm);
+            color: #fff; font-weight: 500;
+            box-shadow: var(--shadow-lg);
+            animation: fadeInUp 0.3s ease-out;
+            backdrop-filter: blur(12px);
+        }
+        .toast-success { background: rgba(46,204,64,0.9); }
+        .toast-warning { background: rgba(255,220,0,0.9); color: #000; }
+        .toast-error   { background: rgba(255,65,54,0.9); }
+        .toast-info    { background: rgba(102,126,234,0.9); }
+        .toast-removing { animation: fadeInUp 0.3s ease-out reverse; }
     </style>
     {% block head %}{% endblock %}
 </head>
 <body>
+    <!-- Toast container -->
+    <div id="toast-container"></div>
     <main class="container">
         <nav>
             <ul>
@@ -241,5 +263,45 @@
     <footer>
         RuOK · NoneBot2 Health Monitor
     </footer>
+
+<script>
+// ── Toast notification system ──
+(function() {
+    var container = document.getElementById('toast-container');
+    if (!container) return;
+
+    function showToast(msg, type) {
+        type = type || 'info';
+        var el = document.createElement('div');
+        el.className = 'toast toast-' + type;
+        el.textContent = msg;
+        container.appendChild(el);
+        setTimeout(function() {
+            el.classList.add('toast-removing');
+            setTimeout(function() { el.remove(); }, 300);
+        }, 3500);
+    }
+
+    // Listen for HTMX HX-Trigger response headers
+    document.body.addEventListener('htmx:afterOnLoad', function(e) {
+        try {
+            var trigger = e.detail.xhr.getResponseHeader('HX-Trigger');
+            if (!trigger) return;
+            var data = JSON.parse(trigger);
+            if (data.toast) {
+                showToast(data.toast, data.toastType || 'success');
+            }
+            // If action requests a re-render of a target element
+            if (data.refresh) {
+                var target = document.querySelector(data.refresh);
+                if (target) {
+                    htmx.ajax('GET', data.refreshUrl || window.location.pathname + '?' + (data.refreshParam || ''),
+                        { target: data.refresh, swap: 'innerHTML' });
+                }
+            }
+        } catch(_) {}
+    });
+})();
+</script>
 </body>
 </html>

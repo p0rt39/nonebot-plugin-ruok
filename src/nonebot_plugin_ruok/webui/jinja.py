@@ -46,6 +46,11 @@ _jinja_env.filters["_fmt_uptime_s"] = _fmt_uptime_s
 
 
 def render(template_name: str, **context) -> HTMLResponse:
-    """Render a Jinja2 template directly, bypassing Starlette's TemplateResponse."""
+    """Render a Jinja2 template directly, bypassing Starlette's TemplateResponse.
+
+    Special context keys:
+        headers: dict[str,str] — extra HTTP response headers (e.g. HX-Trigger)
+    """
+    headers = context.pop("headers", None)
     template = _jinja_env.get_template(template_name)
-    return HTMLResponse(template.render(**context))
+    return HTMLResponse(template.render(**context), headers=headers)
