@@ -185,7 +185,7 @@
         .metric-label { font-size: 0.85em; color: var(--pico-muted-color); }
         .auto-refresh { opacity: 0.5; font-size: 0.75em; }
 
-        /* ── Info chips (run info row) ── */
+        /* ── Info chips (run info row, deprecated — kept for compat) ── */
         .info-chip {
             background: var(--glass-bg) !important; backdrop-filter: blur(12px);
             border: 1px solid var(--glass-border) !important;
@@ -193,7 +193,146 @@
             padding: 0.5rem 1rem; white-space: nowrap;
         }
 
-        /* ── Gauge cards ── */
+        /* ── System overview tile grid ── */
+        .sys-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        @media (max-width: 768px) {
+            .sys-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+        }
+
+        /* ── System tile (glass card with hover lift) ── */
+        .sys-tile {
+            background: var(--glass-bg) !important;
+            backdrop-filter: blur(14px) saturate(130%);
+            -webkit-backdrop-filter: blur(14px) saturate(130%);
+            border: 1px solid var(--glass-border) !important;
+            border-radius: var(--radius-md) !important;
+            box-shadow: var(--shadow-sm);
+            padding: 1rem !important;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+            cursor: default;
+            position: relative;
+            overflow: hidden;
+        }
+        .sys-tile:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-md);
+            border-color: rgba(102,126,234,0.3) !important;
+        }
+        .sys-tile[onclick]:hover {
+            cursor: pointer;
+        }
+
+        /* ── Gauge tile ── */
+        .sys-tile--gauge {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .sys-gauge {
+            width: 110px;
+            height: 110px;
+        }
+
+        /* ── Stat tile ── */
+        .sys-tile--stat {
+            text-align: center;
+        }
+        .sys-tile__icon {
+            font-size: 1.4rem;
+            margin-bottom: 0.25rem;
+        }
+        .sys-tile__value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            line-height: 1.2;
+            transition: color 0.3s ease;
+        }
+        .sys-tile__label {
+            font-size: 0.78em;
+            color: var(--pico-muted-color);
+            margin-top: 0.15rem;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+        .sys-tile__sub {
+            font-size: 0.75em;
+            color: var(--pico-muted-color);
+            margin-top: 0.2rem;
+        }
+        .sys-tile__face {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Expand / collapse ── */
+        .sys-tile__expand {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease, opacity 0.3s ease, margin-top 0.3s ease;
+            margin-top: 0;
+        }
+        .sys-tile.expanded .sys-tile__expand {
+            max-height: 600px;
+            opacity: 1;
+            margin-top: 0.75rem;
+        }
+        .sys-expand-content {
+            border-top: 1px solid var(--glass-border);
+            padding-top: 0.75rem;
+            font-size: 0.82em;
+            text-align: left;
+            line-height: 1.6;
+        }
+        .sys-expand-content > div {
+            padding: 2px 0;
+        }
+
+        /* ── Progress bar (in expand) ── */
+        .sys-progress-bar {
+            height: 6px;
+            background: rgba(0,0,0,0.06);
+            border-radius: 3px;
+            margin-top: 4px;
+            overflow: hidden;
+        }
+        .sys-progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.6s ease;
+            min-width: 2px;
+        }
+
+        /* ── Per-core heatmap ── */
+        .sys-core-heatmap {
+            display: flex;
+            gap: 3px;
+            justify-content: center;
+            margin-top: 0.4rem;
+        }
+        .sys-core-heatmap span {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            flex-shrink: 0;
+            transition: background 0.3s ease, opacity 0.3s ease;
+        }
+
+        /* ── Sparkline ── */
+        .sys-sparkline {
+            width: 100%;
+            height: 28px;
+            margin-top: 0.3rem;
+            overflow: visible;
+        }
+
+        /* ── Gauge cards (deprecated — kept for compat) ── */
         .gauge-card {
             background: var(--glass-bg) !important; backdrop-filter: blur(16px);
             border: 1px solid var(--glass-border) !important;

@@ -18,6 +18,7 @@ from .jinja import render
 from ..config import ScopedConfig
 from ..protocol import ReporterInfo, ModuleDefinition
 from ..collector import (
+    _disk_tracker,
     get_session,
     list_modules,
     delete_module,
@@ -88,37 +89,30 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         modules = list_modules(data_dir, config)
         stats = get_session_stats(data_dir)
 
-        # SSE/polling partial renders
-        if _partial == "dashboard-hero":
-            return render("_dashboard_hero.html.jinja2", status=status)
-        if _partial == "dashboard-gauges":
+        # Unified system overview partial
+        if _partial == "dashboard-system":
             try:
                 fm = await collect_fast_metrics()
                 nr = _network_tracker.get_rate()
+                disk_agg, _ = _disk_tracker.get_rate()
             except Exception:
-                return HTMLResponse(
-                    "<article><p>⏳ 系统指标采集中，请稍候...</p></article>"
+                from ..protocol import (  # noqa: I001
+                    DiskIORate,
+                    FastMetricsSnapshot,
+                    NetworkRate,
                 )
+                fm = FastMetricsSnapshot()
+                nr = NetworkRate()
+                disk_agg = DiskIORate()
             return render(
-                "_dashboard_gauges.html.jinja2",
+                "_dashboard_system.html.jinja2",
                 metrics=fm,
                 net_up=nr.bytes_sent_per_sec,
                 net_down=nr.bytes_recv_per_sec,
+                disk_agg=disk_agg,
             )
-        if _partial == "dashboard-info":
-            try:
-                fm = await collect_fast_metrics()
-                nr = _network_tracker.get_rate()
-            except Exception:
-                return HTMLResponse(
-                    "<article><p>⏳ 运行信息采集中，请稍候...</p></article>"
-                )
-            return render(
-                "_dashboard_info.html.jinja2",
-                metrics=fm,
-                net_up=nr.bytes_sent_per_sec,
-                net_down=nr.bytes_recv_per_sec,
-            )
+
+        # SSE/polling partial renders (other panels)
         if _partial == "dashboard-metrics":
             return render("_dashboard_metrics.html.jinja2", status=status)
         if _partial == "dashboard-disk":

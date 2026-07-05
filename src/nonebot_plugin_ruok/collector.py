@@ -19,6 +19,7 @@ from .protocol import (
     AggregatedStatus,
     BotConnectionStatus,
     CheckResult,
+    DiskIORate,
     FastMetricsSnapshot,
     MetricPoint,
     ModuleDefinition,
@@ -26,6 +27,8 @@ from .protocol import (
     NetworkRate,
     Occurrence,
     PluginHealthInfo,
+    ProcessInfo,
+    ProcessSnapshot,
     ReporterInfo,
     Session,
     SessionStats,
@@ -459,6 +462,27 @@ async def collect_fast_metrics() -> FastMetricsSnapshot:
 
         proc_count = len(psutil.pids())
 
+        # Boot time / bot process create time
+        boot_time = psutil.boot_time()
+        bot_create_time = psutil.Process().create_time()
+
+        # Bot process memory
+        bot_proc = psutil.Process()
+        bot_mem = bot_proc.memory_info()
+        bot_rss = bot_mem.rss
+
+        # CPU temperature (platform-dependent)
+        cpu_temp = None
+        try:
+            temps = psutil.sensors_temperatures()
+            if temps:
+                for name, entries in temps.items():
+                    if entries:
+                        cpu_temp = entries[0].current
+                        break
+        except Exception:
+            pass
+
         return FastMetricsSnapshot(
             cpu_percent=cpu[0] if cpu else 0.0,
             cpu_per_core=cpu[1:] if len(cpu) > 1 else [],
@@ -474,6 +498,54 @@ async def collect_fast_metrics() -> FastMetricsSnapshot:
             process_count=proc_count,
             uptime_seconds=int(time.time() - (_startup_time or time.time())),
             timestamp=datetime.now(timezone.utc).isoformat(),
+            boot_time_epoch=boot_time,
+            bot_process_create_time=bot_create_time,
+            bot_rss_bytes=bot_rss,
+            cpu_temp=cpu_temp,
+        )
+
+    return await asyncio.to_thread(_get)
+
+
+async def collect_process_snapshot() -> ProcessSnapshot:
+    """Collect Bot process details + top 5 system processes by CPU."""
+
+    def _get() -> ProcessSnapshot:
+        import psutil
+
+        bot_proc = psutil.Process()
+        bot_mem = bot_proc.memory_info()
+        bot_rss = bot_mem.rss
+        bot_vms = bot_mem.vms
+        bot_threads = bot_proc.num_threads()
+        bot_cpu = bot_proc.cpu_percent()
+
+        # Top 5 processes by CPU (excluding idle/system)
+        procs = []
+        for p in psutil.process_iter(["name", "pid", "cpu_percent", "memory_info"]):
+            try:
+                info = p.info
+                name = info["name"] or ""
+                if name.lower() in ("idle", "system"):
+                    continue
+                mem = info["memory_info"]
+                rss = mem.rss if mem else 0
+                procs.append(ProcessInfo(
+                    name=name,
+                    pid=info["pid"] or 0,
+                    cpu_percent=info["cpu_percent"] or 0.0,
+                    mem_rss=rss,
+                ))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        procs.sort(key=lambda x: x.cpu_percent, reverse=True)
+        return ProcessSnapshot(
+            bot_rss=bot_rss,
+            bot_vms=bot_vms,
+            bot_threads=bot_threads,
+            bot_cpu_percent=bot_cpu,
+            top_processes=procs[:5],
         )
 
     return await asyncio.to_thread(_get)
@@ -530,6 +602,75 @@ class NetworkRateTracker:
 
 # Singleton
 _network_tracker = NetworkRateTracker()
+
+
+# ────────────────────────────────
+# 5d. Disk I/O rate tracker
+# ────────────────────────────────
+
+
+class DiskRateTracker:
+    """Track per-second disk I/O rate via delta of io counters (per-disk)."""
+
+    def __init__(self) -> None:
+        self._prev: dict[str, dict[str, float]] = {}
+        self._prev_time: float = 0.0
+
+    def get_rate(self) -> tuple[DiskIORate, dict[str, DiskIORate]]:
+        """Return (aggregated_rate, per_disk_rates) or zeros on first call."""
+        import psutil
+
+        now = time.time()
+        try:
+            per_disk = psutil.disk_io_counters(perdisk=True)
+        except Exception:
+            return DiskIORate(), {}
+
+        if not per_disk:
+            return DiskIORate(), {}
+
+        cur: dict[str, dict[str, float]] = {}
+        for name, io in per_disk.items():
+            cur[name] = {
+                "rb": float(io.read_bytes),
+                "wb": float(io.write_bytes),
+                "rc": float(io.read_count),
+                "wc": float(io.write_count),
+            }
+
+        if not self._prev or self._prev_time == 0.0:
+            self._prev = cur
+            self._prev_time = now
+            return DiskIORate(), {}
+
+        elapsed = now - self._prev_time
+        if elapsed <= 0:
+            return DiskIORate(), {}
+
+        agg = DiskIORate()
+        per_disk_rates: dict[str, DiskIORate] = {}
+
+        for name, c in cur.items():
+            p = self._prev.get(name, c)
+            dr = DiskIORate(
+                read_bytes_per_sec=(c["rb"] - p["rb"]) / elapsed,
+                write_bytes_per_sec=(c["wb"] - p["wb"]) / elapsed,
+                read_count_per_sec=(c["rc"] - p["rc"]) / elapsed,
+                write_count_per_sec=(c["wc"] - p["wc"]) / elapsed,
+            )
+            per_disk_rates[name] = dr
+            agg.read_bytes_per_sec += dr.read_bytes_per_sec
+            agg.write_bytes_per_sec += dr.write_bytes_per_sec
+            agg.read_count_per_sec += dr.read_count_per_sec
+            agg.write_count_per_sec += dr.write_count_per_sec
+
+        self._prev = cur
+        self._prev_time = now
+        return agg, per_disk_rates
+
+
+# Singleton
+_disk_tracker = DiskRateTracker()
 
 
 # ────────────────────────────────

@@ -12,18 +12,11 @@
     {% include "_dashboard_hero.html.jinja2" %}
 </div>
 
-<!-- Gauges — initial render via HTMX, then SSE metrics update DOM directly -->
-<div id="dashboard-gauges"
-     hx-get="/ruok?_partial=dashboard-gauges"
-     hx-trigger="load" hx-swap="innerHTML">
-    {% include "_dashboard_gauges.html.jinja2" %}
-</div>
-
-<!-- Info row — initial render via HTMX, then SSE metrics update DOM directly -->
-<div id="dashboard-info"
-     hx-get="/ruok?_partial=dashboard-info"
-     hx-trigger="load" hx-swap="innerHTML">
-    {% include "_dashboard_info.html.jinja2" %}
+<!-- Unified System Overview — replaces gauges + info row -->
+<div id="dashboard-system"
+     hx-get="/ruok?_partial=dashboard-system"
+     hx-trigger="load" hx-swap="outerHTML">
+    {% include "_dashboard_system.html.jinja2" %}
 </div>
 
 <!-- Disk — polling 30s -->
@@ -50,9 +43,48 @@
 (function() {
     var src = new EventSource('/ruok/sse');
     var lastOverall = '';
-    var tickTimer = null;
 
-    // ── status event: only refresh hero when overall changes ──
+    // ── Sparkline history buffers (30 points = ~90s @ 3s interval) ──
+    var _spark = { net_up: [], net_down: [], disk_read: [], disk_write: [] };
+    var _sparkMax = 30;
+
+    function pushSpark(key, val) {
+        _spark[key].push(Math.max(0, val));
+        if (_spark[key].length > _sparkMax) _spark[key].shift();
+    }
+
+    function drawSparkline(svgId, data, maxVal) {
+        var poly = document.getElementById(svgId);
+        if (!poly || !data.length) return;
+        var w = 120, h = 30, pad = 2;
+        var peak = maxVal || Math.max.apply(null, data) || 1;
+        var points = data.map(function(v, i) {
+            var x = pad + (i / (_sparkMax - 1)) * (w - pad * 2);
+            var y = h - pad - (v / peak) * (h - pad * 2);
+            return x.toFixed(1) + ',' + y.toFixed(1);
+        });
+        poly.setAttribute('points', points.join(' '));
+    }
+
+    function fmtBytes(n) {
+        if (n < 1024) return Math.round(n) + ' B';
+        if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+        if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+        return (n / 1073741824).toFixed(2) + ' GB';
+    }
+
+    function fmtUptime(sec) {
+        if (sec == null || sec < 0) return '—';
+        var d = Math.floor(sec / 86400);
+        var h = Math.floor((sec % 86400) / 3600);
+        var m = Math.floor((sec % 3600) / 60);
+        var s = Math.floor(sec % 60);
+        return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm ' + s + 's';
+    }
+
+    function clr(v) { return v < 70 ? '#2ecc40' : v < 90 ? '#ffdc00' : '#ff4136'; }
+
+    // ── status event ──
     src.addEventListener('status', function(e) {
         try {
             var d = JSON.parse(e.data);
@@ -64,7 +96,7 @@
         } catch(_) {}
     });
 
-    // ── tick event: only update timestamp text (no HTTP request) ──
+    // ── tick event ──
     src.addEventListener('tick', function(e) {
         try {
             var d = JSON.parse(e.data);
@@ -73,7 +105,6 @@
                 htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
                     { target: '#dashboard-hero', swap: 'innerHTML' });
             }
-            // Update the UTC timestamp text in the hero banner
             var tsEl = document.querySelector('#dashboard-hero .hero-ts');
             if (tsEl && d.timestamp) {
                 tsEl.textContent = new Date(d.timestamp).toISOString()
@@ -82,53 +113,27 @@
         } catch(_) {}
     });
 
-    // ── metrics event: update gauges & info directly via DOM ──
+    // ── metrics event: update all tiles + sparklines ──
     src.addEventListener('metrics', function(e) {
         try {
             var m = JSON.parse(e.data);
 
-            // Helper: color based on value
-            function clr(v) { return v < 70 ? '#2ecc40' : v < 90 ? '#ffdc00' : '#ff4136'; }
-
-            // Update SVG gauge circles
+            // --- Ring gauges ---
             [{id:'cpu', v:m.cpu}, {id:'mem', v:m.mem_pct}, {id:'swap', v:m.swap_pct}].forEach(function(g) {
-                var svg = document.querySelector('#gauge-' + g.id);
-                var circle = document.querySelector('#gauge-' + g.id + '-arc');
-                var text = document.querySelector('#gauge-' + g.id + '-val');
+                var circle = document.getElementById('gauge-' + g.id + '-arc');
+                var text = document.getElementById('gauge-' + g.id + '-val');
                 if (circle) {
-                    var dash = (g.v * Math.PI).toFixed(1);
-                    circle.setAttribute('stroke-dasharray', dash + ' 314.159');
+                    circle.setAttribute('stroke-dasharray', (g.v * Math.PI).toFixed(1) + ' 314.159');
                     circle.setAttribute('stroke', clr(g.v));
                 }
                 if (text) text.textContent = Math.round(g.v) + '%';
             });
 
-            // Update memory detail
-            var memDetail = document.getElementById('mem-detail');
-            if (memDetail) {
-                memDetail.textContent = '内存: ' + fmtBytes(m.mem_used) + ' / ' + fmtBytes(m.mem_total) +
-                    (m.swap_total > 0 ? ' | Swap: ' + fmtBytes(m.swap_used) + ' / ' + fmtBytes(m.swap_total) : '');
-            }
+            // --- Memory detail ---
+            var memDt = document.getElementById('mem-detail-tile');
+            if (memDt) memDt.textContent = fmtBytes(m.mem_used) + ' / ' + fmtBytes(m.mem_total);
 
-            // Update info chips
-            var loadEl = document.getElementById('info-load');
-            if (loadEl && m.load_1m != null) {
-                loadEl.textContent = '⚖️ Load: ' + m.load_1m.toFixed(2) + ' / ' + m.load_5m.toFixed(2) + ' / ' + m.load_15m.toFixed(2);
-            }
-            var procEl = document.getElementById('info-procs');
-            if (procEl) procEl.textContent = '🔧 进程: ' + m.procs;
-            var netEl = document.getElementById('info-net');
-            if (netEl) netEl.textContent = '🌐 ⬆ ' + fmtBytes(m.net_up) + '/s ⬇ ' + fmtBytes(m.net_down) + '/s';
-            var upEl = document.getElementById('info-uptime');
-            if (upEl && m.uptime != null) {
-                var d = Math.floor(m.uptime / 86400);
-                var h = Math.floor((m.uptime % 86400) / 3600);
-                var min = Math.floor((m.uptime % 3600) / 60);
-                var s = Math.floor(m.uptime % 60);
-                upEl.textContent = '⏱️ ' + (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + min + 'm ' + s + 's';
-            }
-
-            // Update CPU core indicators
+            // --- CPU cores heatmap ---
             if (m.cpu_cores && m.cpu_cores.length > 1) {
                 var cores = document.querySelectorAll('#cpu-cores span');
                 m.cpu_cores.slice(0, cores.length).forEach(function(core, i) {
@@ -139,22 +144,139 @@
                     }
                 });
             }
+
+            // --- Load tile ---
+            var loadEl = document.getElementById('info-load');
+            var loadSub = document.getElementById('load-detail');
+            if (loadEl && m.load_1m != null) {
+                loadEl.textContent = m.load_1m.toFixed(2);
+                var lClr = clr(m.load_1m * 100 / (m.cpu_cores ? m.cpu_cores.length + 1 : 4));
+                loadEl.style.color = lClr;
+                if (loadSub) loadSub.textContent = m.load_5m.toFixed(2) + ' / ' + m.load_15m.toFixed(2);
+                var loadExp1 = document.getElementById('load-exp-1m');
+                var loadExp5 = document.getElementById('load-exp-5m');
+                var loadExp15 = document.getElementById('load-exp-15m');
+                if (loadExp1) loadExp1.textContent = m.load_1m.toFixed(2);
+                if (loadExp5) loadExp5.textContent = m.load_5m.toFixed(2);
+                if (loadExp15) loadExp15.textContent = m.load_15m.toFixed(2);
+                var ratioEl = document.getElementById('load-exp-ratio');
+                if (ratioEl) {
+                    var cores = m.cpu_cores ? m.cpu_cores.length + 1 : '?';
+                    ratioEl.textContent = '负载/核心比: ' + (m.load_1m / (cores === '?' ? 4 : cores)).toFixed(2);
+                }
+            }
+
+            // --- Network tile ---
+            var netUpEl = document.getElementById('net-up-val');
+            var netDownEl = document.getElementById('net-down-val');
+            if (netUpEl) netUpEl.textContent = fmtBytes(m.net_up);
+            if (netDownEl) netDownEl.textContent = fmtBytes(m.net_down);
+            var netExpUp = document.getElementById('net-exp-up');
+            var netExpDown = document.getElementById('net-exp-down');
+            if (netExpUp) netExpUp.textContent = fmtBytes(m.net_up);
+            if (netExpDown) netExpDown.textContent = fmtBytes(m.net_down);
+            var netPktUp = document.getElementById('net-exp-pkt-up');
+            var netPktDown = document.getElementById('net-exp-pkt-down');
+            if (netPktUp) netPktUp.textContent = Math.round(m.net_packets_up || 0) + ' pkt';
+            if (netPktDown) netPktDown.textContent = Math.round(m.net_packets_down || 0) + ' pkt';
+            // Sparkline
+            pushSpark('net_up', m.net_up);
+            pushSpark('net_down', m.net_down);
+            drawSparkline('spark-net-up', _spark.net_up);
+            drawSparkline('spark-net-down', _spark.net_down);
+
+            // --- Disk IO tile ---
+            var diskTotal = document.getElementById('disk-total');
+            if (diskTotal) {
+                diskTotal.textContent = fmtBytes((m.disk_read || 0) + (m.disk_write || 0));
+            }
+            pushSpark('disk_read', m.disk_read || 0);
+            pushSpark('disk_write', m.disk_write || 0);
+            drawSparkline('spark-disk-read', _spark.disk_read);
+            drawSparkline('spark-disk-write', _spark.disk_write);
+            // Per-disk expand
+            var diskPerList = document.getElementById('disk-per-list');
+            if (diskPerList && m.disk_per) {
+                var html = '';
+                var keys = Object.keys(m.disk_per);
+                if (keys.length === 0) {
+                    html = '<div style="color:var(--pico-muted-color);">无磁盘 I/O 数据</div>';
+                } else {
+                    keys.forEach(function(name) {
+                        var d = m.disk_per[name];
+                        html += '<div>' + name + ': 读 ' + fmtBytes(d.read_bytes_per_sec || 0) +
+                                '/s | 写 ' + fmtBytes(d.write_bytes_per_sec || 0) + '/s</div>';
+                    });
+                }
+                diskPerList.innerHTML = html;
+            }
+
+            // --- Process tile ---
+            var procEl = document.getElementById('info-procs');
+            if (procEl) procEl.textContent = m.procs;
+            var botRssEl = document.getElementById('proc-bot-rss');
+            if (botRssEl) botRssEl.textContent = 'Bot: ' + fmtBytes(m.bot_rss || 0);
+            // Process expand detail
+            var procPanel = document.getElementById('proc-detail-panel');
+            if (procPanel) {
+                var h = '<div><strong>Bot 进程:</strong> RSS ' + fmtBytes(m.bot_rss || 0) +
+                        ' | VMS ' + fmtBytes(m.bot_vms || 0) +
+                        ' | 线程 ' + (m.bot_threads || 0) +
+                        ' | CPU ' + (m.bot_cpu || 0).toFixed(1) + '%</div>';
+                if (m.top_processes && m.top_processes.length) {
+                    h += '<div style="margin-top:0.4rem;"><strong>Top 进程 (CPU):</strong></div>';
+                    m.top_processes.forEach(function(p) {
+                        h += '<div>' + p.name + ' (PID ' + p.pid + '): CPU ' +
+                             p.cpu_percent.toFixed(1) + '% | RSS ' + fmtBytes(p.mem_rss) + '</div>';
+                    });
+                }
+                procPanel.innerHTML = h;
+            }
+
+            // --- Uptime tile ---
+            var upEl = document.getElementById('info-uptime');
+            if (upEl && m.uptime != null) upEl.textContent = fmtUptime(m.uptime);
+            // Boot time string
+            if (m.boot_time) {
+                var bootDate = new Date(m.boot_time * 1000);
+                var bootStr = bootDate.toLocaleString();
+                var sysBootEl = document.getElementById('sys-boot-str');
+                if (sysBootEl) sysBootEl.textContent = bootStr;
+                var uptBootEl = document.getElementById('uptime-exp-boot');
+                if (uptBootEl) uptBootEl.textContent = bootStr;
+                var nowSec = Date.now() / 1000;
+                var sysRunEl = document.getElementById('uptime-exp-sys-run');
+                if (sysRunEl) sysRunEl.textContent = fmtUptime(nowSec - m.boot_time);
+            }
+            if (m.bot_start_time) {
+                var botDate = new Date(m.bot_start_time * 1000);
+                var uptBotEl = document.getElementById('uptime-exp-bot');
+                if (uptBotEl) uptBotEl.textContent = botDate.toLocaleString();
+                var nowSec = Date.now() / 1000;
+                var botRunEl = document.getElementById('uptime-exp-bot-run');
+                if (botRunEl) botRunEl.textContent = fmtUptime(nowSec - m.bot_start_time);
+            }
+
+            // --- Temperature tile ---
+            if (m.cpu_temp != null) {
+                var tempTile = document.getElementById('tile-temp');
+                if (tempTile) tempTile.style.display = '';
+                var tempVal = document.getElementById('info-temp');
+                if (tempVal) {
+                    tempVal.textContent = Math.round(m.cpu_temp) + '°C';
+                    tempVal.style.color = m.cpu_temp < 60 ? '#2ecc40' : m.cpu_temp < 80 ? '#ffdc00' : '#ff4136';
+                }
+                var tempExp = document.getElementById('temp-exp-val');
+                if (tempExp) tempExp.textContent = Math.round(m.cpu_temp) + '°C';
+            }
         } catch(_) {}
     });
 
-    // ── session_update: refresh stats + pie chart ──
+    // ── session_update ──
     src.addEventListener('session_update', function() {
         htmx.ajax('GET', '/ruok?_partial=dashboard-stats',
             { target: '#dashboard-stats', swap: 'innerHTML' });
     });
-
-    // ── byte formatter for JS ──
-    function fmtBytes(n) {
-        if (n < 1024) return Math.round(n) + ' B';
-        if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
-        if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
-        return (n / 1073741824).toFixed(2) + ' GB';
-    }
 
     // ── Cleanup on page unload ──
     window.addEventListener('beforeunload', function() { src.close(); });

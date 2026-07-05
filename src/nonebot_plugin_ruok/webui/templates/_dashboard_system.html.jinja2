@@ -1,0 +1,235 @@
+{# Unified system overview: merges gauges + info row into modern tile dashboard #}
+<h3>🖥️ 系统概览</h3>
+
+<div class="sys-grid">
+    {# ── Row 1: Ring gauges (CPU / Memory / Swap) ── #}
+
+    <!-- CPU Gauge Tile -->
+    <article class="sys-tile sys-tile--gauge animate-in" id="tile-cpu">
+        <div class="sys-tile__face">
+            <svg viewBox="0 0 120 120" class="sys-gauge" id="gauge-cpu">
+                <circle cx="60" cy="60" r="50" fill="none"
+                        stroke="rgba(0,0,0,0.08)" stroke-width="10"/>
+                <circle id="gauge-cpu-arc" cx="60" cy="60" r="50" fill="none"
+                        stroke="{% if metrics.cpu_percent < 70 %}#2ecc40{% elif metrics.cpu_percent < 90 %}#ffdc00{% else %}#ff4136{% endif %}"
+                        stroke-width="10" stroke-linecap="round"
+                        stroke-dasharray="{{ (metrics.cpu_percent * 3.14159)|round(1) }} 314.159"
+                        transform="rotate(-90 60 60)"
+                        style="transition: stroke-dasharray 0.6s ease, stroke 0.6s ease;"/>
+                <text id="gauge-cpu-val" x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--pico-color)">{{ "%.0f"|format(metrics.cpu_percent) }}%</text>
+                <text x="60" y="73" text-anchor="middle" font-size="11" fill="var(--pico-muted-color)">CPU</text>
+            </svg>
+            <div class="sys-tile__label">CPU 使用率</div>
+        </div>
+        {% if metrics.cpu_per_core|length > 1 %}
+        <div id="cpu-cores" class="sys-core-heatmap">
+            {% for core in metrics.cpu_per_core[:16] %}
+            <span title="Core {{ loop.index0 }}: {{ '%.0f'|format(core) }}%"
+                  style="background:{% if core < 70 %}#2ecc40{% elif core < 90 %}#ffdc00{% else %}#ff4136{% endif %};
+                         opacity:{{ 0.2 + core/150 }};"></span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </article>
+
+    <!-- Memory Gauge Tile -->
+    <article class="sys-tile sys-tile--gauge animate-in" id="tile-mem"
+             onclick="this.classList.toggle('expanded')">
+        <div class="sys-tile__face">
+            <svg viewBox="0 0 120 120" class="sys-gauge" id="gauge-mem">
+                <circle cx="60" cy="60" r="50" fill="none"
+                        stroke="rgba(0,0,0,0.08)" stroke-width="10"/>
+                <circle id="gauge-mem-arc" cx="60" cy="60" r="50" fill="none"
+                        stroke="{% if metrics.memory_percent < 70 %}#2ecc40{% elif metrics.memory_percent < 90 %}#ffdc00{% else %}#ff4136{% endif %}"
+                        stroke-width="10" stroke-linecap="round"
+                        stroke-dasharray="{{ (metrics.memory_percent * 3.14159)|round(1) }} 314.159"
+                        transform="rotate(-90 60 60)"
+                        style="transition: stroke-dasharray 0.6s ease, stroke 0.6s ease;"/>
+                <text id="gauge-mem-val" x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--pico-color)">{{ "%.0f"|format(metrics.memory_percent) }}%</text>
+                <text x="60" y="73" text-anchor="middle" font-size="11" fill="var(--pico-muted-color)">内存</text>
+            </svg>
+            <div class="sys-tile__label" id="mem-detail-tile">
+                {{ metrics.memory_used|_fmt_bytes_s }} / {{ metrics.memory_total|_fmt_bytes_s }}
+            </div>
+        </div>
+        <div class="sys-tile__expand">
+            <div class="sys-expand-content">
+                <strong>Swap</strong>
+                <div>已用: {{ metrics.swap_used|_fmt_bytes_s }} / {{ metrics.swap_total|_fmt_bytes_s }}</div>
+                <div>使用率: {{ "%.1f"|format(metrics.swap_percent) }}%</div>
+                <div class="sys-progress-bar">
+                    <div class="sys-progress-fill"
+                         style="width:{{ metrics.swap_percent }}%;
+                                background:{% if metrics.swap_percent < 70 %}#2ecc40{% elif metrics.swap_percent < 90 %}#ffdc00{% else %}#ff4136{% endif %};">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </article>
+
+    <!-- Swap Gauge Tile -->
+    <article class="sys-tile sys-tile--gauge animate-in" id="tile-swap">
+        <div class="sys-tile__face">
+            <svg viewBox="0 0 120 120" class="sys-gauge" id="gauge-swap">
+                <circle cx="60" cy="60" r="50" fill="none"
+                        stroke="rgba(0,0,0,0.08)" stroke-width="10"/>
+                <circle id="gauge-swap-arc" cx="60" cy="60" r="50" fill="none"
+                        stroke="{% if metrics.swap_percent < 70 %}#2ecc40{% elif metrics.swap_percent < 90 %}#ffdc00{% else %}#ff4136{% endif %}"
+                        stroke-width="10" stroke-linecap="round"
+                        stroke-dasharray="{{ (metrics.swap_percent * 3.14159)|round(1) }} 314.159"
+                        transform="rotate(-90 60 60)"
+                        style="transition: stroke-dasharray 0.6s ease, stroke 0.6s ease;"/>
+                <text id="gauge-swap-val" x="60" y="55" text-anchor="middle" font-size="22" font-weight="700" fill="var(--pico-color)">{{ "%.0f"|format(metrics.swap_percent) }}%</text>
+                <text x="60" y="73" text-anchor="middle" font-size="11" fill="var(--pico-muted-color)">Swap</text>
+            </svg>
+            <div class="sys-tile__label" id="swap-detail-tile">
+                {% if metrics.swap_total > 0 %}
+                {{ metrics.swap_used|_fmt_bytes_s }} / {{ metrics.swap_total|_fmt_bytes_s }}
+                {% else %}
+                未部署
+                {% endif %}
+            </div>
+        </div>
+    </article>
+
+    {# ── Row 2: Stat tiles (Load / Network / Disk IO) ── #}
+
+    <!-- Load Tile -->
+    <article class="sys-tile sys-tile--stat animate-in" id="tile-load"
+             onclick="this.classList.toggle('expanded')">
+        <div class="sys-tile__face">
+            <div class="sys-tile__icon">⚖️</div>
+            <div class="sys-tile__value" id="info-load">
+                {% if metrics.load_1m is not none %}
+                {{ "%.2f"|format(metrics.load_1m) }}
+                {% else %}
+                N/A
+                {% endif %}
+            </div>
+            <div class="sys-tile__label">Load Average</div>
+            <div class="sys-tile__sub" id="load-detail">
+                {% if metrics.load_1m is not none %}
+                {{ "%.2f"|format(metrics.load_5m) }} / {{ "%.2f"|format(metrics.load_15m) }}
+                {% else %}
+                Windows
+                {% endif %}
+            </div>
+        </div>
+        <div class="sys-tile__expand">
+            <div class="sys-expand-content">
+                <div><strong>1 分钟:</strong> <span id="load-exp-1m">{{ "%.2f"|format(metrics.load_1m or 0) }}</span></div>
+                <div><strong>5 分钟:</strong> <span id="load-exp-5m">{{ "%.2f"|format(metrics.load_5m or 0) }}</span></div>
+                <div><strong>15 分钟:</strong> <span id="load-exp-15m">{{ "%.2f"|format(metrics.load_15m or 0) }}</span></div>
+                <div id="load-exp-ratio" style="margin-top:0.5rem;font-size:0.85em;color:var(--pico-muted-color);"></div>
+            </div>
+        </div>
+    </article>
+
+    <!-- Network Tile -->
+    <article class="sys-tile sys-tile--stat animate-in" id="tile-net"
+             onclick="this.classList.toggle('expanded')">
+        <div class="sys-tile__face">
+            <div class="sys-tile__icon">🌐</div>
+            <div class="sys-tile__value" id="info-net">
+                ⬆ <span id="net-up-val">{{ net_up|_fmt_bytes_s }}</span>/s
+                ⬇ <span id="net-down-val">{{ net_down|_fmt_bytes_s }}</span>/s
+            </div>
+            <div class="sys-tile__label">网络速率</div>
+            <svg class="sys-sparkline" id="spark-net" viewBox="0 0 120 30" preserveAspectRatio="none">
+                <polyline id="spark-net-up" fill="none" stroke="#2ecc40" stroke-width="1.5"/>
+                <polyline id="spark-net-down" fill="none" stroke="#3498db" stroke-width="1.5"/>
+            </svg>
+        </div>
+        <div class="sys-tile__expand">
+            <div class="sys-expand-content">
+                <div><strong>⬆ 发送:</strong> <span id="net-exp-up">{{ net_up|_fmt_bytes_s }}</span>/s</div>
+                <div><strong>⬇ 接收:</strong> <span id="net-exp-down">{{ net_down|_fmt_bytes_s }}</span>/s</div>
+                <div><strong>📦 包速率:</strong> ⬆ <span id="net-exp-pkt-up">—</span>/s ⬇ <span id="net-exp-pkt-down">—</span>/s</div>
+            </div>
+        </div>
+    </article>
+
+    <!-- Disk IO Tile -->
+    <article class="sys-tile sys-tile--stat animate-in" id="tile-disk"
+             onclick="this.classList.toggle('expanded')">
+        <div class="sys-tile__face">
+            <div class="sys-tile__icon">💾</div>
+            <div class="sys-tile__value">
+                ↕ <span id="disk-total">—</span>/s
+            </div>
+            <div class="sys-tile__label">磁盘 I/O</div>
+            <svg class="sys-sparkline" id="spark-disk" viewBox="0 0 120 30" preserveAspectRatio="none">
+                <polyline id="spark-disk-read" fill="none" stroke="#2ecc40" stroke-width="1.5"/>
+                <polyline id="spark-disk-write" fill="none" stroke="#e74c3c" stroke-width="1.5"/>
+            </svg>
+        </div>
+        <div class="sys-tile__expand">
+            <div class="sys-expand-content" id="disk-per-list">
+                <div style="color:var(--pico-muted-color);">采集中...</div>
+            </div>
+        </div>
+    </article>
+
+    {# ── Row 3: Stat tiles (Process / Uptime / Temperature) ── #}
+
+    <!-- Process Tile -->
+    <article class="sys-tile sys-tile--stat animate-in" id="tile-proc"
+             onclick="this.classList.toggle('expanded')">
+        <div class="sys-tile__face">
+            <div class="sys-tile__icon">🔧</div>
+            <div class="sys-tile__value" id="info-procs">{{ metrics.process_count }}</div>
+            <div class="sys-tile__label">进程</div>
+            <div class="sys-tile__sub" id="proc-bot-rss">Bot: {{ metrics.bot_rss_bytes|_fmt_bytes_s }}</div>
+        </div>
+        <div class="sys-tile__expand">
+            <div class="sys-expand-content" id="proc-detail-panel">
+                <div style="color:var(--pico-muted-color);">采集中...</div>
+            </div>
+        </div>
+    </article>
+
+    <!-- Uptime Tile -->
+    <article class="sys-tile sys-tile--stat animate-in" id="tile-uptime"
+             onclick="this.classList.toggle('expanded')">
+        <div class="sys-tile__face">
+            <div class="sys-tile__icon">⏱️</div>
+            <div class="sys-tile__value">
+                <span id="info-uptime">{{ metrics.uptime_seconds|_fmt_uptime_s }}</span>
+            </div>
+            <div class="sys-tile__label">运行时间</div>
+            <div class="sys-tile__sub" id="uptime-sub">
+                🖥️ 系统: <span id="sys-boot-str">—</span>
+            </div>
+        </div>
+        <div class="sys-tile__expand">
+            <div class="sys-expand-content">
+                <div>🖥️ <strong>系统启动:</strong> <span id="uptime-exp-boot">—</span></div>
+                <div>🤖 <strong>Bot 启动:</strong> <span id="uptime-exp-bot">—</span></div>
+                <div>🖥️ <strong>系统运行:</strong> <span id="uptime-exp-sys-run">—</span></div>
+                <div>🤖 <strong>Bot 运行:</strong> <span id="uptime-exp-bot-run">—</span></div>
+            </div>
+        </div>
+    </article>
+
+    <!-- Temperature Tile (hidden if no data) -->
+    <article class="sys-tile sys-tile--stat animate-in" id="tile-temp"
+             style="{% if metrics.cpu_temp is none %}display:none;{% endif %}"
+             onclick="this.classList.toggle('expanded')">
+        <div class="sys-tile__face">
+            <div class="sys-tile__icon">🌡️</div>
+            <div class="sys-tile__value" id="info-temp">
+                {% if metrics.cpu_temp is not none %}
+                {{ "%.0f"|format(metrics.cpu_temp) }}°C
+                {% else %}
+                —
+                {% endif %}
+            </div>
+            <div class="sys-tile__label">CPU 温度</div>
+        </div>
+        <div class="sys-tile__expand">
+            <div class="sys-expand-content" id="temp-detail-panel">
+                <span id="temp-exp-val">—</span>
+            </div>
+        </div>
+    </article>
+</div>

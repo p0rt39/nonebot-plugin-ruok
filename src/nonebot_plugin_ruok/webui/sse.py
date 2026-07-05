@@ -74,7 +74,12 @@ async def sse_event_generator(
     tick_count = int(config_ttl)  # number of 1s ticks between full collections
 
     try:
-        from ..collector import _network_tracker, collect_fast_metrics
+        from ..collector import (
+            _disk_tracker,
+            _network_tracker,
+            collect_fast_metrics,
+            collect_process_snapshot,
+        )
 
         tick_count = int(config_ttl)
         metrics_interval = 3
@@ -90,6 +95,18 @@ async def sse_event_generator(
             try:
                 fm = await collect_fast_metrics()
                 nr = _network_tracker.get_rate()
+                disk_agg, disk_per = _disk_tracker.get_rate()
+                ps_snap = await collect_process_snapshot()
+
+                # Serialize per-disk rates for JSON
+                disk_per_serialized = {
+                    name: dr.model_dump(mode="json")
+                    for name, dr in disk_per.items()
+                }
+                top_procs_serialized = [
+                    p.model_dump(mode="json") for p in ps_snap.top_processes
+                ]
+
                 _latest_metrics = {
                     "cpu": fm.cpu_percent,
                     "cpu_cores": fm.cpu_per_core,
@@ -104,8 +121,23 @@ async def sse_event_generator(
                     "load_15m": fm.load_15m,
                     "procs": fm.process_count,
                     "uptime": fm.uptime_seconds,
+                    "boot_time": fm.boot_time_epoch,
+                    "bot_start_time": fm.bot_process_create_time,
+                    "bot_rss": fm.bot_rss_bytes,
+                    "cpu_temp": fm.cpu_temp,
                     "net_up": nr.bytes_sent_per_sec,
                     "net_down": nr.bytes_recv_per_sec,
+                    "net_packets_up": nr.packets_sent_per_sec,
+                    "net_packets_down": nr.packets_recv_per_sec,
+                    "disk_read": disk_agg.read_bytes_per_sec,
+                    "disk_write": disk_agg.write_bytes_per_sec,
+                    "disk_read_count": disk_agg.read_count_per_sec,
+                    "disk_write_count": disk_agg.write_count_per_sec,
+                    "disk_per": disk_per_serialized,
+                    "bot_vms": ps_snap.bot_vms,
+                    "bot_threads": ps_snap.bot_threads,
+                    "bot_cpu": ps_snap.bot_cpu_percent,
+                    "top_processes": top_procs_serialized,
                 }
             except Exception as exc:
                 logger.warning(f"RuOK SSE: fast metrics failed: {exc}")

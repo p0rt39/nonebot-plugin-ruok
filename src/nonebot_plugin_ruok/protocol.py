@@ -207,6 +207,11 @@ class FastMetricsSnapshot(BaseModel):
     process_count: int = 0
     uptime_seconds: int = 0
     timestamp: str = ""
+    # ── New fields for unified system overview ──
+    boot_time_epoch: float = 0.0
+    bot_process_create_time: float = 0.0
+    bot_rss_bytes: int = 0
+    cpu_temp: float | None = None
 
 
 class NetworkRate(BaseModel):
@@ -216,3 +221,36 @@ class NetworkRate(BaseModel):
     bytes_recv_per_sec: float = 0.0
     packets_sent_per_sec: float = 0.0
     packets_recv_per_sec: float = 0.0
+
+
+class DiskIORate(BaseModel):
+    """Per-second disk I/O rate (computed from delta)."""
+
+    read_bytes_per_sec: float = 0.0
+    write_bytes_per_sec: float = 0.0
+    read_count_per_sec: float = 0.0
+    write_count_per_sec: float = 0.0
+
+
+# ────────────────────────────────
+# 7. Process info
+# ────────────────────────────────
+
+
+class ProcessInfo(BaseModel):
+    """Lightweight info about a single process."""
+
+    name: str = ""
+    pid: int = 0
+    cpu_percent: float = 0.0
+    mem_rss: int = 0
+
+
+class ProcessSnapshot(BaseModel):
+    """Bot process details + top system processes."""
+
+    bot_rss: int = 0
+    bot_vms: int = 0
+    bot_threads: int = 0
+    bot_cpu_percent: float = 0.0
+    top_processes: list[ProcessInfo] = Field(default_factory=list)
