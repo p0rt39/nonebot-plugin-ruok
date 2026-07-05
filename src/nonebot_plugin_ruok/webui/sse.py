@@ -77,8 +77,38 @@ async def sse_event_generator(
         from ..collector import _network_tracker, collect_fast_metrics
 
         tick_count = int(config_ttl)
-        ticks_since_metrics = 0
         metrics_interval = 3
+        ticks_since_metrics = 0
+
+        # Background metrics task to avoid blocking tick interval
+        _metrics_task: asyncio.Task | None = None
+        _latest_metrics: dict[str, Any] | None = None
+
+        async def _collect_metrics_background() -> None:
+            """Collect fast metrics in background, update cache on completion."""
+            nonlocal _latest_metrics
+            try:
+                fm = await collect_fast_metrics()
+                nr = _network_tracker.get_rate()
+                _latest_metrics = {
+                    "cpu": fm.cpu_percent,
+                    "cpu_cores": fm.cpu_per_core,
+                    "mem_pct": fm.memory_percent,
+                    "mem_used": fm.memory_used,
+                    "mem_total": fm.memory_total,
+                    "swap_pct": fm.swap_percent,
+                    "swap_used": fm.swap_used,
+                    "swap_total": fm.swap_total,
+                    "load_1m": fm.load_1m,
+                    "load_5m": fm.load_5m,
+                    "load_15m": fm.load_15m,
+                    "procs": fm.process_count,
+                    "uptime": fm.uptime_seconds,
+                    "net_up": nr.bytes_sent_per_sec,
+                    "net_down": nr.bytes_recv_per_sec,
+                }
+            except Exception as exc:
+                logger.warning(f"RuOK SSE: fast metrics failed: {exc}")
 
         while True:
             try:
@@ -120,31 +150,14 @@ async def sse_event_generator(
                 ticks_since_metrics += 1
                 if ticks_since_metrics >= metrics_interval:
                     ticks_since_metrics = 0
-                    try:
-                        fm = await collect_fast_metrics()
-                        nr = _network_tracker.get_rate()
-                        yield _sse_event(
-                            "metrics",
-                            {
-                                "cpu": fm.cpu_percent,
-                                "cpu_cores": fm.cpu_per_core,
-                                "mem_pct": fm.memory_percent,
-                                "mem_used": fm.memory_used,
-                                "mem_total": fm.memory_total,
-                                "swap_pct": fm.swap_percent,
-                                "swap_used": fm.swap_used,
-                                "swap_total": fm.swap_total,
-                                "load_1m": fm.load_1m,
-                                "load_5m": fm.load_5m,
-                                "load_15m": fm.load_15m,
-                                "procs": fm.process_count,
-                                "uptime": fm.uptime_seconds,
-                                "net_up": nr.bytes_sent_per_sec,
-                                "net_down": nr.bytes_recv_per_sec,
-                            },
-                        )
-                    except Exception as exc:
-                        logger.warning(f"RuOK SSE: fast metrics failed: {exc}")
+                    # Fire background collection; don't await — keep tick on time
+                    _metrics_task = asyncio.create_task(
+                        _collect_metrics_background()
+                    )
+                # If background task finished, emit cached result
+                if _latest_metrics is not None:
+                    yield _sse_event("metrics", _latest_metrics)
+                    _latest_metrics = None
     except asyncio.CancelledError:
         pass
     finally:

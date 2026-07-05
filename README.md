@@ -99,7 +99,7 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 
 ## ⚙️ 配置
 
-在 nonebot2 项目的 `.env` 文件中，所有配置项使用 `RUOK__` 前缀。**插件零配置即可加载**，所有配置均有默认值。
+在 nonebot2 项目的 `.env` 文件中，添加以下配置项即可。
 
 ### 健康检查
 
@@ -128,7 +128,10 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 | `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 允许上报问题的用户白名单（QQ号字符串） |
 | `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 允许上报问题的群白名单（群号字符串） |
 
-> **上报权限优先级**：SUPERUSERS > 白名单用户 > 群管理员/群主 > 白名单群。`crisis_mode=True` 时全部跳过。
+**上报权限判断优先级**：
+> SUPERUSERS → 白名单用户 → 群管理员/群主 → 白名单群群员
+
+**`crisis_mode=True` 时全部跳过** *(启发自Cloudflare的Zero Trust Mode，Reversed)* 。
 
 ### API / WebUI
 
