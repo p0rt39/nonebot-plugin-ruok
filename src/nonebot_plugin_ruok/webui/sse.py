@@ -155,7 +155,15 @@ async def sse_event_generator(
             except Exception as exc:
                 logger.warning(f"RuOK SSE: fast metrics failed: {exc}")
 
-        while True:
+        # ── Background status collection (also async to avoid blocking ticks) ──
+        _status_task: asyncio.Task | None = None
+        _cached_status: dict[str, Any] | None = None
+        # Prime: fire immediately so first status event doesn't wait 10s
+        _tick_counter = tick_count  # emit status on first iteration
+
+        async def _collect_status_background() -> None:
+            """Collect full status in background, update cache on completion."""
+            nonlocal cached_overall, cached_connections, _cached_status
             try:
                 status = await collect_status_fn()
                 cached_overall = status.overall
@@ -163,20 +171,32 @@ async def sse_event_generator(
                     "online": sum(1 for c in status.connections if c.connected),
                     "total": len(status.connections),
                 }
-                yield _sse_event(
-                    "status",
-                    {
-                        "overall": cached_overall,
-                        "timestamp": status.timestamp.isoformat(),
-                        "connections_online": cached_connections["online"],
-                        "connections_total": cached_connections["total"],
-                    },
-                )
+                _cached_status = {
+                    "overall": cached_overall,
+                    "timestamp": status.timestamp.isoformat(),
+                    "connections_online": cached_connections["online"],
+                    "connections_total": cached_connections["total"],
+                }
             except Exception as exc:
                 logger.warning(f"RuOK SSE: status collection failed: {exc}")
 
+        while True:
+            # Fire background status collection when due and not already running
+            if _tick_counter >= tick_count:
+                _tick_counter = 0
+                if _status_task is None or _status_task.done():
+                    _status_task = asyncio.create_task(
+                        _collect_status_background()
+                    )
+
+            # Emit cached status result if ready
+            if _cached_status is not None:
+                yield _sse_event("status", _cached_status)
+                _cached_status = None
+
             for _ in range(tick_count):
                 await asyncio.sleep(1.0)
+                _tick_counter += 1
                 while not session_q.empty():
                     try:
                         event = session_q.get_nowait()
