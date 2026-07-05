@@ -8,6 +8,7 @@ import time
 import asyncio
 import hashlib
 import secrets
+import traceback
 from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -62,7 +63,7 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
                 details={"total_percent": cpu_pct, "per_core": per_core},
             )
         )
-    except Exception as exc:
+    except (psutil.AccessDenied, OSError) as exc:
         results.append(CheckResult(name="cpu", status="unknown", error=str(exc)))
 
     # Memory
@@ -84,7 +85,7 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
                 },
             )
         )
-    except Exception as exc:
+    except (psutil.AccessDenied, OSError) as exc:
         results.append(CheckResult(name="memory", status="unknown", error=str(exc)))
 
     # Swap
@@ -103,8 +104,8 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
                     },
                 )
             )
-    except Exception:
-        pass  # Swap info is optional
+    except (psutil.AccessDenied, OSError, NotImplementedError):
+        pass  # Swap info is optional / not supported on all platforms
 
     # Disk
     try:
@@ -119,7 +120,7 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
                     "percent": usage.percent,
                     "fstype": getattr(part, "fstype", "") or "",
                 }
-            except Exception:
+            except (OSError, PermissionError, psutil.AccessDenied):
                 continue
         worst = max((d["percent"] for d in disk_info.values()), default=0)
         results.append(
@@ -130,7 +131,7 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
                 details=disk_info,
             )
         )
-    except Exception as exc:
+    except (psutil.AccessDenied, OSError) as exc:
         results.append(CheckResult(name="disk", status="unknown", error=str(exc)))
 
     # Network
@@ -148,7 +149,7 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
                 },
             )
         )
-    except Exception:
+    except (psutil.AccessDenied, OSError):
         pass
 
     return results
@@ -187,7 +188,7 @@ def _collect_bot_info() -> list[CheckResult]:
                 },
             )
         )
-    except Exception as exc:
+    except (OSError, ImportError, RuntimeError) as exc:
         results.append(CheckResult(name="versions", status="unknown", error=str(exc)))
 
     # Adapters
@@ -201,7 +202,7 @@ def _collect_bot_info() -> list[CheckResult]:
                 name="adapters", status="healthy", details={"adapters": adapter_names}
             )
         )
-    except Exception as exc:
+    except (AttributeError, RuntimeError) as exc:
         results.append(CheckResult(name="adapters", status="unknown", error=str(exc)))
 
     return results
@@ -243,7 +244,7 @@ async def _collect_connection_status(config: ScopedConfig) -> list[BotConnection
                 if conns is not None and self_id in conns:
                     entry.ws_closed = conns[self_id].closed
                     break
-        except Exception:
+        except (AttributeError, KeyError):
             pass  # Not using OneBot or adapter doesn't expose connections
 
         # Deep e2e check
@@ -257,7 +258,7 @@ async def _collect_connection_status(config: ScopedConfig) -> list[BotConnection
             except asyncio.TimeoutError:
                 entry.latency_ms = None
                 entry.error = "get_status() timed out"
-            except Exception as exc:
+            except (OSError, RuntimeError) as exc:
                 entry.latency_ms = None
                 entry.error = str(exc)
 
@@ -380,7 +381,7 @@ async def collect_all_statuses(
     # 1. Check module status (most important)
     try:
         modules = list_modules(data_dir, config)
-    except Exception:
+    except (json.JSONDecodeError, OSError, ValueError):
         modules = []
     if any(m.status == "unavailable" for m in modules):
         overall = "unavailable"
@@ -428,7 +429,7 @@ async def collect_all_statuses(
             ),
             retention_days=config.metrics_retention_days,
         )
-    except Exception:
+    except (json.JSONDecodeError, OSError, ValueError):
         pass  # Metrics are best-effort
 
     return result
@@ -510,7 +511,7 @@ async def collect_fast_metrics() -> FastMetricsSnapshot:
                     if entries:
                         cpu_temp = entries[0].current
                         break
-        except Exception:
+        except (AttributeError, NotImplementedError, OSError):
             pass
 
         return FastMetricsSnapshot(
@@ -603,7 +604,7 @@ class NetworkRateTracker:
         now = time.time()
         try:
             net = psutil.net_io_counters()
-        except Exception:
+        except (psutil.AccessDenied, OSError, AttributeError):
             return NetworkRate()
 
         cur = {
@@ -656,7 +657,7 @@ class DiskRateTracker:
         now = time.time()
         try:
             per_disk = psutil.disk_io_counters(perdisk=True)
-        except Exception:
+        except (psutil.AccessDenied, OSError, AttributeError, RuntimeError):
             return DiskIORate(), {}
 
         if not per_disk:
@@ -867,9 +868,8 @@ def _find_existing_session(data_dir: Path, signature: str) -> Session | None:
     for f in _sessions_dir(data_dir).glob("*.json"):
         try:
             s = Session.model_validate_json(f.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, ValueError, OSError):
             continue
-        if s.error_signature == signature and s.status in ("pending", "unsolved"):
             return s
     return None
 
@@ -938,7 +938,10 @@ def list_sessions(
     for f in _sessions_dir(data_dir).glob("*.json"):
         try:
             s = Session.model_validate_json(f.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, ValueError, OSError):
+            continue
+        except Exception as exc:
+            _handle_ruok_error(exc, f"list_sessions 读取文件: {f.name}", data_dir)
             continue
         if statuses and s.status not in statuses:
             continue
@@ -1044,8 +1047,60 @@ def _publish_session_event(
                 "last_seen_at": session.last_seen_at.isoformat(),
             },
         )
-    except Exception:
+    except (ImportError, RuntimeError):
         pass  # SSE is best-effort, never crash the collector
+
+
+# ────────────────────────────────
+# 7b. Internal error handler — auto-create RuOK sessions
+# ────────────────────────────────
+
+
+def _handle_ruok_error(
+    exc: BaseException,
+    context: str,
+    data_dir: Path,
+) -> str:
+    """Log an unexpected internal error with full traceback and create a
+    RuOK self-monitoring session under the built-in ``"ruok"`` module.
+
+    Returns the *session_id* for use in user-facing error messages, or
+    ``"N/A"`` when even the session cannot be persisted.
+    """
+    tb_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+
+    logger.error(
+        f"RuOK 内部异常 [{context}]: {type(exc).__name__}: {exc}\n{tb_text}"
+    )
+
+    # Auto-create a session so the error is tracked and visible in WebUI
+    try:
+        session = Session(
+            session_id=_gen_session_id(),
+            source="automatic",
+            status="pending",
+            module_name="ruok",
+            error_signature=_make_signature(
+                "ruok", type(exc).__name__, str(exc)[:100]
+            ),
+            reporter=ReporterInfo(type="automatic"),
+            description=(
+                f"**上下文**: {context}\n"
+                f"**异常类型**: {type(exc).__name__}\n"
+                f"**异常信息**: {exc}\n\n"
+                f"```\n{tb_text}\n```"
+            ),
+            developer_notes=tb_text,
+            occurrences=[Occurrence(source="automatic")],
+        )
+        _save_session(data_dir, session)
+    except Exception:
+        return "N/A"  # cannot even persist the error session
+
+    # Best-effort: publish to SSE and notify superusers
+    _publish_session_event("created", session)
+
+    return session.session_id
 
 
 def link_sessions(data_dir: Path, session_id_a: str, session_id_b: str) -> bool:
@@ -1111,7 +1166,12 @@ def get_linked_sessions(data_dir: Path, session_id: str) -> list[Session]:
     for f in _sessions_dir(data_dir).glob("*.json"):
         try:
             other = Session.model_validate_json(f.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, ValueError, OSError):
+            continue
+        except Exception as exc:
+            _handle_ruok_error(
+                exc, f"get_linked_sessions 读取文件: {f.name}", data_dir
+            )
             continue
         if other.link_group == group and other.session_id != session_id:
             linked.append(other)
@@ -1124,7 +1184,12 @@ def _merge_link_groups(data_dir: Path, from_group: str, to_group: str) -> None:
     for f in _sessions_dir(data_dir).glob("*.json"):
         try:
             s = Session.model_validate_json(f.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, ValueError, OSError):
+            continue
+        except Exception as exc:
+            _handle_ruok_error(
+                exc, f"_merge_link_groups 读取文件: {f.name}", data_dir
+            )
             continue
         if s.link_group == from_group:
             s.link_group = to_group
@@ -1273,9 +1338,11 @@ def _notify_new_session(session: Session) -> None:
                         bot.send_private_msg(user_id=int(uid), message=text)
                     )
                 )
-            except Exception:
-                logger.warning(f"RuOK: failed to notify superuser {uid}")
-    except Exception as exc:
+            except (ValueError, RuntimeError) as exc:
+                logger.warning(
+                    f"RuOK: failed to notify superuser {uid}: {exc}"
+                )
+    except (RuntimeError, KeyError) as exc:
         logger.warning(f"RuOK: notification failed: {exc}")
 
 
@@ -1357,7 +1424,12 @@ class MetricsStore:
                     ts = datetime.fromisoformat(pt.ts)
                     if ts >= cutoff:
                         points.append(pt)
-                except Exception:
+                except (ValueError, KeyError):
+                    continue
+                except Exception as exc:
+                    _handle_ruok_error(
+                        exc, "MetricsStore.query 解析记录", data_dir
+                    )
                     continue
 
         points.sort(key=lambda p: p.ts)

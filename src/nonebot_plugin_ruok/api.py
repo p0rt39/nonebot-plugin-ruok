@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import asyncio
 from typing import Any
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from .collector import (
     unlink_session,
     update_session,
     get_session_stats,
+    _handle_ruok_error,
     get_linked_sessions,
     collect_all_statuses,
 )
@@ -68,8 +70,15 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         if data is None:
             try:
                 data = await collect_all_statuses(config, data_dir)
-            except Exception:
-                return JSONResponse({"status": "unhealthy"}, status_code=503)
+            except (asyncio.TimeoutError, RuntimeError, OSError):
+                return JSONResponse(
+                    {"status": "unhealthy"}, status_code=503
+                )
+            except Exception as exc:
+                _handle_ruok_error(exc, "api_health", data_dir)
+                return JSONResponse(
+                    {"status": "unhealthy"}, status_code=503
+                )
         if data.overall == "unavailable":
             return JSONResponse(
                 {"status": "unhealthy", "overall": data.overall}, status_code=503

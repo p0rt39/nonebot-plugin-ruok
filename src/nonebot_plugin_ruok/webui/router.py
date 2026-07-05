@@ -1,10 +1,13 @@
 """SSR routes for RuOK WebUI — Jinja2 + HTMX + Pico.css."""
 from __future__ import annotations
 
+import json
+import asyncio
 from pathlib import Path
 from datetime import datetime
 
 from fastapi import Form, Depends, Request, APIRouter
+from nonebot import logger
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
@@ -34,6 +37,7 @@ from ..collector import (
     update_session,
     _network_tracker,
     get_session_stats,
+    _handle_ruok_error,
     get_linked_sessions,
     collect_all_statuses,
     collect_fast_metrics,
@@ -86,7 +90,12 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                              _guard_ok=Depends(_webui_guard)):
         try:
             status = await collect_all_statuses(config, data_dir)
-        except Exception:
+        except (asyncio.TimeoutError, RuntimeError, OSError):
+            from ..protocol import AggregatedStatus
+
+            status = AggregatedStatus(overall="unavailable")
+        except Exception as exc:
+            _handle_ruok_error(exc, "page_dashboard 状态采集", data_dir)
             from ..protocol import AggregatedStatus
 
             status = AggregatedStatus(overall="unavailable")
@@ -113,7 +122,11 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         try:
             metrics_snap = await collect_fast_metrics()
             net_rate = _network_tracker.get_rate()
-        except Exception:
+        except (OSError, RuntimeError):
+            metrics_snap = FastMetricsSnapshot()
+            net_rate = NetworkRate()
+        except Exception as exc:
+            _handle_ruok_error(exc, "page_dashboard 快速指标采集", data_dir)
             metrics_snap = FastMetricsSnapshot()
             net_rate = NetworkRate()
         return render(
@@ -275,9 +288,17 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                     )
                 },
             )
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning(f"RuOK WebUI: create session failed: {exc}")
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 创建 Session 失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, "action_session_create", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
 
@@ -288,9 +309,17 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             s = get_session(data_dir, session_id)
             if s is None:
                 raise ValueError("Session not found after update")
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning(f"RuOK WebUI: confirm failed: {exc}")
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, f"action_confirm {session_id}", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
         return render(
@@ -310,9 +339,17 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             s = get_session(data_dir, session_id)
             if s is None:
                 raise ValueError("Session not found after update")
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning(f"RuOK WebUI: solve failed: {exc}")
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, f"action_solve {session_id}", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
         return render(
@@ -332,9 +369,17 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             s = get_session(data_dir, session_id)
             if s is None:
                 raise ValueError("Session not found after update")
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning(f"RuOK WebUI: ignore failed: {exc}")
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, f"action_ignore {session_id}", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
         return render(
@@ -355,9 +400,19 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             update_session(
                 data_dir, session_id, {"developer_notes": developer_notes}
             )
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning(f"RuOK WebUI: note save failed: {exc}")
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 保存失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, f"action_session_note {session_id}", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
         return HTMLResponse(
@@ -424,9 +479,19 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         try:
             upsert_module(data_dir, definition)
             modules = list_modules(data_dir, config)
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning(f"RuOK WebUI: module upsert failed: {exc}")
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 保存模块失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, f"action_module_upsert {name}", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
         return render("_modules_table.html.jinja2", request=request, modules=modules)
@@ -436,9 +501,19 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         try:
             delete_module(data_dir, name)
             modules = list_modules(data_dir, config)
-        except Exception:
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(f"RuOK WebUI: module delete failed: {exc}")
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 删除模块失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, f"action_module_delete {name}", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
         return render("_modules_table.html.jinja2", request=request, modules=modules)
@@ -453,9 +528,16 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         rules_file = data_dir / "notification_rules.json"
         if rules_file.exists():
             try:
-                import json
                 file_rules = json.loads(rules_file.read_text("utf-8"))
-            except Exception:
+            except (json.JSONDecodeError, OSError, ValueError) as exc:
+                logger.warning(
+                    f"RuOK WebUI: load notification rules failed: {exc}"
+                )
+                file_rules = []
+            except Exception as exc:
+                _handle_ruok_error(
+                    exc, "_load_notification_rules", data_dir
+                )
                 file_rules = []
         # Merge: file rules override config rules by name
         config_rules = [r.model_dump(mode="json") for r in config.notification_rules]
@@ -466,7 +548,6 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     def _save_notification_rules(rules: list) -> None:
         """Persist notification rules to data file."""
-        import json
 
         rules_file = data_dir / "notification_rules.json"
         rules_file.parent.mkdir(parents=True, exist_ok=True)
@@ -507,9 +588,21 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 rules = [r for r in rules if r.name != name]
             rules.append(rule)
             _save_notification_rules(rules)
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning(
+                f"RuOK WebUI: notification upsert failed: {exc}"
+            )
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 保存规则失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, "action_notification_upsert", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
         return render(
@@ -525,9 +618,21 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         try:
             rules = [r for r in _load_notification_rules() if r.name != name]
             _save_notification_rules(rules)
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning(
+                f"RuOK WebUI: notification delete failed: {exc}"
+            )
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 删除规则失败</p>',
+                status_code=500,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, "action_notification_delete", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 未知错误 [{type(exc).__name__}] → Session: {sid}</p>',
                 status_code=500,
             )
         return render(

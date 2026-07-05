@@ -20,6 +20,7 @@ from .collector import (
     list_sessions,
     create_session,
     update_session,
+    _handle_ruok_error,
     _connection_history,
 )
 from .webui.router import create_webui_router
@@ -187,7 +188,11 @@ async def _cmd_status() -> None:
         from .collector import list_modules as lm
 
         modules = lm(data_dir, plugin_config)
-    except Exception:
+    except (OSError, ValueError, ImportError) as exc:
+        logger.warning(f"RuOK: status list_modules failed: {exc}")
+        modules = []
+    except Exception as exc:
+        _handle_ruok_error(exc, "_cmd_status list_modules", data_dir)
         modules = []
 
     if not modules:
@@ -306,8 +311,10 @@ if isinstance(driver, ASGIMixin):
                 allow_headers=["*"],
             )
             logger.info("RuOK CORS middleware registered")
-        except Exception as exc:
+        except (ImportError, RuntimeError) as exc:
             logger.warning(f"RuOK CORS setup failed: {exc}")
+        except Exception as exc:
+            _handle_ruok_error(exc, "CORS middleware setup", data_dir)
 
         # SessionMiddleware — always added for request.session support.
         # Auth gating (enabled/disabled) is handled at route level via require_login().
@@ -316,8 +323,10 @@ if isinstance(driver, ASGIMixin):
 
             app.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(32))
             logger.info("RuOK SessionMiddleware registered")
-        except Exception as exc:
+        except (ImportError, RuntimeError) as exc:
             logger.warning(f"RuOK SessionMiddleware setup failed: {exc}")
+        except Exception as exc:
+            _handle_ruok_error(exc, "SessionMiddleware setup", data_dir)
     else:
         logger.warning("RuOK: driver.server_app is not a FastAPI instance, " \
         "skipping middleware")
@@ -361,22 +370,28 @@ async def _startup():
             auth_router = auth.create_router()
             app.include_router(auth_router)
             logger.info("RuOK Auth routes mounted")
-        except Exception as exc:
+        except (ImportError, RuntimeError) as exc:
             logger.warning(f"RuOK Auth mount failed: {exc}")
+        except Exception as exc:
+            _handle_ruok_error(exc, "Auth routes mount", data_dir)
 
         try:
             router = create_ruok_router(plugin_config, data_dir)
             app.include_router(router)
             logger.info("RuOK API mounted at /ruok/api/*")
-        except Exception as exc:
+        except (ImportError, RuntimeError) as exc:
             logger.warning(f"RuOK API mount failed: {exc}")
+        except Exception as exc:
+            _handle_ruok_error(exc, "API routes mount", data_dir)
 
         try:
             webui_router = create_webui_router(plugin_config, data_dir)
             app.include_router(webui_router)
             logger.info("RuOK WebUI SSR mounted at /ruok")
-        except Exception as exc:
+        except (ImportError, RuntimeError) as exc:
             logger.warning(f"RuOK WebUI mount failed: {exc}")
+        except Exception as exc:
+            _handle_ruok_error(exc, "WebUI routes mount", data_dir)
     else:
         logger.info("RuOK: non-ASGI driver, skipping API/WebUI mount")
 
