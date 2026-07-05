@@ -336,7 +336,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 current_before="",
                 headers={
                     "HX-Trigger": (
-                        '{"toast":"[OK] Session 已创建","toastType":"success"}'
+                        '{"toast":"Session created","toastType":"success"}'
                     )
                 },
             )
@@ -369,7 +369,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             s=s,
             headers={
                 "HX-Trigger": (
-                    '{"toast":"[OK] 已确认 Session","toastType":"success"}'
+                    '{"toast":"Session confirmed","toastType":"success"}'
                 )
             },
         )
@@ -395,7 +395,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             s=s,
             headers={
                 "HX-Trigger": (
-                    '{"toast":"[OK] Session 已解决","toastType":"success"}'
+                    '{"toast":"Session resolved","toastType":"success"}'
                 )
             },
         )
@@ -421,7 +421,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             s=s,
             headers={
                 "HX-Trigger": (
-                    '{"toast":"[i] Session 已忽略","toastType":"info"}'
+                    '{"toast":"Session ignored","toastType":"info"}'
                 )
             },
         )
@@ -617,7 +617,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             "notifications.html.jinja2",
             request=request,
             rules=rules,
-            headers={"HX-Trigger": '{"toast":"[OK] 规则已保存","toastType":"success"}'},
+            headers={"HX-Trigger": '{"toast":"Rule saved","toastType":"success"}'},
         )
 
     @router.post("/ruok/_actions/notification-delete/{name}")
@@ -639,7 +639,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             "notifications.html.jinja2",
             request=request,
             rules=rules,
-            headers={"HX-Trigger": '{"toast":"[X] 规则已删除","toastType":"info"}'},
+            headers={"HX-Trigger": '{"toast":"Rule deleted","toastType":"info"}'},
         )
 
     return router
