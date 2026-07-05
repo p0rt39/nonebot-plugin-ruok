@@ -15,7 +15,7 @@
 <!-- Unified System Overview — replaces gauges + info row -->
 <div id="dashboard-system"
      hx-get="/ruok?_partial=dashboard-system"
-     hx-trigger="load" hx-swap="outerHTML">
+     hx-trigger="load" hx-swap="innerHTML">
     {% include "_dashboard_system.html.jinja2" %}
 </div>
 
