@@ -6,21 +6,12 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from pathlib import Path
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from jinja2 import Environment, FileSystemLoader
 from nonebot import logger
 
-TEMPLATES_DIR = Path(__file__).parent / "templates"
-_jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
-
-
-def _render(template_name: str, **context) -> HTMLResponse:
-    template = _jinja_env.get_template(template_name)
-    return HTMLResponse(template.render(**context))
+from .jinja import render
 
 
 def verify_password(plain: str, stored_hash: str) -> bool:
@@ -71,14 +62,14 @@ class WebUIAuth:
             # Already logged in?
             if request.session.get(self._session_key):
                 return RedirectResponse(url="/ruok", status_code=302)
-            return _render("login.html.jinja2", request=request)
+            return render("login.html.jinja2", request=request)
 
         @router.post("/ruok/login")
         async def login_action(request: Request, password: str = Form(...)):
             if verify_password(password, self._password_hash):
                 request.session[self._session_key] = True
                 return RedirectResponse(url="/ruok", status_code=302)
-            return _render(
+            return render(
                 "login.html.jinja2", request=request, error="密码错误"
             )
 

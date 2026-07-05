@@ -7,8 +7,6 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
-from jinja2 import Environment, FileSystemLoader
-
 from ..collector import (
     _network_tracker,
     collect_all_statuses,
@@ -28,42 +26,8 @@ from ..config import ScopedConfig
 from ..protocol import ModuleDefinition
 
 from .auth import WebUIAuth
+from .jinja import render
 from .sse import event_bus, sse_event_generator
-
-TEMPLATES_DIR = Path(__file__).parent / "templates"
-_jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
-
-
-# Custom Jinja2 filters for human-readable formatting in templates
-def _fmt_bytes_s(n: float) -> str:
-    if n < 1024:
-        return f"{n:.0f} B"
-    if n < 1024 * 1024:
-        return f"{n / 1024:.1f} KB"
-    if n < 1024 * 1024 * 1024:
-        return f"{n / (1024 * 1024):.1f} MB"
-    return f"{n / (1024 * 1024 * 1024):.2f} GB"
-
-
-def _fmt_uptime_s(seconds: int) -> str:
-    days, rem = divmod(seconds, 86400)
-    hours, rem = divmod(rem, 3600)
-    mins, secs = divmod(rem, 60)
-    if days:
-        return f"{days}d {hours}h {mins}m"
-    if hours:
-        return f"{hours}h {mins}m {secs}s"
-    return f"{mins}m {secs}s"
-
-
-_jinja_env.filters["_fmt_bytes_s"] = _fmt_bytes_s
-_jinja_env.filters["_fmt_uptime_s"] = _fmt_uptime_s
-
-
-def _render(template_name: str, **context) -> HTMLResponse:
-    """Render a Jinja2 template directly, bypassing Starlette's TemplateResponse."""
-    template = _jinja_env.get_template(template_name)
-    return HTMLResponse(template.render(**context))
 
 
 def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
@@ -92,17 +56,16 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     # ── Auth guard dependency ──
 
-    async def _guard(request: Request):
-        if not await auth.require_login(request):
+    async def _webui_guard(request: Request):
+        """FastAPI dependency: redirect to login if not authenticated."""
+        if auth.enabled and not await auth.require_login(request):
             return RedirectResponse(url="/ruok/login", status_code=302)
-        return None
 
     # ── Pages ─────────────────────
 
     @router.get("/ruok", response_class=HTMLResponse)
-    async def page_dashboard(request: Request, _partial: str = ""):
-        if auth.enabled and not await auth.require_login(request):
-            return RedirectResponse(url="/ruok/login", status_code=302)
+    async def page_dashboard(request: Request, _partial: str = "",
+                             _guard_ok=Depends(_webui_guard)):
         try:
             status = await collect_all_statuses(config, data_dir)
         except Exception:
@@ -114,40 +77,55 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
         # SSE/polling partial renders
         if _partial == "dashboard-hero":
-            return _render("_dashboard_hero.html.jinja2", status=status)
+            return render("_dashboard_hero.html.jinja2", status=status)
         if _partial == "dashboard-gauges":
-            fm = await collect_fast_metrics()
-            nr = _network_tracker.get_rate()
-            return _render(
+            try:
+                fm = await collect_fast_metrics()
+                nr = _network_tracker.get_rate()
+            except Exception:
+                return HTMLResponse(
+                    '<article><p>⏳ 系统指标采集中，请稍候...</p></article>'
+                )
+            return render(
                 "_dashboard_gauges.html.jinja2",
                 metrics=fm,
                 net_up=nr.bytes_sent_per_sec,
                 net_down=nr.bytes_recv_per_sec,
             )
         if _partial == "dashboard-info":
-            fm = await collect_fast_metrics()
-            nr = _network_tracker.get_rate()
-            return _render(
+            try:
+                fm = await collect_fast_metrics()
+                nr = _network_tracker.get_rate()
+            except Exception:
+                return HTMLResponse(
+                    '<article><p>⏳ 运行信息采集中，请稍候...</p></article>'
+                )
+            return render(
                 "_dashboard_info.html.jinja2",
                 metrics=fm,
                 net_up=nr.bytes_sent_per_sec,
                 net_down=nr.bytes_recv_per_sec,
             )
         if _partial == "dashboard-metrics":
-            return _render("_dashboard_metrics.html.jinja2", status=status)
+            return render("_dashboard_metrics.html.jinja2", status=status)
         if _partial == "dashboard-disk":
-            return _render("_dashboard_disk.html.jinja2", status=status)
+            return render("_dashboard_disk.html.jinja2", status=status)
         if _partial == "dashboard-connections":
-            return _render("_dashboard_connections.html.jinja2", status=status)
+            return render("_dashboard_connections.html.jinja2", status=status)
         if _partial == "dashboard-stats":
-            return _render("_dashboard_stats.html.jinja2", stats=stats)
+            return render("_dashboard_stats.html.jinja2", stats=stats)
         if _partial == "dashboard-trends":
-            return _render("_dashboard_trends.html.jinja2")
+            return render("_dashboard_trends.html.jinja2")
 
         # Initial data for full page render
-        fm = await collect_fast_metrics()
-        nr = _network_tracker.get_rate()
-        return _render(
+        try:
+            fm = await collect_fast_metrics()
+            nr = _network_tracker.get_rate()
+        except Exception:
+            from ..protocol import FastMetricsSnapshot, NetworkRate
+            fm = FastMetricsSnapshot()
+            nr = NetworkRate()
+        return render(
             "dashboard.html.jinja2",
             request=request,
             status=status,
@@ -167,9 +145,8 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         plugin: str = "",
         after: str = "",
         before: str = "",
+        _guard_ok=Depends(_webui_guard),
     ):
-        if auth.enabled and not await auth.require_login(request):
-            return RedirectResponse(url="/ruok/login", status_code=302)
         first_seen_after = datetime.fromisoformat(after) if after else None
         first_seen_before = datetime.fromisoformat(before) if before else None
         sessions = list_sessions(
@@ -183,7 +160,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         )
         stats = get_session_stats(data_dir)
         all_modules = list_modules(data_dir, config)
-        return _render(
+        return render(
             "sessions.html.jinja2",
             request=request,
             sessions=sessions,
@@ -198,14 +175,13 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         )
 
     @router.get("/ruok/sessions/{session_id}", response_class=HTMLResponse)
-    async def page_session_detail(request: Request, session_id: str):
-        if auth.enabled and not await auth.require_login(request):
-            return RedirectResponse(url="/ruok/login", status_code=302)
+    async def page_session_detail(request: Request, session_id: str,
+                                 _guard_ok=Depends(_webui_guard)):
         session = get_session(data_dir, session_id)
         if session is None:
             return HTMLResponse("<p>Session not found</p>", status_code=404)
         linked = get_linked_sessions(data_dir, session_id)
-        return _render(
+        return render(
             "sessions_detail.html.jinja2",
             request=request,
             session=session,
@@ -213,18 +189,14 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         )
 
     @router.get("/ruok/modules", response_class=HTMLResponse)
-    async def page_modules(request: Request):
-        if auth.enabled and not await auth.require_login(request):
-            return RedirectResponse(url="/ruok/login", status_code=302)
+    async def page_modules(request: Request, _guard_ok=Depends(_webui_guard)):
         modules = list_modules(data_dir, config)
-        return _render("modules.html.jinja2", request=request, modules=modules)
+        return render("modules.html.jinja2", request=request, modules=modules)
 
     @router.get("/ruok/notifications", response_class=HTMLResponse)
-    async def page_notifications(request: Request):
-        if auth.enabled and not await auth.require_login(request):
-            return RedirectResponse(url="/ruok/login", status_code=302)
+    async def page_notifications(request: Request, _guard_ok=Depends(_webui_guard)):
         rules = config.notification_rules
-        return _render(
+        return render(
             "notifications.html.jinja2",
             request=request,
             rules=rules,
@@ -235,7 +207,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.get("/ruok/_partials/modules", response_class=HTMLResponse)
     async def partial_modules(request: Request):
         modules = list_modules(data_dir, config)
-        return _render("_modules_table.html.jinja2", request=request, modules=modules)
+        return render("_modules_table.html.jinja2", request=request, modules=modules)
 
     @router.get("/ruok/_partials/sessions", response_class=HTMLResponse)
     async def partial_sessions(
@@ -258,7 +230,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             first_seen_before=first_seen_before,
             plugin_name=plugin if plugin else None,
         )
-        return _render(
+        return render(
             "_sessions_list.html.jinja2",
             request=request,
             sessions=sessions,
@@ -269,22 +241,46 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.post("/ruok/_actions/confirm/{session_id}")
     async def action_confirm(session_id: str):
-        update_session(data_dir, session_id, {"status": "unsolved"})
+        try:
+            update_session(data_dir, session_id, {"status": "unsolved"})
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
+                status_code=500,
+            )
         return HTMLResponse(status_code=200)
 
     @router.post("/ruok/_actions/solve/{session_id}")
     async def action_solve(session_id: str):
-        update_session(data_dir, session_id, {"status": "solved"})
+        try:
+            update_session(data_dir, session_id, {"status": "solved"})
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
+                status_code=500,
+            )
         return HTMLResponse(status_code=200)
 
     @router.post("/ruok/_actions/ignore/{session_id}")
     async def action_ignore(session_id: str):
-        update_session(data_dir, session_id, {"status": "ignored"})
+        try:
+            update_session(data_dir, session_id, {"status": "ignored"})
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 操作失败</p>',
+                status_code=500,
+            )
         return HTMLResponse(status_code=200)
 
     @router.post("/ruok/_actions/session-note/{session_id}")
     async def action_session_note(session_id: str, developer_notes: str = Form("")):
-        update_session(data_dir, session_id, {"developer_notes": developer_notes})
+        try:
+            update_session(data_dir, session_id, {"developer_notes": developer_notes})
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 保存失败</p>',
+                status_code=500,
+            )
         return HTMLResponse(
             f'<div id="notes-area"><form hx-post="/ruok/_actions/session-note/{session_id}" hx-target="#notes-area" hx-swap="outerHTML"><textarea name="developer_notes" rows="3" style="width:100%;" placeholder="添加备注...">{developer_notes}</textarea><button type="submit">保存备注</button></form><p style="color: var(--pico-ins-color);">✅ 已保存</p></div>'
         )
@@ -295,7 +291,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         if not ok:
             return HTMLResponse('<p style="color:var(--pico-del-color);">Session 未找到或 ID 相同</p>', status_code=400)
         linked = get_linked_sessions(data_dir, session_id)
-        return _render("_linked_list.html.jinja2", session_id=session_id, linked_sessions=linked)
+        return render("_linked_list.html.jinja2", session_id=session_id, linked_sessions=linked)
 
     @router.post("/ruok/_actions/unlink/{session_id}")
     async def action_unlink(session_id: str):
@@ -306,16 +302,16 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def action_unlink_other(session_id: str, other_id: str):
         unlink_session(data_dir, other_id)
         linked = get_linked_sessions(data_dir, session_id)
-        return _render("_linked_list.html.jinja2", session_id=session_id, linked_sessions=linked)
+        return render("_linked_list.html.jinja2", session_id=session_id, linked_sessions=linked)
 
     @router.post("/ruok/_actions/module-upsert")
     async def action_module_upsert(
+        request: Request,
         name: str = Form(...),
         display_name: str = Form(""),
         description: str = Form(""),
         plugins: str = Form(""),
         enabled: bool = Form(True),
-        request: Request = None,
     ):
         plugins_list = [p.strip() for p in plugins.split(",") if p.strip()]
         definition = ModuleDefinition(
@@ -325,14 +321,26 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             description=description or None,
             enabled=enabled,
         )
-        upsert_module(data_dir, definition)
-        modules = list_modules(data_dir, config)
-        return _render("_modules_table.html.jinja2", request=request, modules=modules)
+        try:
+            upsert_module(data_dir, definition)
+            modules = list_modules(data_dir, config)
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 保存模块失败</p>',
+                status_code=500,
+            )
+        return render("_modules_table.html.jinja2", request=request, modules=modules)
 
     @router.post("/ruok/_actions/module-delete/{name}")
     async def action_module_delete(name: str, request: Request):
-        delete_module(data_dir, name)
-        modules = list_modules(data_dir, config)
-        return _render("_modules_table.html.jinja2", request=request, modules=modules)
+        try:
+            delete_module(data_dir, name)
+            modules = list_modules(data_dir, config)
+        except Exception:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">❌ 删除模块失败</p>',
+                status_code=500,
+            )
+        return render("_modules_table.html.jinja2", request=request, modules=modules)
 
     return router
