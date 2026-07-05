@@ -41,8 +41,19 @@
 
 <script>
 (function() {
+    var DBG = '[RuOK:SSE]';
+    console.log(DBG, '初始化 SSE 连接...');
+
     var src = new EventSource('/ruok/sse');
     var lastOverall = '';
+    var _evtCount = { status: 0, tick: 0, metrics: 0, session_update: 0 };
+
+    src.onopen = function() {
+        console.log(DBG, '✅ SSE 连接已建立');
+    };
+    src.onerror = function(e) {
+        console.warn(DBG, '⚠️ SSE 连接错误/断开 (将自动重连)', e);
+    };
 
     // ── Sparkline history buffers (30 points = ~90s @ 3s interval) ──
     var _spark = { net_up: [], net_down: [], disk_read: [], disk_write: [] };
@@ -55,7 +66,8 @@
 
     function drawSparkline(svgId, data, maxVal) {
         var poly = document.getElementById(svgId);
-        if (!poly || !data.length) return;
+        if (!poly) { console.debug(DBG, '  sparkline SVG 未找到:', svgId); return; }
+        if (!data.length) return;
         var w = 120, h = 30, pad = 2;
         var peak = maxVal || Math.max.apply(null, data) || 1;
         var points = data.map(function(v, i) {
@@ -67,6 +79,7 @@
     }
 
     function fmtBytes(n) {
+        if (n == null) return '—';
         if (n < 1024) return Math.round(n) + ' B';
         if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
         if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
@@ -86,21 +99,31 @@
 
     // ── status event ──
     src.addEventListener('status', function(e) {
+        _evtCount.status++;
         try {
             var d = JSON.parse(e.data);
+            console.log(DBG, '📡 status #' + _evtCount.status,
+                'overall=' + d.overall);
             if (d.overall !== lastOverall) {
+                console.log(DBG, '  overall 变更:', lastOverall, '→', d.overall, '— 刷新 hero');
                 lastOverall = d.overall;
                 htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
                     { target: '#dashboard-hero', swap: 'innerHTML' });
             }
-        } catch(_) {}
+        } catch(ex) { console.error(DBG, 'status 解析失败:', ex, e.data); }
     });
 
     // ── tick event ──
     src.addEventListener('tick', function(e) {
+        _evtCount.tick++;
         try {
             var d = JSON.parse(e.data);
+            if (_evtCount.tick <= 3 || _evtCount.tick % 10 === 0) {
+                console.log(DBG, '⏱ tick #' + _evtCount.tick,
+                    'overall=' + d.overall);
+            }
             if (d.overall !== lastOverall) {
+                console.log(DBG, '  (via tick) overall 变更:', lastOverall, '→', d.overall);
                 lastOverall = d.overall;
                 htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
                     { target: '#dashboard-hero', swap: 'innerHTML' });
@@ -110,18 +133,39 @@
                 tsEl.textContent = new Date(d.timestamp).toISOString()
                     .replace('T', ' ').replace(/\.\d+/, '') + ' UTC';
             }
-        } catch(_) {}
+        } catch(ex) { console.error(DBG, 'tick 解析失败:', ex); }
     });
 
     // ── metrics event: update all tiles + sparklines ──
     src.addEventListener('metrics', function(e) {
+        _evtCount.metrics++;
+        var t0 = performance.now();
         try {
             var m = JSON.parse(e.data);
+            var fields = Object.keys(m).length;
+            console.log(DBG, '📊 metrics #' + _evtCount.metrics,
+                '(' + fields + ' 字段)',
+                'cpu=' + (m.cpu != null ? Math.round(m.cpu) + '%' : '?'),
+                'mem=' + (m.mem_pct != null ? Math.round(m.mem_pct) + '%' : '?'),
+                'load=' + (m.load_1m != null ? m.load_1m.toFixed(2) : 'N/A'),
+                'net_up=' + fmtBytes(m.net_up) + '/s',
+                'disk_r=' + fmtBytes(m.disk_read || 0) + '/s',
+                'procs=' + m.procs,
+                'uptime=' + fmtUptime(m.uptime),
+                'cpu_temp=' + (m.cpu_temp != null ? Math.round(m.cpu_temp) + '°C' : 'N/A')
+            );
+
+            // Helper: log DOM element existence
+            function el(id) {
+                var e = document.getElementById(id);
+                if (!e) console.debug(DBG, '  ⚠ DOM 元素未找到: #' + id);
+                return e;
+            }
 
             // --- Ring gauges ---
             [{id:'cpu', v:m.cpu}, {id:'mem', v:m.mem_pct}, {id:'swap', v:m.swap_pct}].forEach(function(g) {
-                var circle = document.getElementById('gauge-' + g.id + '-arc');
-                var text = document.getElementById('gauge-' + g.id + '-val');
+                var circle = el('gauge-' + g.id + '-arc');
+                var text = el('gauge-' + g.id + '-val');
                 if (circle) {
                     circle.setAttribute('stroke-dasharray', (g.v * Math.PI).toFixed(1) + ' 314.159');
                     circle.setAttribute('stroke', clr(g.v));
@@ -130,7 +174,7 @@
             });
 
             // --- Memory detail ---
-            var memDt = document.getElementById('mem-detail-tile');
+            var memDt = el('mem-detail-tile');
             if (memDt) memDt.textContent = fmtBytes(m.mem_used) + ' / ' + fmtBytes(m.mem_total);
 
             // --- CPU cores heatmap ---
@@ -146,20 +190,20 @@
             }
 
             // --- Load tile ---
-            var loadEl = document.getElementById('info-load');
-            var loadSub = document.getElementById('load-detail');
+            var loadEl = el('info-load');
+            var loadSub = el('load-detail');
             if (loadEl && m.load_1m != null) {
                 loadEl.textContent = m.load_1m.toFixed(2);
                 var lClr = clr(m.load_1m * 100 / (m.cpu_cores ? m.cpu_cores.length + 1 : 4));
                 loadEl.style.color = lClr;
                 if (loadSub) loadSub.textContent = m.load_5m.toFixed(2) + ' / ' + m.load_15m.toFixed(2);
-                var loadExp1 = document.getElementById('load-exp-1m');
-                var loadExp5 = document.getElementById('load-exp-5m');
-                var loadExp15 = document.getElementById('load-exp-15m');
+                var loadExp1 = el('load-exp-1m');
+                var loadExp5 = el('load-exp-5m');
+                var loadExp15 = el('load-exp-15m');
                 if (loadExp1) loadExp1.textContent = m.load_1m.toFixed(2);
                 if (loadExp5) loadExp5.textContent = m.load_5m.toFixed(2);
                 if (loadExp15) loadExp15.textContent = m.load_15m.toFixed(2);
-                var ratioEl = document.getElementById('load-exp-ratio');
+                var ratioEl = el('load-exp-ratio');
                 if (ratioEl) {
                     var cores = m.cpu_cores ? m.cpu_cores.length + 1 : '?';
                     ratioEl.textContent = '负载/核心比: ' + (m.load_1m / (cores === '?' ? 4 : cores)).toFixed(2);
@@ -167,26 +211,25 @@
             }
 
             // --- Network tile ---
-            var netUpEl = document.getElementById('net-up-val');
-            var netDownEl = document.getElementById('net-down-val');
+            var netUpEl = el('net-up-val');
+            var netDownEl = el('net-down-val');
             if (netUpEl) netUpEl.textContent = fmtBytes(m.net_up);
             if (netDownEl) netDownEl.textContent = fmtBytes(m.net_down);
-            var netExpUp = document.getElementById('net-exp-up');
-            var netExpDown = document.getElementById('net-exp-down');
+            var netExpUp = el('net-exp-up');
+            var netExpDown = el('net-exp-down');
             if (netExpUp) netExpUp.textContent = fmtBytes(m.net_up);
             if (netExpDown) netExpDown.textContent = fmtBytes(m.net_down);
-            var netPktUp = document.getElementById('net-exp-pkt-up');
-            var netPktDown = document.getElementById('net-exp-pkt-down');
+            var netPktUp = el('net-exp-pkt-up');
+            var netPktDown = el('net-exp-pkt-down');
             if (netPktUp) netPktUp.textContent = Math.round(m.net_packets_up || 0) + ' pkt';
             if (netPktDown) netPktDown.textContent = Math.round(m.net_packets_down || 0) + ' pkt';
-            // Sparkline
             pushSpark('net_up', m.net_up);
             pushSpark('net_down', m.net_down);
             drawSparkline('spark-net-up', _spark.net_up);
             drawSparkline('spark-net-down', _spark.net_down);
 
             // --- Disk IO tile ---
-            var diskTotal = document.getElementById('disk-total');
+            var diskTotal = el('disk-total');
             if (diskTotal) {
                 diskTotal.textContent = fmtBytes((m.disk_read || 0) + (m.disk_write || 0));
             }
@@ -194,8 +237,7 @@
             pushSpark('disk_write', m.disk_write || 0);
             drawSparkline('spark-disk-read', _spark.disk_read);
             drawSparkline('spark-disk-write', _spark.disk_write);
-            // Per-disk expand
-            var diskPerList = document.getElementById('disk-per-list');
+            var diskPerList = el('disk-per-list');
             if (diskPerList && m.disk_per) {
                 var html = '';
                 var keys = Object.keys(m.disk_per);
@@ -212,12 +254,11 @@
             }
 
             // --- Process tile ---
-            var procEl = document.getElementById('info-procs');
+            var procEl = el('info-procs');
             if (procEl) procEl.textContent = m.procs;
-            var botRssEl = document.getElementById('proc-bot-rss');
+            var botRssEl = el('proc-bot-rss');
             if (botRssEl) botRssEl.textContent = 'Bot: ' + fmtBytes(m.bot_rss || 0);
-            // Process expand detail
-            var procPanel = document.getElementById('proc-detail-panel');
+            var procPanel = el('proc-detail-panel');
             if (procPanel) {
                 var h = '<div><strong>Bot 进程:</strong> RSS ' + fmtBytes(m.bot_rss || 0) +
                         ' | VMS ' + fmtBytes(m.bot_vms || 0) +
@@ -234,52 +275,70 @@
             }
 
             // --- Uptime tile ---
-            var upEl = document.getElementById('info-uptime');
+            var upEl = el('info-uptime');
             if (upEl && m.uptime != null) upEl.textContent = fmtUptime(m.uptime);
-            // Boot time string
             if (m.boot_time) {
                 var bootDate = new Date(m.boot_time * 1000);
                 var bootStr = bootDate.toLocaleString();
-                var sysBootEl = document.getElementById('sys-boot-str');
+                var sysBootEl = el('sys-boot-str');
                 if (sysBootEl) sysBootEl.textContent = bootStr;
-                var uptBootEl = document.getElementById('uptime-exp-boot');
+                var uptBootEl = el('uptime-exp-boot');
                 if (uptBootEl) uptBootEl.textContent = bootStr;
                 var nowSec = Date.now() / 1000;
-                var sysRunEl = document.getElementById('uptime-exp-sys-run');
+                var sysRunEl = el('uptime-exp-sys-run');
                 if (sysRunEl) sysRunEl.textContent = fmtUptime(nowSec - m.boot_time);
             }
             if (m.bot_start_time) {
                 var botDate = new Date(m.bot_start_time * 1000);
-                var uptBotEl = document.getElementById('uptime-exp-bot');
+                var uptBotEl = el('uptime-exp-bot');
                 if (uptBotEl) uptBotEl.textContent = botDate.toLocaleString();
                 var nowSec = Date.now() / 1000;
-                var botRunEl = document.getElementById('uptime-exp-bot-run');
+                var botRunEl = el('uptime-exp-bot-run');
                 if (botRunEl) botRunEl.textContent = fmtUptime(nowSec - m.bot_start_time);
             }
 
             // --- Temperature tile ---
             if (m.cpu_temp != null) {
-                var tempTile = document.getElementById('tile-temp');
+                var tempTile = el('tile-temp');
                 if (tempTile) tempTile.style.display = '';
-                var tempVal = document.getElementById('info-temp');
+                var tempVal = el('info-temp');
                 if (tempVal) {
                     tempVal.textContent = Math.round(m.cpu_temp) + '°C';
                     tempVal.style.color = m.cpu_temp < 60 ? '#2ecc40' : m.cpu_temp < 80 ? '#ffdc00' : '#ff4136';
                 }
-                var tempExp = document.getElementById('temp-exp-val');
+                var tempExp = el('temp-exp-val');
                 if (tempExp) tempExp.textContent = Math.round(m.cpu_temp) + '°C';
+            } else {
+                var tempTile = el('tile-temp');
+                if (tempTile) tempTile.style.display = 'none';
             }
-        } catch(_) {}
+
+            var elapsed = (performance.now() - t0).toFixed(1);
+            if (_evtCount.metrics <= 3 || _evtCount.metrics % 5 === 0) {
+                console.log(DBG, '  ✅ metrics #' + _evtCount.metrics + ' 更新完成 (' + elapsed + 'ms)');
+            }
+        } catch(ex) {
+            console.error(DBG, '❌ metrics #' + _evtCount.metrics + ' 处理异常:', ex);
+        }
     });
 
     // ── session_update ──
-    src.addEventListener('session_update', function() {
-        htmx.ajax('GET', '/ruok?_partial=dashboard-stats',
-            { target: '#dashboard-stats', swap: 'innerHTML' });
+    src.addEventListener('session_update', function(e) {
+        _evtCount.session_update++;
+        console.log(DBG, '🔄 session_update #' + _evtCount.session_update, '— 刷新 stats');
+        try {
+            htmx.ajax('GET', '/ruok?_partial=dashboard-stats',
+                { target: '#dashboard-stats', swap: 'innerHTML' });
+        } catch(ex) { console.error(DBG, 'session_update HTMX 失败:', ex); }
     });
 
     // ── Cleanup on page unload ──
-    window.addEventListener('beforeunload', function() { src.close(); });
+    window.addEventListener('beforeunload', function() {
+        console.log(DBG, '🛑 页面卸载, 关闭 SSE (共收到',
+            _evtCount.status + ' status,', _evtCount.tick + ' tick,',
+            _evtCount.metrics + ' metrics,', _evtCount.session_update + ' session_update)');
+        src.close();
+    });
 })();
 </script>
 
