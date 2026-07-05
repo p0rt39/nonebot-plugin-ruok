@@ -1,9 +1,13 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}RuOK{% endblock %} — NoneBot2 Health Monitor</title>
+    <!-- Theme init: prevent flash of wrong theme -->
+    <script>
+        (function(){var t=localStorage.getItem('ruok-theme')||'light';document.documentElement.setAttribute('data-theme',t);})();
+    </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <script src="https://unpkg.com/htmx.org@2"></script>
     <script src="https://unpkg.com/idiomorph"></script>
@@ -21,6 +25,22 @@
             --radius-lg: 24px;
             --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
+
+        /* ── Dark mode overrides ── */
+        [data-theme="dark"] {
+            --glass-bg: rgba(30,30,40,0.55);
+            --glass-border: rgba(255,255,255,0.1);
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+            --shadow-md: 0 4px 16px rgba(0,0,0,0.25);
+            --shadow-lg: 0 12px 32px rgba(0,0,0,0.35);
+        }
+        [data-theme="dark"] body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        }
+        [data-theme="dark"] thead th { background: rgba(255,255,255,0.04); }
+        [data-theme="dark"] tbody tr:hover { background: rgba(102,126,234,0.1); }
+        [data-theme="dark"] .occurrence-list pre { background: rgba(255,255,255,0.04); }
+        [data-theme="dark"] footer { border-top-color: rgba(255,255,255,0.06); }
 
         /* ── Body background gradient ── */
         body {
@@ -216,6 +236,16 @@
         ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
 
+        /* ── Mobile nav ── */
+        @media (max-width: 768px) {
+            nav ul { flex-wrap: wrap; gap: 0.3rem; }
+            nav ul#nav-links { width: 100%; justify-content: center; }
+            nav ul#nav-links a { font-size: 0.85em; padding: 0.3rem 0.6rem; }
+            .card-grid { grid-template-columns: 1fr; }
+            .gauge-card { min-width: 100px !important; }
+            .gauge-card svg { width: 90px !important; height: 90px !important; }
+        }
+
         /* ── Toast notifications ── */
         #toast-container {
             position: fixed; top: 1rem; right: 1rem; z-index: 9999;
@@ -240,20 +270,26 @@
 </head>
 <body>
     <!-- Toast container -->
-    <div id="toast-container"></div>
+    <div id="toast-container" aria-live="polite"></div>
     <main class="container">
-        <nav>
+        <nav role="navigation" aria-label="主导航">
             <ul>
                 <li><strong>🔍 RuOK</strong></li>
             </ul>
-            <ul>
-                <li><a href="/ruok" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>总览</a></li>
-                <li><a href="/ruok/sessions" {% if active_page == 'sessions' %}aria-current="page"{% endif %}>Sessions</a></li>
-                <li><a href="/ruok/modules" {% if active_page == 'modules' %}aria-current="page"{% endif %}>模块</a></li>
-                <li><a href="/ruok/notifications" {% if active_page == 'notifications' %}aria-current="page"{% endif %}>通知</a></li>
+            <ul id="nav-links">
+                <li><a href="/ruok" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>📊 总览</a></li>
+                <li><a href="/ruok/sessions" {% if active_page == 'sessions' %}aria-current="page"{% endif %}>📋 Sessions</a></li>
+                <li><a href="/ruok/modules" {% if active_page == 'modules' %}aria-current="page"{% endif %}>📦 模块</a></li>
+                <li><a href="/ruok/notifications" {% if active_page == 'notifications' %}aria-current="page"{% endif %}>🔔 通知</a></li>
             </ul>
             <ul>
-                <li><a href="/ruok/logout" title="登出">🚪</a></li>
+                <li>
+                    <button id="theme-toggle" aria-label="切换暗色模式" title="切换暗色模式"
+                            style="background:none;border:none;font-size:1.2em;padding:0.2rem 0.5rem;cursor:pointer;">
+                        🌙
+                    </button>
+                </li>
+                <li><a href="/ruok/logout" title="登出" aria-label="登出">🚪</a></li>
             </ul>
         </nav>
 
@@ -263,6 +299,25 @@
     <footer>
         RuOK · NoneBot2 Health Monitor
     </footer>
+
+<script>
+// ── Theme toggle ──
+(function() {
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    function setTheme(t) {
+        document.documentElement.setAttribute('data-theme', t);
+        localStorage.setItem('ruok-theme', t);
+        btn.textContent = t === 'dark' ? '☀️' : '🌙';
+        btn.setAttribute('aria-label', t === 'dark' ? '切换亮色模式' : '切换暗色模式');
+    }
+    btn.addEventListener('click', function() {
+        setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
+    // Initialize button state
+    setTheme(document.documentElement.getAttribute('data-theme') || 'light');
+})();
+</script>
 
 <script>
 // ── Toast notification system ──
