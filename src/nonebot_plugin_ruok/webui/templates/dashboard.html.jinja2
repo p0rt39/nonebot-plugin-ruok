@@ -226,16 +226,16 @@
             drawSparkline('spark-net-up', _spark.net_up);
             drawSparkline('spark-net-down', _spark.net_down);
 
-            // --- Disk IO tile ---
-            var diskTotal = el('disk-total');
-            if (diskTotal) {
-                diskTotal.textContent = fmtBytes((m.disk_read || 0) + (m.disk_write || 0));
-            }
+            // --- Disk IO tile (two-row display) ---
+            var diskReadEl = el('disk-read-val');
+            var diskWriteEl = el('disk-write-val');
+            if (diskReadEl) diskReadEl.textContent = fmtBytes(m.disk_read || 0);
+            if (diskWriteEl) diskWriteEl.textContent = fmtBytes(m.disk_write || 0);
             pushSpark('disk_read', m.disk_read || 0);
             pushSpark('disk_write', m.disk_write || 0);
             drawSparkline('spark-disk-read', _spark.disk_read);
             drawSparkline('spark-disk-write', _spark.disk_write);
-            var diskPerList = el('disk-per-list');
+            // Per-disk expand
             if (diskPerList && m.disk_per) {
                 var html = '';
                 var keys = Object.keys(m.disk_per);
