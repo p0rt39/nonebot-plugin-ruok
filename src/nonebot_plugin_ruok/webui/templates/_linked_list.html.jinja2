@@ -1,0 +1,16 @@
+<!-- HTMX partial: linked sessions list -->
+{% if linked_sessions %}
+<ul>
+    {% for s in linked_sessions %}
+    <li id="link-{{ s.session_id }}">
+        <a href="/ruok/sessions/{{ s.session_id }}">{{ s.session_id }}</a>
+        <small>({{ s.module_name }}, {{ s.status }})</small>
+        <button class="secondary outline" style="padding:1px 6px;font-size:0.7em;margin-left:0.5rem;"
+                hx-post="/ruok/_actions/link/{{ session_id }}/remove/{{ s.session_id }}"
+                hx-target="closest ul" hx-swap="outerHTML">✕</button>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p>暂无关联 Session。</p>
+{% endif %}

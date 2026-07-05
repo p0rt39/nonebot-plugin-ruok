@@ -251,8 +251,11 @@ async def _cmd_lookup(rest: str) -> None:
         f"创建: {session.first_seen_at} | 最近: {session.last_seen_at}",
         f"重复次数: {len(session.occurrences)}",
     ]
-    if session.linked_sessions:
-        lines.append(f"关联: {', '.join(session.linked_sessions)}")
+    from .collector import get_linked_sessions
+
+    linked = get_linked_sessions(data_dir, session.session_id)
+    if linked:
+        lines.append(f"关联 ({len(linked)}): {', '.join(s.session_id for s in linked)}")
     await ruok_cmd.finish("\n".join(lines))
 
 

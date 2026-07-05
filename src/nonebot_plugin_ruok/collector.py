@@ -730,7 +730,7 @@ def update_session(data_dir: Path, session_id: str, updates: dict[str, Any]) -> 
     if session is None:
         return None
 
-    allowed = {"status", "developer_notes", "last_seen_at", "linked_sessions"}
+    allowed = {"status", "developer_notes", "last_seen_at", "link_group"}
     old_status = session.status
     for k, v in updates.items():
         if k in allowed:
@@ -769,17 +769,86 @@ def _publish_session_event(
 
 
 def link_sessions(data_dir: Path, session_id_a: str, session_id_b: str) -> bool:
+    """Link two sessions into the same link_group (group-based, no cross-linking).
+
+    Scenarios:
+    - Both have no group → create new group, both join.
+    - One has a group → the other joins that group.
+    - Different groups → merge all sessions in group B into group A.
+    - Same group → no-op (idempotent).
+    """
     sa = _load_session(data_dir, session_id_a)
     sb = _load_session(data_dir, session_id_b)
     if sa is None or sb is None:
         return False
-    if session_id_b not in sa.linked_sessions:
-        sa.linked_sessions.append(session_id_b)
-    if session_id_a not in sb.linked_sessions:
-        sb.linked_sessions.append(session_id_a)
-    _save_session(data_dir, sa)
-    _save_session(data_dir, sb)
+    if sa.session_id == sb.session_id:
+        return False
+
+    ga = sa.link_group
+    gb = sb.link_group
+
+    if ga is None and gb is None:
+        # New group
+        gid = f"ruok-grp-{secrets.token_hex(4)}"
+        sa.link_group = gid
+        sb.link_group = gid
+        _save_session(data_dir, sa)
+        _save_session(data_dir, sb)
+    elif ga and gb is None:
+        sb.link_group = ga
+        _save_session(data_dir, sb)
+    elif ga is None and gb:
+        sa.link_group = gb
+        _save_session(data_dir, sa)
+    elif ga == gb:
+        return True  # Already same group
+    else:
+        # Merge groups: move all gb → ga
+        _merge_link_groups(data_dir, gb, ga)
+
     return True
+
+
+def unlink_session(data_dir: Path, session_id: str) -> bool:
+    """Remove a session from its link_group."""
+    s = _load_session(data_dir, session_id)
+    if s is None or s.link_group is None:
+        return False
+    s.link_group = None
+    _save_session(data_dir, s)
+    return True
+
+
+def get_linked_sessions(
+    data_dir: Path, session_id: str
+) -> list[Session]:
+    """Return all sessions in the same link_group (excluding self)."""
+    s = _load_session(data_dir, session_id)
+    if s is None or s.link_group is None:
+        return []
+    group = s.link_group
+    linked: list[Session] = []
+    for f in _sessions_dir(data_dir).glob("*.json"):
+        try:
+            other = Session.model_validate_json(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if other.link_group == group and other.session_id != session_id:
+            linked.append(other)
+    linked.sort(key=lambda x: x.last_seen_at, reverse=True)
+    return linked
+
+
+def _merge_link_groups(data_dir: Path, from_group: str, to_group: str) -> None:
+    """Move all sessions in *from_group* to *to_group*."""
+    for f in _sessions_dir(data_dir).glob("*.json"):
+        try:
+            s = Session.model_validate_json(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if s.link_group == from_group:
+            s.link_group = to_group
+            _save_session(data_dir, s)
 
 
 # ────────────────────────────────

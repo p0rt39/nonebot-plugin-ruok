@@ -1,0 +1,42 @@
+<!-- SSE-refreshed partial: session stats + pie chart -->
+<h3>📊 Session 统计 <small style="font-weight:normal;opacity:0.7;">(SSE 实时)</small></h3>
+<div class="grid">
+    <article>
+        <canvas id="chart-sessions-pie" style="max-height: 250px;"></canvas>
+    </article>
+    <article>
+        <h4>概览</h4>
+        <table>
+            <tr><td>🟡 Pending</td><td><strong>{{ stats.pending }}</strong></td></tr>
+            <tr><td>🔴 Unsolved</td><td><strong>{{ stats.unsolved }}</strong></td></tr>
+            <tr><td>🟢 Solved</td><td><strong>{{ stats.solved }}</strong></td></tr>
+            <tr><td>⚪ Ignored</td><td><strong>{{ stats.ignored }}</strong></td></tr>
+            <tr><td><strong>总计</strong></td><td><strong>{{ stats.total }}</strong></td></tr>
+        </table>
+    </article>
+</div>
+<script>
+(function() {
+    var ctx = document.getElementById('chart-sessions-pie');
+    if (!ctx) return;
+    var existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Pending', 'Unsolved', 'Solved', 'Ignored'],
+            datasets: [{
+                data: [{{ stats.pending }}, {{ stats.unsolved }}, {{ stats.solved }}, {{ stats.ignored }}],
+                backgroundColor: ['#ffdc00', '#ff4136', '#2ecc40', '#aaa'],
+                borderWidth: 2,
+                borderColor: '#fff',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+})();
+</script>

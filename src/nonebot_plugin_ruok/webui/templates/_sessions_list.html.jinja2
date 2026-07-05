@@ -36,8 +36,8 @@
         </div>
     </details>
 
-    {% if s.linked_sessions %}
-    <p><small>🔗 关联: {{ s.linked_sessions | join(', ') }}</small></p>
+    {% if s.link_group %}
+    <p><small>👥 关联组: <code>{{ s.link_group }}</code></small></p>
     {% endif %}
 
     {% if s.status in ('pending', 'unsolved') %}

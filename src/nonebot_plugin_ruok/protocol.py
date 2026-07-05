@@ -117,7 +117,7 @@ class Session(BaseModel):
                                    lambda: datetime.now(timezone.utc))
     resolved_at: datetime | None = None
 
-    linked_sessions: list[str] = Field(default_factory=list)
+    link_group: str | None = None  # "ruok-grp-{8 hex}" — group-based linking
     developer_notes: str | None = None
 
     occurrences: list[Occurrence] = Field(default_factory=list)

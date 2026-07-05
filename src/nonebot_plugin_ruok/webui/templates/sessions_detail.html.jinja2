@@ -105,15 +105,22 @@
 
 <!-- Linked Sessions -->
 <article>
-    <h4>🔗 关联 Sessions</h4>
-    {% if session.linked_sessions %}
-    <ul>
-        {% for linked_id in session.linked_sessions %}
-        <li><a href="/ruok/sessions/{{ linked_id }}">{{ linked_id }}</a></li>
-        {% endfor %}
-    </ul>
-    {% else %}
-    <p>暂无关联 Session。</p>
+    <h4>🔗 关联 Sessions {% if session.link_group %}<code style="font-size:0.7em;">{{ session.link_group }}</code>{% endif %}</h4>
+    <div id="linked-container">
+        {% include "_linked_list.html.jinja2" %}
+    </div>
+    <form hx-post="/ruok/_actions/link/{{ session.session_id }}"
+          hx-target="#linked-container" hx-swap="outerHTML"
+          style="margin-top:1rem; display:flex; gap:0.5rem;">
+        <input type="text" name="other_id" placeholder="输入 Session ID" required style="margin-bottom:0;">
+        <button type="submit">关联</button>
+    </form>
+    {% if session.link_group %}
+    <form hx-post="/ruok/_actions/unlink/{{ session.session_id }}"
+          hx-target="#linked-container" hx-swap="outerHTML"
+          style="margin-top:0.5rem;">
+        <button type="submit" class="contrast outline" style="font-size:0.8em;">🔓 退出关联组</button>
+    </form>
     {% endif %}
 </article>
 

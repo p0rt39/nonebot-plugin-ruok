@@ -13,11 +13,14 @@ from jinja2 import Environment, FileSystemLoader
 from ..collector import (
     collect_all_statuses,
     delete_module,
+    get_linked_sessions,
     get_session,
     get_session_stats,
+    link_sessions,
     list_modules,
     list_sessions,
     MetricsStore,
+    unlink_session,
     update_session,
     upsert_module,
 )
@@ -71,7 +74,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     # ── Pages ─────────────────────
 
     @router.get("/ruok", response_class=HTMLResponse)
-    async def page_dashboard(request: Request):
+    async def page_dashboard(request: Request, _partial: str = ""):
         if auth.enabled and not await auth.require_login(request):
             return RedirectResponse(url="/ruok/login", status_code=302)
         try:
@@ -82,9 +85,15 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             status = AggregatedStatus(overall="unavailable")
         modules = list_modules(data_dir, config)
         stats = get_session_stats(data_dir)
-        # Initial metrics for charts (last 1 hour), pre-serialized for JS
         initial_metrics_raw = MetricsStore.query(data_dir, hours=1.0)
         initial_metrics_json = json.dumps([m.model_dump(mode="json") for m in initial_metrics_raw])
+
+        # SSE-triggered partial renders
+        if _partial == "dashboard-overview":
+            return _render("_dashboard_overview.html.jinja2", status=status)
+        if _partial == "dashboard-stats":
+            return _render("_dashboard_stats.html.jinja2", stats=stats)
+
         return _render(
             "dashboard.html.jinja2",
             request=request,
@@ -140,10 +149,12 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         session = get_session(data_dir, session_id)
         if session is None:
             return HTMLResponse("<p>Session not found</p>", status_code=404)
+        linked = get_linked_sessions(data_dir, session_id)
         return _render(
             "sessions_detail.html.jinja2",
             request=request,
             session=session,
+            linked_sessions=linked,
         )
 
     @router.get("/ruok/modules", response_class=HTMLResponse)
@@ -222,6 +233,25 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return HTMLResponse(
             f'<div id="notes-area"><form hx-post="/ruok/_actions/session-note/{session_id}" hx-target="#notes-area" hx-swap="outerHTML"><textarea name="developer_notes" rows="3" style="width:100%;" placeholder="添加备注...">{developer_notes}</textarea><button type="submit">保存备注</button></form><p style="color: var(--pico-ins-color);">✅ 已保存</p></div>'
         )
+
+    @router.post("/ruok/_actions/link/{session_id}")
+    async def action_link(session_id: str, other_id: str = Form(...)):
+        ok = link_sessions(data_dir, session_id, other_id)
+        if not ok:
+            return HTMLResponse('<p style="color:var(--pico-del-color);">Session 未找到或 ID 相同</p>', status_code=400)
+        linked = get_linked_sessions(data_dir, session_id)
+        return _render("_linked_list.html.jinja2", session_id=session_id, linked_sessions=linked)
+
+    @router.post("/ruok/_actions/unlink/{session_id}")
+    async def action_unlink(session_id: str):
+        unlink_session(data_dir, session_id)
+        return HTMLResponse('<p>已解除关联</p>')
+
+    @router.post("/ruok/_actions/link/{session_id}/remove/{other_id}")
+    async def action_unlink_other(session_id: str, other_id: str):
+        unlink_session(data_dir, other_id)
+        linked = get_linked_sessions(data_dir, session_id)
+        return _render("_linked_list.html.jinja2", session_id=session_id, linked_sessions=linked)
 
     @router.post("/ruok/_actions/module-upsert")
     async def action_module_upsert(

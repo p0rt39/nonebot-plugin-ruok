@@ -13,12 +13,14 @@ from .collector import (
     collect_all_statuses,
     create_session,
     delete_module,
+    get_linked_sessions,
     get_module,
     get_session,
     get_session_stats,
     link_sessions,
     list_modules,
     list_sessions,
+    unlink_session,
     update_session,
     upsert_module,
 )
@@ -163,11 +165,28 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.post("/sessions/{session_id}/link/{other_id}")
     async def api_link_sessions(session_id: str, other_id: str):
-        """Link two sessions together."""
+        """Link two sessions into the same link_group."""
         ok = link_sessions(data_dir, session_id, other_id)
         if not ok:
             raise HTTPException(status_code=404, detail="One or both sessions not found")
-        return {"linked": True}
+        return {"linked": True, "link_group": get_session(data_dir, session_id).link_group}
+
+    @router.delete("/sessions/{session_id}/link")
+    async def api_unlink_session(session_id: str):
+        """Remove a session from its link_group."""
+        ok = unlink_session(data_dir, session_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Session not found or not linked")
+        return {"unlinked": True}
+
+    @router.get("/sessions/{session_id}/linked")
+    async def api_get_linked_sessions(session_id: str):
+        """Get all sessions in the same link_group."""
+        session = get_session(data_dir, session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        linked = get_linked_sessions(data_dir, session_id)
+        return {"link_group": session.link_group, "linked": [s.model_dump(mode="json") for s in linked]}
 
     # ── Modules ───────────────────
 
