@@ -82,32 +82,27 @@ async def sse_event_generator(
         )
 
         tick_count = int(config_ttl)
-        metrics_interval = 3
+        metrics_interval = 1  # fire lightweight collection every tick
         ticks_since_metrics = 0
+        _tick_index = 0  # for alternating heavy/light collection
 
         # Background metrics task to avoid blocking tick interval
         _metrics_task: asyncio.Task | None = None
         _latest_metrics: dict[str, Any] | None = None
 
-        async def _collect_metrics_background() -> None:
-            """Collect fast metrics in background, update cache on completion."""
+        async def _collect_metrics_background(full: bool = True) -> None:
+            """Collect metrics in background, update cache on completion.
+
+            *full=True*: collect everything including process snapshot.
+            *full=False*: skip process snapshot for faster 1s cycle.
+            """
             nonlocal _latest_metrics
             try:
                 fm = await collect_fast_metrics()
                 nr = _network_tracker.get_rate()
                 disk_agg, disk_per = _disk_tracker.get_rate()
-                ps_snap = await collect_process_snapshot()
 
-                # Serialize per-disk rates for JSON
-                disk_per_serialized = {
-                    name: dr.model_dump(mode="json")
-                    for name, dr in disk_per.items()
-                }
-                top_procs_serialized = [
-                    p.model_dump(mode="json") for p in ps_snap.top_processes
-                ]
-
-                _latest_metrics = {
+                metrics: dict[str, Any] = {
                     "cpu": fm.cpu_percent,
                     "cpu_cores": fm.cpu_per_core,
                     "mem_pct": fm.memory_percent,
@@ -133,12 +128,30 @@ async def sse_event_generator(
                     "disk_write": disk_agg.write_bytes_per_sec,
                     "disk_read_count": disk_agg.read_count_per_sec,
                     "disk_write_count": disk_agg.write_count_per_sec,
-                    "disk_per": disk_per_serialized,
-                    "bot_vms": ps_snap.bot_vms,
-                    "bot_threads": ps_snap.bot_threads,
-                    "bot_cpu": ps_snap.bot_cpu_percent,
-                    "top_processes": top_procs_serialized,
                 }
+
+                # Per-disk rates (lightweight, always collect)
+                metrics["disk_per"] = {
+                    name: dr.model_dump(mode="json")
+                    for name, dr in disk_per.items()
+                }
+
+                # Process snapshot (heavy — only on full cycles, ~3s cadence)
+                if full:
+                    ps_snap = await collect_process_snapshot()
+                    metrics["bot_vms"] = ps_snap.bot_vms
+                    metrics["bot_threads"] = ps_snap.bot_threads
+                    metrics["bot_cpu"] = ps_snap.bot_cpu_percent
+                    metrics["top_processes"] = [
+                        p.model_dump(mode="json") for p in ps_snap.top_processes
+                    ]
+                else:
+                    metrics["bot_vms"] = 0
+                    metrics["bot_threads"] = 0
+                    metrics["bot_cpu"] = 0.0
+                    metrics["top_processes"] = []
+
+                _latest_metrics = metrics
             except Exception as exc:
                 logger.warning(f"RuOK SSE: fast metrics failed: {exc}")
 
@@ -180,12 +193,16 @@ async def sse_event_generator(
                     },
                 )
                 ticks_since_metrics += 1
+                _tick_index += 1
                 if ticks_since_metrics >= metrics_interval:
                     ticks_since_metrics = 0
-                    # Fire background collection; don't await — keep tick on time
-                    _metrics_task = asyncio.create_task(
-                        _collect_metrics_background()
-                    )
+                    # Skip if previous task still running (overlap protection)
+                    if _metrics_task is None or _metrics_task.done():
+                        # Full collection (with process snapshot) every ~3s
+                        is_full = (_tick_index % 3 == 0)
+                        _metrics_task = asyncio.create_task(
+                            _collect_metrics_background(full=is_full)
+                        )
                 # If background task finished, emit cached result
                 if _latest_metrics is not None:
                     yield _sse_event("metrics", _latest_metrics)
