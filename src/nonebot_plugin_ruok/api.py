@@ -64,8 +64,8 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             _cache_time["status"] = time.time()
         return data.model_dump(mode="json")
 
-    @router.get("/health")
-    async def api_health() -> dict[str, Any]:
+    @router.get("/health", response_model=None)
+    async def api_health() -> dict[str, Any] | JSONResponse:
         """Simple health check for K8s / Docker / Uptime."""
         data = _cached("status", lambda: None)
         if data is None:

@@ -145,8 +145,8 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     # ── SSE endpoint ──
 
-    @router.get("/ruok/sse")
-    async def sse_stream(request: Request) -> StreamingResponse:
+    @router.get("/ruok/sse", response_model=None)
+    async def sse_stream(request: Request) -> StreamingResponse | JSONResponse:
         """Server-Sent Events stream for real-time dashboard updates.
 
         Respects WebUI auth unless config.sse_public is True.
