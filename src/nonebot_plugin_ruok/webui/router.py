@@ -16,6 +16,44 @@ from fastapi.responses import (
 )
 
 from .sse import event_bus, sse_event_generator
+
+
+def _render_module_edit_row(mod: ModuleDefinition) -> str:
+    """Render an inline edit form row for a module."""
+    plugins_str = ", ".join(mod.plugins)
+    desc = mod.description or ""
+    dname = mod.display_name or mod.name
+    return (
+        f'<tr>'
+        f'<td></td>'  # status
+        f'<td><strong>{mod.name}</strong></td>'  # name — readonly
+        f'<td>'
+        f'<input type="text" name="display_name" value="{dname}"'
+        f' style="margin-bottom:0;font-size:0.85em"'
+        f' form="edit-frm-{mod.name}">'
+        f'</td>'
+        f'<td></td>'  # plugin count
+        f'<td>'
+        f'<input type="text" name="description" value="{desc}"'
+        f' style="margin-bottom:0;font-size:0.85em"'
+        f' form="edit-frm-{mod.name}">'
+        f'</td>'
+        f'<td style="white-space:nowrap">'
+        f'<button class="outline" style="padding:2px 6px;font-size:0.78em"'
+        f' form="edit-frm-{mod.name}"'
+        f' hx-post="/ruok/_actions/module-edit-save/{mod.name}"'
+        f' hx-target="#module-list" hx-swap="outerHTML">'
+        f'Save</button> '
+        f'<button class="outline secondary" style="padding:2px 6px;font-size:0.78em"'
+        f' hx-get="/ruok/_partials/modules"'
+        f' hx-target="#module-list" hx-swap="outerHTML">'
+        f'Cancel</button>'
+        f'</td>'
+        f'</tr>'
+        f'<form id="edit-frm-{mod.name}" style="display:none">'
+        f'<input type="text" name="plugins" value="{plugins_str}">'
+        f'</form>'
+    )
 from .auth import WebUIAuth
 from .jinja import render
 from ..config import ScopedConfig
@@ -26,6 +64,7 @@ from ..protocol import (
     FastMetricsSnapshot,
 )
 from ..collector import (
+    get_module,
     get_session,
     list_modules,
     delete_module,
@@ -226,6 +265,40 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_modules", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>',
+                status_code=500,
+            )
+
+    @router.get("/ruok/modules/{name}", response_class=HTMLResponse)
+    async def page_module_detail(
+        request: Request, name: str, _guard_ok=Depends(_webui_guard)
+    ):
+        try:
+            mod = get_module(data_dir, config, name)
+            if mod is None:
+                return HTMLResponse(
+                    "<p>Module not found</p>", status_code=404
+                )
+            # Sessions for this module
+            sessions = list_sessions(data_dir, module_name=name)
+            # Plugin health for associated plugins
+            all_plugins = _collect_plugin_inventory()
+            linked_plugins = [
+                p for p in all_plugins if p.name in mod.plugins
+            ]
+            return render(
+                "modules_detail.html.jinja2",
+                request=request,
+                module=mod,
+                sessions=sessions,
+                linked_plugins=linked_plugins,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, f"page_module_detail {name}", data_dir
+            )
             return HTMLResponse(
                 f'<p style="color:var(--pico-del-color);">'
                 f'❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>',
@@ -505,6 +578,22 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         plugins: str = Form(""),
         enabled: bool = Form(True),
     ):
+        # Validate display_name uniqueness
+        new_display = display_name.strip() or name
+        existing_mod = get_module(data_dir, config, name)
+        if new_display and (
+            existing_mod is None
+            or new_display != existing_mod.display_name
+        ):
+            all_modules = list_modules(data_dir, config)
+            for m in all_modules:
+                if m.name != name and m.display_name == new_display:
+                    return HTMLResponse(
+                        f'<p style="color:var(--pico-del-color);">'
+                        f'❌ 显示名 "{new_display}" 已被模块 '
+                        f'"{m.display_name or m.name}" 使用</p>',
+                        status_code=400,
+                    )
         plugins_list = [p.strip() for p in plugins.split(",") if p.strip()]
         definition = ModuleDefinition(
             name=name,
@@ -542,6 +631,82 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=500,
             )
         return render("_modules_table.html.jinja2", request=request, modules=modules)
+
+    # ── Inline edit ──
+
+    @router.get("/ruok/_actions/module-edit-form/{name}")
+    async def action_module_edit_form(name: str):
+        try:
+            mod = get_module(data_dir, config, name)
+            if mod is None:
+                return HTMLResponse(
+                    "<p>Module not found</p>", status_code=404
+                )
+            return HTMLResponse(
+                _render_module_edit_row(mod)
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, f"action_module_edit_form {name}", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>',
+                status_code=500,
+            )
+
+    @router.post("/ruok/_actions/module-edit-save/{name}")
+    async def action_module_edit_save(
+        name: str,
+        display_name: str = Form(""),
+        description: str = Form(""),
+        plugins: str = Form(""),
+    ):
+        try:
+            mod = get_module(data_dir, config, name)
+            if mod is None:
+                return HTMLResponse(
+                    "<p>Module not found</p>", status_code=404
+                )
+            # Validate display_name uniqueness
+            new_display = display_name.strip()
+            if new_display and new_display != mod.display_name:
+                all_modules = list_modules(data_dir, config)
+                for m in all_modules:
+                    if m.name != name and m.display_name == new_display:
+                        return HTMLResponse(
+                            f'<p style="color:var(--pico-del-color);">'
+                            f'❌ 显示名 "{new_display}" 已被模块 '
+                            f'"{m.display_name or m.name}" 使用</p>',
+                            status_code=400,
+                        )
+            plugins_list = [
+                p.strip() for p in plugins.split(",") if p.strip()
+            ]
+            definition = ModuleDefinition(
+                name=name,
+                display_name=new_display or name,
+                plugins=plugins_list,
+                description=description.strip() or None,
+                enabled=mod.enabled,
+            )
+            upsert_module(data_dir, definition)
+            # Return refreshed modules table
+            modules = list_modules(data_dir, config)
+            return render(
+                "_modules_table.html.jinja2",
+                request=None,
+                modules=modules,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, f"action_module_edit_save {name}", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 保存失败 [{type(exc).__name__}] → Session: {sid}</p>',
+                status_code=500,
+            )
 
     # ── Notification rules CRUD ──
 

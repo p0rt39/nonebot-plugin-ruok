@@ -22,17 +22,23 @@
                 {% else %}⚪{% endif %}
                 {{ m.status }}
             </td>
-            <td><strong>{{ m.name }}</strong></td>
+            <td><strong><a href="/ruok/modules/{{ m.name }}">{{ m.display_name or m.name }}</a></strong></td>
             <td>{{ m.display_name }}</td>
             <td>{{ m.plugins | length }}</td>
             <td>{{ m.description or '—' }}</td>
             <td>
-                <button class="outline secondary" style="padding:2px 8px;font-size:0.78em;"
+                <button class="outline secondary" style="padding:2px 6px;font-size:0.78em;"
+                        hx-get="/ruok/_actions/module-edit-form/{{ m.name }}"
+                        hx-target="closest tr"
+                        hx-swap="outerHTML">
+                    Edit
+                </button>
+                <button class="outline secondary" style="padding:2px 6px;font-size:0.78em;"
                         hx-post="/ruok/_actions/module-delete/{{ m.name }}"
                         hx-target="#module-list"
                         hx-swap="outerHTML"
                         hx-confirm="确定删除模块「{{ m.display_name or m.name }}」？">
-                    🗑️ 删除
+                    Del
                 </button>
             </td>
         </tr>

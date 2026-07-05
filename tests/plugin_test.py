@@ -68,7 +68,7 @@ async def test_ruok_status_builtin_module(app: App) -> None:
         ctx.should_pass_permission()
         ctx.should_call_send(
             event,
-            "🟢 ruok — available",
+            "🟢 RuOK — available",
             result=None,
             bot=bot,
         )
