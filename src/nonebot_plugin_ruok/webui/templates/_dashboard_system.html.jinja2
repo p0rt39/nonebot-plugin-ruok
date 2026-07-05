@@ -26,7 +26,7 @@
             {% for core in metrics.cpu_per_core[:16] %}
             <span title="Core {{ loop.index0 }}: {{ '%.0f'|format(core) }}%"
                   style="background:{% if core < 70 %}#2ecc40{% elif core < 90 %}#ffdc00{% else %}#ff4136{% endif %};
-                         opacity:{{ 0.2 + core/150 }};"></span>
+                         opacity:{{ 0.35 + core/200 }};"></span>
             {% endfor %}
         </div>
         {% endif %}
@@ -135,9 +135,10 @@
                 ⬇ <span id="net-down-val">{{ net_down|_fmt_bytes_s }}</span>/s
             </div>
             <div class="sys-tile__label">网络速率</div>
-            <svg class="sys-sparkline" id="spark-net" viewBox="0 0 120 30" preserveAspectRatio="none">
-                <polyline id="spark-net-up" fill="none" stroke="#2ecc40" stroke-width="1.5"/>
-                <polyline id="spark-net-down" fill="none" stroke="#3498db" stroke-width="1.5"/>
+            <svg class="sys-sparkline" id="spark-net" viewBox="0 0 120 36" preserveAspectRatio="none">
+                <rect x="0" y="0" width="120" height="36" fill="rgba(0,0,0,0.03)" rx="2"/>
+                <polyline id="spark-net-up" fill="none" stroke="#2ecc40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline id="spark-net-down" fill="none" stroke="#3498db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </div>
         <div class="sys-tile__expand">
@@ -158,9 +159,10 @@
                 ↕ <span id="disk-total">—</span>/s
             </div>
             <div class="sys-tile__label">磁盘 I/O</div>
-            <svg class="sys-sparkline" id="spark-disk" viewBox="0 0 120 30" preserveAspectRatio="none">
-                <polyline id="spark-disk-read" fill="none" stroke="#2ecc40" stroke-width="1.5"/>
-                <polyline id="spark-disk-write" fill="none" stroke="#e74c3c" stroke-width="1.5"/>
+            <svg class="sys-sparkline" id="spark-disk" viewBox="0 0 120 36" preserveAspectRatio="none">
+                <rect x="0" y="0" width="120" height="36" fill="rgba(0,0,0,0.03)" rx="2"/>
+                <polyline id="spark-disk-read" fill="none" stroke="#2ecc40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline id="spark-disk-write" fill="none" stroke="#e74c3c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </div>
         <div class="sys-tile__expand">

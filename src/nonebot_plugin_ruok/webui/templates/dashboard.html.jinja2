@@ -67,12 +67,12 @@
     function drawSparkline(svgId, data, maxVal) {
         var poly = document.getElementById(svgId);
         if (!poly) { console.debug(DBG, '  sparkline SVG 未找到:', svgId); return; }
-        if (!data.length) return;
-        var w = 120, h = 30, pad = 2;
+        if (!data.length) { poly.removeAttribute('points'); return; }
+        var w = 120, h = 36, padTB = 6, padLR = 3;
         var peak = maxVal || Math.max.apply(null, data) || 1;
         var points = data.map(function(v, i) {
-            var x = pad + (i / (_sparkMax - 1)) * (w - pad * 2);
-            var y = h - pad - (v / peak) * (h - pad * 2);
+            var x = padLR + (i / (_sparkMax - 1)) * (w - padLR * 2);
+            var y = h - padTB - (v / peak) * (h - padTB * 2);
             return x.toFixed(1) + ',' + y.toFixed(1);
         });
         poly.setAttribute('points', points.join(' '));
@@ -183,7 +183,7 @@
                 m.cpu_cores.slice(0, cores.length).forEach(function(core, i) {
                     if (cores[i]) {
                         cores[i].style.background = clr(core);
-                        cores[i].style.opacity = 0.2 + core / 150;
+                        cores[i].style.opacity = 0.35 + core / 200;
                         cores[i].title = 'Core ' + i + ': ' + Math.round(core) + '%';
                     }
                 });
