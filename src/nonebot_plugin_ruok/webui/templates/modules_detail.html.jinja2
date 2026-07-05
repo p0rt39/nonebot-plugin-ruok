@@ -5,21 +5,25 @@
 {% block content %}
 
 <article class="hero-banner {% if module.status == 'available' %}ok{% elif module.status == 'degraded' %}warn{% else %}error{% endif %}"
-         style="margin-bottom:1.5rem;">
-    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
-        <span style="font-size:2em;">
+         style="margin-bottom:1.5rem;color:#fff;text-shadow:0 0 12px rgba(255,255,255,0.25);">
+    <div style="display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+        <span style="font-size:2em;line-height:1;">
             {% if module.status == 'available' %}🟢
             {% elif module.status == 'degraded' %}🟡
             {% elif module.status == 'unavailable' %}🔴
             {% else %}⚪{% endif %}
         </span>
         <div>
-            <h3 style="margin:0;">{{ module.display_name or module.name }}</h3>
-            <small style="opacity:0.7;">{{ module.name }} · {{ module.status }}</small>
+            <h3 style="margin:0;color:#fff;text-shadow:0 0 12px rgba(255,255,255,0.3);">
+                {{ module.display_name or module.name }}
+            </h3>
+            <small style="opacity:0.65;">{{ module.name }} · {{ module.status }}</small>
         </div>
     </div>
     {% if module.description %}
-    <p style="margin-top:0.75rem;opacity:0.85;">{{ module.description }}</p>
+    <p style="margin-top:0.75rem;color:#fff;opacity:0.9;text-shadow:0 0 8px rgba(255,255,255,0.2);text-align:left;">
+        {{ module.description }}
+    </p>
     {% endif %}
 </article>
 
