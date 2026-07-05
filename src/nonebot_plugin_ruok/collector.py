@@ -1,38 +1,39 @@
 """Core engine: health collection, LogMonitor, session storage, module derivation."""
+
 from __future__ import annotations
 
+import sys
+import json
+import time
 import asyncio
 import hashlib
-import json
 import secrets
-import sys
-import time
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from typing import Any
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 import nonebot
-from nonebot import get_driver, logger
+from nonebot import logger, get_driver
 
 from .config import ScopedConfig
 from .protocol import (
-    AggregatedStatus,
-    BotConnectionStatus,
-    CheckResult,
-    DiskIORate,
-    FastMetricsSnapshot,
-    MetricPoint,
-    ModuleDefinition,
-    ModuleStatus,
-    NetworkRate,
-    Occurrence,
-    PluginHealthInfo,
-    ProcessInfo,
-    ProcessSnapshot,
-    ReporterInfo,
     Session,
+    DiskIORate,
+    Occurrence,
+    CheckResult,
+    MetricPoint,
+    NetworkRate,
+    ProcessInfo,
+    ModuleStatus,
+    ReporterInfo,
     SessionStats,
     StatusResult,
+    ProcessSnapshot,
+    AggregatedStatus,
+    ModuleDefinition,
+    PluginHealthInfo,
+    BotConnectionStatus,
+    FastMetricsSnapshot,
 )
 
 # ────────────────────────────────
@@ -70,7 +71,10 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
             CheckResult(
                 name="memory",
                 status="healthy" if mem.percent < 90 else "degraded",
-                message=f"{mem.percent:.1f}% used ({_bytes_str(mem.used)} / {_bytes_str(mem.total)})",
+                message=(
+                    f"{mem.percent:.1f}% used "
+                    f"({_bytes_str(mem.used)} / {_bytes_str(mem.total)})"
+                ),
                 details={
                     "total": mem.total,
                     "available": mem.available,
@@ -91,7 +95,11 @@ async def _collect_system_metrics(config: ScopedConfig) -> list[CheckResult]:
                     name="swap",
                     status="healthy",
                     message=f"{swap.percent:.1f}% used",
-                    details={"total": swap.total, "used": swap.used, "percent": swap.percent},
+                    details={
+                        "total": swap.total,
+                        "used": swap.used,
+                        "percent": swap.percent,
+                    },
                 )
             )
     except Exception:
@@ -184,9 +192,13 @@ def _collect_bot_info() -> list[CheckResult]:
     # Adapters
     try:
         driver = get_driver()
-        adapter_names = [a.get_name() for a in getattr(driver, "_adapters", {}).values()]
+        adapter_names = [
+            a.get_name() for a in getattr(driver, "_adapters", {}).values()
+        ]
         results.append(
-            CheckResult(name="adapters", status="healthy", details={"adapters": adapter_names})
+            CheckResult(
+                name="adapters", status="healthy", details={"adapters": adapter_names}
+            )
         )
     except Exception as exc:
         results.append(CheckResult(name="adapters", status="unknown", error=str(exc)))
@@ -237,7 +249,9 @@ async def _collect_connection_status(config: ScopedConfig) -> list[BotConnection
         if config.enable_deep_ws_check:
             try:
                 t0 = time.monotonic()
-                await asyncio.wait_for(bot.get_status(), timeout=config.ws_deep_check_timeout)
+                await asyncio.wait_for(
+                    bot.get_status(), timeout=config.ws_deep_check_timeout
+                )
                 entry.latency_ms = (time.monotonic() - t0) * 1000
             except asyncio.TimeoutError:
                 entry.latency_ms = None
@@ -320,7 +334,9 @@ def _collect_plugin_inventory() -> list[PluginHealthInfo]:
 _startup_time: float | None = None
 
 
-async def collect_all_statuses(config: ScopedConfig, data_dir: Path) -> AggregatedStatus:
+async def collect_all_statuses(
+    config: ScopedConfig, data_dir: Path
+) -> AggregatedStatus:
     """Gather all health data into a single AggregatedStatus."""
     global _startup_time
     if _startup_time is None:
@@ -374,7 +390,9 @@ async def collect_all_statuses(config: ScopedConfig, data_dir: Path) -> Aggregat
     if overall == "available":
         if any(not c.connected for c in connections):
             overall = (
-                "unavailable" if all(not c.connected for c in connections) else "degraded"
+                "unavailable"
+                if all(not c.connected for c in connections)
+                else "degraded"
             )
 
     # 3. Check system health (if still ok)
@@ -432,7 +450,14 @@ def _extract_memory_percent(checks: list[CheckResult]) -> float | None:
 def _extract_disk_percent(checks: list[CheckResult]) -> float | None:
     for c in checks:
         if c.name == "disk" and c.details:
-            return max((d.get("percent", 0) for d in c.details.values() if isinstance(d, dict)), default=None)
+            return max(
+                (
+                    d.get("percent", 0)
+                    for d in c.details.values()
+                    if isinstance(d, dict)
+                ),
+                default=None,
+            )
     return None
 
 
@@ -535,12 +560,14 @@ async def collect_process_snapshot() -> ProcessSnapshot:
                     continue
                 mem = info["memory_info"]
                 rss = mem.rss if mem else 0
-                procs.append(ProcessInfo(
-                    name=name,
-                    pid=info["pid"] or 0,
-                    cpu_percent=info["cpu_percent"] or 0.0,
-                    mem_rss=rss,
-                ))
+                procs.append(
+                    ProcessInfo(
+                        name=name,
+                        pid=info["pid"] or 0,
+                        cpu_percent=info["cpu_percent"] or 0.0,
+                        mem_rss=rss,
+                    )
+                )
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
@@ -716,7 +743,9 @@ class LogMonitor:
             self._handler_id = None
 
 
-def _make_log_sink(config: ScopedConfig, data_dir: Path, loop: asyncio.AbstractEventLoop):
+def _make_log_sink(
+    config: ScopedConfig, data_dir: Path, loop: asyncio.AbstractEventLoop
+):
     """Create a loguru-compatible sink closure.
 
     With serialize=True, the sink receives a JSON string.  Session I/O runs
@@ -898,7 +927,7 @@ def list_sessions(
                      that includes this plugin in its ``plugins`` list.
     """
     sessions: list[Session] = []
-    statuses = set(s.strip() for s in status.split(",")) if status else None
+    statuses = {s.strip() for s in status.split(",")} if status else None
 
     # Pre-compute module→plugin mapping if needed
     module_plugin_names: dict[str, set[str]] | None = None
@@ -973,7 +1002,9 @@ def _session_matches_search(s: Session, q: str) -> bool:
     return False
 
 
-def update_session(data_dir: Path, session_id: str, updates: dict[str, Any]) -> Session | None:
+def update_session(
+    data_dir: Path, session_id: str, updates: dict[str, Any]
+) -> Session | None:
     session = _load_session(data_dir, session_id)
     if session is None:
         return None
@@ -1050,9 +1081,11 @@ def link_sessions(data_dir: Path, session_id_a: str, session_id_b: str) -> bool:
         _save_session(data_dir, sa)
     elif ga == gb:
         return True  # Already same group
-    else:
+    elif ga is not None and gb is not None:
         # Merge groups: move all gb → ga
         _merge_link_groups(data_dir, gb, ga)
+    else:
+        return False
 
     return True
 
@@ -1067,9 +1100,7 @@ def unlink_session(data_dir: Path, session_id: str) -> bool:
     return True
 
 
-def get_linked_sessions(
-    data_dir: Path, session_id: str
-) -> list[Session]:
+def get_linked_sessions(data_dir: Path, session_id: str) -> list[Session]:
     """Return all sessions in the same link_group (excluding self)."""
     s = _load_session(data_dir, session_id)
     if s is None or s.link_group is None:
@@ -1135,7 +1166,10 @@ def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]
     modules: list[ModuleDefinition] = []
     if path.exists():
         try:
-            modules = [ModuleDefinition.model_validate(m) for m in json.loads(path.read_text("utf-8"))]
+            modules = [
+                ModuleDefinition.model_validate(m)
+                for m in json.loads(path.read_text("utf-8"))
+            ]
         except (json.JSONDecodeError, TypeError):
             modules = []
 
@@ -1149,7 +1183,9 @@ def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]
     return modules
 
 
-def get_module(data_dir: Path, config: ScopedConfig, name: str) -> ModuleDefinition | None:
+def get_module(
+    data_dir: Path, config: ScopedConfig, name: str
+) -> ModuleDefinition | None:
     for m in list_modules(data_dir, config):
         if m.name == name:
             return m
@@ -1162,7 +1198,9 @@ def upsert_module(data_dir: Path, definition: ModuleDefinition) -> ModuleDefinit
     if path.exists():
         modules = json.loads(path.read_text("utf-8"))
 
-    existing_idx = next((i for i, m in enumerate(modules) if m["name"] == definition.name), None)
+    existing_idx = next(
+        (i for i, m in enumerate(modules) if m["name"] == definition.name), None
+    )
     data = definition.model_dump()
     if existing_idx is not None:
         modules[existing_idx] = data
@@ -1181,7 +1219,9 @@ def delete_module(data_dir: Path, name: str) -> bool:
     new_modules = [m for m in modules if m["name"] != name]
     if len(new_modules) == len(modules):
         return False
-    path.write_text(json.dumps(new_modules, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(
+        json.dumps(new_modules, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     return True
 
 
@@ -1224,10 +1264,14 @@ def _notify_new_session(session: Session) -> None:
             f"描述: {session.description[:200]}\n"
             f"时间: {session.first_seen_at}"
         )
+        _tasks: list[asyncio.Task] = []
         for uid in superusers:
             try:
-                # schedule async send without awaiting (fire-and-forget)
-                asyncio.ensure_future(bot.send_private_msg(user_id=int(uid), message=text))
+                _tasks.append(
+                    asyncio.create_task(
+                        bot.send_private_msg(user_id=int(uid), message=text)
+                    )
+                )
             except Exception:
                 logger.warning(f"RuOK: failed to notify superuser {uid}")
     except Exception as exc:
@@ -1260,7 +1304,10 @@ class MetricsStore:
 
     @staticmethod
     def _today_file(data_dir: Path) -> Path:
-        return MetricsStore._metrics_dir(data_dir) / f"{datetime.now(timezone.utc).date().isoformat()}.json"
+        return (
+            MetricsStore._metrics_dir(data_dir)
+            / f"{datetime.now(timezone.utc).date().isoformat()}.json"
+        )
 
     @staticmethod
     def append(data_dir: Path, point: MetricPoint, retention_days: int = 7) -> None:
@@ -1273,7 +1320,9 @@ class MetricsStore:
             except (json.JSONDecodeError, OSError):
                 records = []
         records.append(point.model_dump(mode="json"))
-        file_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+        file_path.write_text(
+            json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         # Clean old files
         MetricsStore._cleanup(data_dir, retention_days)
 
@@ -1289,7 +1338,9 @@ class MetricsStore:
 
         # We only look at the last 2 days of files (today + yesterday)
         today_str = datetime.now(timezone.utc).date().isoformat()
-        yesterday_str = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+        yesterday_str = (
+            datetime.now(timezone.utc).date() - timedelta(days=1)
+        ).isoformat()
 
         for date_str in (today_str, yesterday_str):
             fpath = metrics_dir / f"{date_str}.json"
@@ -1314,7 +1365,9 @@ class MetricsStore:
     @staticmethod
     def _cleanup(data_dir: Path, retention_days: int) -> None:
         """Remove metric files older than *retention_days*."""
-        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=retention_days)).date()
+        cutoff_date = (
+            datetime.now(timezone.utc) - timedelta(days=retention_days)
+        ).date()
         metrics_dir = MetricsStore._metrics_dir(data_dir)
         for f in metrics_dir.glob("*.json"):
             try:

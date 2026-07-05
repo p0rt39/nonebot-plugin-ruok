@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import json
 import asyncio
-from typing import Any, AsyncGenerator
+from typing import Any
 from datetime import datetime, timezone
+from collections.abc import AsyncGenerator
 
 from nonebot import logger
-from fastapi.responses import StreamingResponse
 
 
 class EventBus:

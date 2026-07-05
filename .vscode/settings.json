@@ -4,6 +4,10 @@
         "/^uv run poe test 2>&1$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^uv run pytest tests/ -q$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

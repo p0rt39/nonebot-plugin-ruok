@@ -5,10 +5,8 @@ Protects /ruok SSR pages; does NOT affect /ruok/api/* endpoints.
 from __future__ import annotations
 
 import hashlib
-import secrets
 
 from fastapi import Form, Request, APIRouter
-from nonebot import logger
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .jinja import render
@@ -41,7 +39,7 @@ class WebUIAuth:
     @property
     def middleware(self):
         """Starlette SessionMiddleware class (lazy import)."""
-        from starlette.middleware.sessions import (  # noqa: F811
+        from starlette.middleware.sessions import (
             SessionMiddleware,
         )
 
