@@ -6,109 +6,77 @@
 
 {% block content %}
 
-<div hx-ext="sse" sse-connect="/ruok/sse">
-
-<!-- Hero + metrics + connections — refreshed via SSE event: status -->
-<div id="dashboard-overview"
-     hx-get="/ruok?_partial=dashboard-overview"
-     hx-trigger="sse:status"
-     hx-swap="outerHTML">
-    {% include "_dashboard_overview.html.jinja2" %}
+<!-- Hero — SSE every ~1s (idiomorph patches only changed text) -->
+<div id="dashboard-hero" hx-ext="morph"
+     hx-get="/ruok?_partial=dashboard-hero" hx-trigger="load" hx-swap="innerHTML">
+    {% include "_dashboard_hero.html.jinja2" %}
 </div>
 
+<!-- Gauges — polling 3s -->
+<div id="dashboard-gauges"
+     hx-get="/ruok?_partial=dashboard-gauges"
+     hx-trigger="load, every 3s" hx-swap="innerHTML">
+    {% include "_dashboard_gauges.html.jinja2" %}
 </div>
 
-<!-- Session stats — refreshed via SSE event: session_update -->
-<div id="dashboard-stats"
-     hx-get="/ruok?_partial=dashboard-stats"
-     hx-trigger="sse:session_update from:body"
-     hx-swap="outerHTML">
+<!-- Info row — polling 3s -->
+<div id="dashboard-info"
+     hx-get="/ruok?_partial=dashboard-info"
+     hx-trigger="load, every 3s" hx-swap="innerHTML">
+    {% include "_dashboard_info.html.jinja2" %}
+</div>
+
+<!-- Disk — polling 30s -->
+<div id="dashboard-disk"
+     hx-get="/ruok?_partial=dashboard-disk"
+     hx-trigger="load, every 30s" hx-swap="innerHTML">
+    {% include "_dashboard_disk.html.jinja2" %}
+</div>
+
+<!-- Connections — polling 30s -->
+<div id="dashboard-connections"
+     hx-get="/ruok?_partial=dashboard-connections"
+     hx-trigger="load, every 30s" hx-swap="innerHTML">
+    {% include "_dashboard_connections.html.jinja2" %}
+</div>
+
+<!-- Session stats — SSE on session changes -->
+<div id="dashboard-stats" hx-ext="morph"
+     hx-get="/ruok?_partial=dashboard-stats" hx-trigger="load" hx-swap="innerHTML">
     {% include "_dashboard_stats.html.jinja2" %}
 </div>
 
+<script>
+(function() {
+    var src = new EventSource('/ruok/sse');
+    src.addEventListener('status', function() {
+        htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
+            { target: '#dashboard-hero', swap: 'innerHTML' });
+    });
+    src.addEventListener('tick', function() {
+        htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
+            { target: '#dashboard-hero', swap: 'innerHTML' });
+    });
+    src.addEventListener('session_update', function() {
+        htmx.ajax('GET', '/ruok?_partial=dashboard-stats',
+            { target: '#dashboard-stats', swap: 'innerHTML' });
+    });
+})();
+</script>
+
 <!-- Module Status (auto-refresh every 10s) -->
-<h3>📦 模块状态 <span class="auto-refresh">(HTMX 自动刷新 10s)</span></h3>
+<h3>📦 模块状态</h3>
 <div hx-get="/ruok/_partials/modules" hx-trigger="load, every 10s" hx-swap="outerHTML">
     {% include "_modules_table.html.jinja2" %}
 </div>
 
-<!-- Trend Charts -->
-<h3>📈 指标趋势 (最近 1 小时)</h3>
-<div class="grid">
-    <article>
-        <canvas id="chart-cpu" style="max-height: 220px;"></canvas>
-    </article>
-    <article>
-        <canvas id="chart-memory" style="max-height: 220px;"></canvas>
-    </article>
+<!-- Trend Charts — auto-refresh every 30s via HTMX polling -->
+<h3>📈 指标趋势</h3>
+<div id="dashboard-trends"
+     hx-get="/ruok?_partial=dashboard-trends"
+     hx-trigger="load, every 30s"
+     hx-swap="outerHTML">
+    {% include "_dashboard_trends.html.jinja2" %}
 </div>
 
-<!-- Trend Charts -->
-<h3>📈 指标趋势 (最近 1 小时)</h3>
-(function() {
-    const metrics = {{ initial_metrics_json | safe if initial_metrics_json else '[]' }};
-    const labels = metrics.map(m => new Date(m.ts).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}));
-    const cpuData = metrics.map(m => m.cpu_percent);
-
-    const ctx = document.getElementById('chart-cpu');
-    if (ctx && cpuData.length > 0) {
-        new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'CPU %',
-                    data: cpuData,
-                    borderColor: '#667eea',
-                    backgroundColor: 'rgba(102,126,234,0.1)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
-                    x: { ticks: { maxTicksLimit: 8 } }
-                }
-            }
-        });
-    }
-
-    // ── Memory Chart ──
-    const memCtx = document.getElementById('chart-memory');
-    const memData = metrics.map(m => m.memory_percent);
-    if (memCtx && memData.length > 0) {
-        new Chart(memCtx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Memory %',
-                    data: memData,
-                    borderColor: '#11998e',
-                    backgroundColor: 'rgba(17,153,142,0.1)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
-                    x: { ticks: { maxTicksLimit: 8 } }
-                }
-            }
-        });
-    }
-})();
-
-// ── Trend Charts JS done ──
-</script>
 {% endblock %}

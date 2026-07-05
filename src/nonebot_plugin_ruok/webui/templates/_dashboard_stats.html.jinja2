@@ -1,5 +1,5 @@
-<!-- SSE-refreshed partial: session stats + pie chart -->
-<h3>📊 Session 统计 <small style="font-weight:normal;opacity:0.7;">(SSE 实时)</small></h3>
+<!-- Stats partial (innerHTML, no wrapper) -->
+<h3>📊 Session 统计</h3>
 <div class="grid">
     <article>
         <canvas id="chart-sessions-pie" style="max-height: 250px;"></canvas>
@@ -17,26 +17,30 @@
 </div>
 <script>
 (function() {
+    var data = [{{ stats.pending }}, {{ stats.unsolved }}, {{ stats.solved }}, {{ stats.ignored }}];
     var ctx = document.getElementById('chart-sessions-pie');
     if (!ctx) return;
-    var existing = Chart.getChart(ctx);
-    if (existing) existing.destroy();
-    new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: ['Pending', 'Unsolved', 'Solved', 'Ignored'],
-            datasets: [{
-                data: [{{ stats.pending }}, {{ stats.unsolved }}, {{ stats.solved }}, {{ stats.ignored }}],
-                backgroundColor: ['#ffdc00', '#ff4136', '#2ecc40', '#aaa'],
-                borderWidth: 2,
-                borderColor: '#fff',
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom' } }
-        }
-    });
+    var chart = Chart.getChart(ctx);
+    if (chart) {
+        chart.data.datasets[0].data = data;
+        chart.update('none');  // no animation
+    } else {
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Pending', 'Unsolved', 'Solved', 'Ignored'],
+                datasets: [{
+                    data: data,
+                    backgroundColor: ['#ffdc00', '#ff4136', '#2ecc40', '#aaa'],
+                    borderWidth: 2, borderColor: '#fff',
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } },
+                animation: false,
+            }
+        });
+    }
 })();
 </script>

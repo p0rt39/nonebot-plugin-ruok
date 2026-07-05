@@ -1,0 +1,74 @@
+<!-- HTMX-polled partial: CPU + Memory trend charts (last 1 hour) -->
+<div class="grid">
+    <article>
+        <canvas id="chart-cpu" style="max-height: 220px;"></canvas>
+    </article>
+    <article>
+        <canvas id="chart-memory" style="max-height: 220px;"></canvas>
+    </article>
+</div>
+<script>
+(async function() {
+    try {
+        const resp = await fetch('/ruok/api/metrics/history?hours=1');
+        const metrics = await resp.json();
+        if (!metrics.length) return;
+
+        const labels = metrics.map(m =>
+            new Date(m.ts).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})
+        );
+        const cpuData = metrics.map(m => m.cpu_percent);
+        const memData = metrics.map(m => m.memory_percent);
+
+        // CPU
+        const cpuCtx = document.getElementById('chart-cpu');
+        if (cpuCtx && cpuData.length) {
+            var existing = Chart.getChart(cpuCtx);
+            if (existing) existing.destroy();
+            new Chart(cpuCtx, {
+                type: 'line',
+                data: {
+                    labels, datasets: [{
+                        label: 'CPU %', data: cpuData,
+                        borderColor: '#667eea', backgroundColor: 'rgba(102,126,234,0.1)',
+                        fill: true, tension: 0.3, pointRadius: 0,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+                        x: { ticks: { maxTicksLimit: 8 } }
+                    }
+                }
+            });
+        }
+
+        // Memory
+        const memCtx = document.getElementById('chart-memory');
+        if (memCtx && memData.length) {
+            var existing = Chart.getChart(memCtx);
+            if (existing) existing.destroy();
+            new Chart(memCtx, {
+                type: 'line',
+                data: {
+                    labels, datasets: [{
+                        label: 'Memory %', data: memData,
+                        borderColor: '#11998e', backgroundColor: 'rgba(17,153,142,0.1)',
+                        fill: true, tension: 0.3, pointRadius: 0,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+                        x: { ticks: { maxTicksLimit: 8 } }
+                    }
+                }
+            });
+        }
+    } catch(e) { /* chart refresh is best-effort */ }
+})();
+</script>

@@ -1,0 +1,13 @@
+<!-- Connections partial (30s polling) — compact chip style -->
+<h3>🔗 连接</h3>
+<div style="display:flex; gap:1rem; flex-wrap:wrap;">
+    {% for conn in status.connections %}
+    <article class="info-chip">
+        <span class="status-dot status-{{ 'available' if conn.connected else 'unavailable' }}"></span>
+        {{ conn.self_id }}
+        <small>{{ conn.adapter }}{% if conn.latency_ms is not none %} · {{ '%.0f'|format(conn.latency_ms) }}ms{% endif %}</small>
+    </article>
+    {% else %}
+    <p>暂无连接</p>
+    {% endfor %}
+</div>

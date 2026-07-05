@@ -6,7 +6,7 @@
     <title>{% block title %}RuOK{% endblock %} — NoneBot2 Health Monitor</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <script src="https://unpkg.com/htmx.org@2"></script>
-    <script src="https://unpkg.com/htmx.org@2/dist/ext/sse.js"></script>
+    <script src="https://unpkg.com/idiomorph"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <style>
         :root {
@@ -36,11 +36,6 @@
             border: 1px solid var(--glass-border) !important;
             border-radius: var(--radius-md) !important;
             box-shadow: var(--shadow-sm);
-            transition: transform var(--transition), box-shadow var(--transition);
-        }
-        article:hover, .glass-card:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
         }
 
         /* ── Navigation ── */
@@ -70,7 +65,6 @@
             box-shadow: var(--shadow-lg);
             padding: 2.5rem 2rem;
             text-align: center;
-            animation: fadeInUp 0.5s ease-out;
         }
         .hero-banner.ok { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%) !important; }
         .hero-banner.warn { background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%) !important; }

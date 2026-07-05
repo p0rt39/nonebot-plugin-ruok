@@ -2,30 +2,30 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import Query, Request, APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from .config import ScopedConfig
+from .protocol import ReporterInfo, ModuleDefinition
 from .collector import (
     MetricsStore,
-    collect_all_statuses,
-    create_session,
-    delete_module,
-    get_linked_sessions,
     get_module,
     get_session,
-    get_session_stats,
-    link_sessions,
     list_modules,
+    delete_module,
+    link_sessions,
     list_sessions,
+    upsert_module,
+    create_session,
     unlink_session,
     update_session,
-    upsert_module,
+    get_session_stats,
+    get_linked_sessions,
+    collect_all_statuses,
 )
-from .config import ScopedConfig
-from .protocol import ModuleDefinition, ReporterInfo
 
 # ────────────────────────────────
 # Router factory
@@ -95,7 +95,9 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         | None = Query(None, description="ISO datetime, e.g. 2026-07-01T00:00:00"),
         before: str | None = Query(None, description="ISO datetime"),
         plugin: str
-        | None = Query(None, description="Filter by plugin name from ModuleDefinitions"),
+        | None = Query(
+            None, description="Filter by plugin name from ModuleDefinitions"
+        ),
     ):
         """List sessions with optional filters."""
         from datetime import datetime as dt
@@ -168,15 +170,20 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         """Link two sessions into the same link_group."""
         ok = link_sessions(data_dir, session_id, other_id)
         if not ok:
-            raise HTTPException(status_code=404, detail="One or both sessions not found")
-        return {"linked": True, "link_group": get_session(data_dir, session_id).link_group}
+            raise HTTPException(
+                status_code=404, detail="One or both sessions not found"
+            )
+        s = get_session(data_dir, session_id)
+        return {"linked": True, "link_group": s.link_group if s else None}
 
     @router.delete("/sessions/{session_id}/link")
     async def api_unlink_session(session_id: str):
         """Remove a session from its link_group."""
         ok = unlink_session(data_dir, session_id)
         if not ok:
-            raise HTTPException(status_code=404, detail="Session not found or not linked")
+            raise HTTPException(
+                status_code=404, detail="Session not found or not linked"
+            )
         return {"unlinked": True}
 
     @router.get("/sessions/{session_id}/linked")
@@ -186,7 +193,10 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
         linked = get_linked_sessions(data_dir, session_id)
-        return {"link_group": session.link_group, "linked": [s.model_dump(mode="json") for s in linked]}
+        return {
+            "link_group": session.link_group,
+            "linked": [s.model_dump(mode="json") for s in linked],
+        }
 
     # ── Modules ───────────────────
 

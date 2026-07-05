@@ -19,9 +19,11 @@ from .protocol import (
     AggregatedStatus,
     BotConnectionStatus,
     CheckResult,
+    FastMetricsSnapshot,
     MetricPoint,
     ModuleDefinition,
     ModuleStatus,
+    NetworkRate,
     Occurrence,
     PluginHealthInfo,
     ReporterInfo,
@@ -428,6 +430,106 @@ def _extract_disk_percent(checks: list[CheckResult]) -> float | None:
         if c.name == "disk" and c.details:
             return max((d.get("percent", 0) for d in c.details.values() if isinstance(d, dict)), default=None)
     return None
+
+
+# ────────────────────────────────
+# 5b. Fast metrics (~3s) for gauges
+# ────────────────────────────────
+
+
+async def collect_fast_metrics() -> FastMetricsSnapshot:
+    """Lightweight snapshot for real-time gauges (no disk/network/plugins)."""
+    import os
+
+    def _get():
+        import psutil
+
+        # interval=0.5 gives stable per-core readings (0.1 too noisy for spikes)
+        cpu = psutil.cpu_percent(interval=0.5, percpu=True)
+        mem = psutil.virtual_memory()
+        swap = psutil.swap_memory()
+
+        # Load average (Unix) or emulate with CPU on Windows
+        load_1m = load_5m = load_15m = None
+        if hasattr(os, "getloadavg"):
+            try:
+                load_1m, load_5m, load_15m = os.getloadavg()
+            except OSError:
+                pass
+
+        proc_count = len(psutil.pids())
+
+        return FastMetricsSnapshot(
+            cpu_percent=cpu[0] if cpu else 0.0,
+            cpu_per_core=cpu[1:] if len(cpu) > 1 else [],
+            memory_percent=mem.percent,
+            memory_used=mem.used,
+            memory_total=mem.total,
+            swap_percent=swap.percent,
+            swap_used=swap.used,
+            swap_total=swap.total,
+            load_1m=load_1m,
+            load_5m=load_5m,
+            load_15m=load_15m,
+            process_count=proc_count,
+            uptime_seconds=int(time.time() - (_startup_time or time.time())),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
+    return await asyncio.to_thread(_get)
+
+
+# ────────────────────────────────
+# 5c. Network rate tracker
+# ────────────────────────────────
+
+
+class NetworkRateTracker:
+    """Track per-second network transfer rate via delta of io counters."""
+
+    def __init__(self) -> None:
+        self._prev: dict[str, float] = {}
+        self._prev_time: float = 0.0
+
+    def get_rate(self) -> NetworkRate:
+        """Return current bytes/sec rate, or zeros on first call."""
+        import psutil
+
+        now = time.time()
+        try:
+            net = psutil.net_io_counters()
+        except Exception:
+            return NetworkRate()
+
+        cur = {
+            "bs": float(net.bytes_sent),
+            "br": float(net.bytes_recv),
+            "ps": float(net.packets_sent),
+            "pr": float(net.packets_recv),
+        }
+
+        if not self._prev or self._prev_time == 0.0:
+            self._prev = cur
+            self._prev_time = now
+            return NetworkRate()
+
+        elapsed = now - self._prev_time
+        if elapsed <= 0:
+            return NetworkRate()
+
+        rate = NetworkRate(
+            bytes_sent_per_sec=(cur["bs"] - self._prev["bs"]) / elapsed,
+            bytes_recv_per_sec=(cur["br"] - self._prev["br"]) / elapsed,
+            packets_sent_per_sec=(cur["ps"] - self._prev["ps"]) / elapsed,
+            packets_recv_per_sec=(cur["pr"] - self._prev["pr"]) / elapsed,
+        )
+        self._prev = cur
+        self._prev_time = now
+        return rate
+
+
+# Singleton
+_network_tracker = NetworkRateTracker()
 
 
 # ────────────────────────────────

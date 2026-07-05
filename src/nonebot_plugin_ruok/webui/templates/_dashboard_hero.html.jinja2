@@ -1,0 +1,13 @@
+<!-- Hero banner partial (innerHTML, no wrapper) -->
+<article class="hero-banner {% if status.overall == 'available' %}ok{% elif status.overall == 'degraded' %}warn{% else %}error{% endif %}">
+    <div style="font-size: 1.8em; font-weight: 700;">
+        {% if status.overall == 'available' %}🟢 一切正常
+        {% elif status.overall == 'degraded' %}🟡 部分降级
+        {% else %}🔴 不可用
+        {% endif %}
+    </div>
+    <div style="color: rgba(255,255,255,0.75); margin-top: 0.5rem; font-size:0.85em;">
+        {{ status.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+        <span style="opacity:0.6; margin-left:0.5rem;">🔄 SSE</span>
+    </div>
+</article>

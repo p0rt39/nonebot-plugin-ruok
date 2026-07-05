@@ -1,7 +1,6 @@
 """SSR routes for RuOK WebUI — Jinja2 + HTMX + Pico.css."""
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -11,7 +10,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from jinja2 import Environment, FileSystemLoader
 
 from ..collector import (
+    _network_tracker,
     collect_all_statuses,
+    collect_fast_metrics,
     delete_module,
     get_linked_sessions,
     get_session,
@@ -19,7 +20,6 @@ from ..collector import (
     link_sessions,
     list_modules,
     list_sessions,
-    MetricsStore,
     unlink_session,
     update_session,
     upsert_module,
@@ -32,6 +32,32 @@ from .sse import event_bus, sse_event_generator
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
+
+
+# Custom Jinja2 filters for human-readable formatting in templates
+def _fmt_bytes_s(n: float) -> str:
+    if n < 1024:
+        return f"{n:.0f} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    return f"{n / (1024 * 1024 * 1024):.2f} GB"
+
+
+def _fmt_uptime_s(seconds: int) -> str:
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, secs = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours}h {mins}m"
+    if hours:
+        return f"{hours}h {mins}m {secs}s"
+    return f"{mins}m {secs}s"
+
+
+_jinja_env.filters["_fmt_bytes_s"] = _fmt_bytes_s
+_jinja_env.filters["_fmt_uptime_s"] = _fmt_uptime_s
 
 
 def _render(template_name: str, **context) -> HTMLResponse:
@@ -85,22 +111,51 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             status = AggregatedStatus(overall="unavailable")
         modules = list_modules(data_dir, config)
         stats = get_session_stats(data_dir)
-        initial_metrics_raw = MetricsStore.query(data_dir, hours=1.0)
-        initial_metrics_json = json.dumps([m.model_dump(mode="json") for m in initial_metrics_raw])
 
-        # SSE-triggered partial renders
-        if _partial == "dashboard-overview":
-            return _render("_dashboard_overview.html.jinja2", status=status)
+        # SSE/polling partial renders
+        if _partial == "dashboard-hero":
+            return _render("_dashboard_hero.html.jinja2", status=status)
+        if _partial == "dashboard-gauges":
+            fm = await collect_fast_metrics()
+            nr = _network_tracker.get_rate()
+            return _render(
+                "_dashboard_gauges.html.jinja2",
+                metrics=fm,
+                net_up=nr.bytes_sent_per_sec,
+                net_down=nr.bytes_recv_per_sec,
+            )
+        if _partial == "dashboard-info":
+            fm = await collect_fast_metrics()
+            nr = _network_tracker.get_rate()
+            return _render(
+                "_dashboard_info.html.jinja2",
+                metrics=fm,
+                net_up=nr.bytes_sent_per_sec,
+                net_down=nr.bytes_recv_per_sec,
+            )
+        if _partial == "dashboard-metrics":
+            return _render("_dashboard_metrics.html.jinja2", status=status)
+        if _partial == "dashboard-disk":
+            return _render("_dashboard_disk.html.jinja2", status=status)
+        if _partial == "dashboard-connections":
+            return _render("_dashboard_connections.html.jinja2", status=status)
         if _partial == "dashboard-stats":
             return _render("_dashboard_stats.html.jinja2", stats=stats)
+        if _partial == "dashboard-trends":
+            return _render("_dashboard_trends.html.jinja2")
 
+        # Initial data for full page render
+        fm = await collect_fast_metrics()
+        nr = _network_tracker.get_rate()
         return _render(
             "dashboard.html.jinja2",
             request=request,
             status=status,
             modules=modules,
             stats=stats,
-            initial_metrics_json=initial_metrics_json,
+            metrics=fm,
+            net_up=nr.bytes_sent_per_sec,
+            net_down=nr.bytes_recv_per_sec,
         )
 
     @router.get("/ruok/sessions", response_class=HTMLResponse)

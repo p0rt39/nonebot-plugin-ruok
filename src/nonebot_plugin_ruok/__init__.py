@@ -1,4 +1,3 @@
-"""nonebot-plugin-ruok — Bot health monitoring, session tracking, and WebUI."""
 from __future__ import annotations
 
 import secrets
@@ -94,7 +93,7 @@ async def _can_report(event: Event) -> bool:
 
 
 # ────────────────────────────────
-# Matchers — single /ruok entry, dispatch by subcommand
+# RuOK Main Entrypoint
 # ────────────────────────────────
 
 ruok_cmd = on_command("ruok", priority=10, block=True)
@@ -292,33 +291,36 @@ driver = get_driver()
 
 # CORS + SessionMiddleware — at module level before uvicorn starts
 if isinstance(driver, ASGIMixin):
-    try:
-        from fastapi import FastAPI
-        from fastapi.middleware.cors import CORSMiddleware
+    from fastapi import FastAPI
 
-        app_raw = driver.server_app
-        if isinstance(app_raw, FastAPI):
-            app_raw.add_middleware(
+    app = driver.server_app
+    if isinstance(app, FastAPI):
+        # CORS
+        try:
+            from fastapi.middleware.cors import CORSMiddleware
+
+            app.add_middleware(
                 CORSMiddleware,
                 allow_origins=plugin_config.cors_origins,
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
             logger.info("RuOK CORS middleware registered")
-    except Exception as exc:
-        logger.warning(f"RuOK CORS setup failed: {exc}")
+        except Exception as exc:
+            logger.warning(f"RuOK CORS setup failed: {exc}")
 
-    # SessionMiddleware — always added for request.session support.
-    # Auth gating (enabled/disabled) is handled at route level via require_login().
-    try:
-        from starlette.middleware.sessions import SessionMiddleware
+        # SessionMiddleware — always added for request.session support.
+        # Auth gating (enabled/disabled) is handled at route level via require_login().
+        try:
+            from starlette.middleware.sessions import SessionMiddleware
 
-        app_raw2 = driver.server_app
-        if isinstance(app_raw2, FastAPI):
-            app_raw2.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(32))
+            app.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(32))
             logger.info("RuOK SessionMiddleware registered")
-    except Exception as exc:
-        logger.warning(f"RuOK SessionMiddleware setup failed: {exc}")
+        except Exception as exc:
+            logger.warning(f"RuOK SessionMiddleware setup failed: {exc}")
+    else:
+        logger.warning("RuOK: driver.server_app is not a FastAPI instance, " \
+        "skipping middleware")
 
 
 @driver.on_bot_connect

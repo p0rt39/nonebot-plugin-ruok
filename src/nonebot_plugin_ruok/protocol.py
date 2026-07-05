@@ -183,3 +183,36 @@ class NotificationRule(BaseModel):
     cooldown_minutes: float = 60.0
     channels: list[str] = Field(default_factory=lambda: ["bot_dm"])  # bot_dm, webhook
     webhook_url: str | None = None
+
+
+# ────────────────────────────────
+# 6. Fast metrics (for ~3s SSE gauges)
+# ────────────────────────────────
+
+
+class FastMetricsSnapshot(BaseModel):
+    """Lightweight snapshot for real-time system gauges (~3s refresh)."""
+
+    cpu_percent: float = 0.0
+    cpu_per_core: list[float] = Field(default_factory=list)
+    memory_percent: float = 0.0
+    memory_used: int = 0
+    memory_total: int = 0
+    swap_percent: float = 0.0
+    swap_used: int = 0
+    swap_total: int = 0
+    load_1m: float | None = None
+    load_5m: float | None = None
+    load_15m: float | None = None
+    process_count: int = 0
+    uptime_seconds: int = 0
+    timestamp: str = ""
+
+
+class NetworkRate(BaseModel):
+    """Per-second network transfer rate (computed from delta)."""
+
+    bytes_sent_per_sec: float = 0.0
+    bytes_recv_per_sec: float = 0.0
+    packets_sent_per_sec: float = 0.0
+    packets_recv_per_sec: float = 0.0
