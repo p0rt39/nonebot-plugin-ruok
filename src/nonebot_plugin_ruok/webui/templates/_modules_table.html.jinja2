@@ -1,4 +1,5 @@
 <!-- HTMX partial: auto-refreshing module status table -->
+<div id="module-list">
 {% if modules %}
 <table class="striped">
     <thead>
@@ -43,3 +44,4 @@
     <p>⚠️ 暂无功能模块定义。使用 <code>PUT /ruok/api/modules/{name}</code> 添加。</p>
 </article>
 {% endif %}
+</div>
