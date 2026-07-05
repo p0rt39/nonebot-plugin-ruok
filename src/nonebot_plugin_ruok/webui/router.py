@@ -112,6 +112,10 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 disk_agg=disk_agg,
             )
 
+        # Hero banner partial (SSE-driven refresh)
+        if _partial == "dashboard-hero":
+            return render("_dashboard_hero.html.jinja2", status=status)
+
         # SSE/polling partial renders (other panels)
         if _partial == "dashboard-metrics":
             return render("_dashboard_metrics.html.jinja2", status=status)
