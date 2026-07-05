@@ -327,6 +327,34 @@ if isinstance(driver, ASGIMixin):
             logger.warning(f"RuOK SessionMiddleware setup failed: {exc}")
         except Exception as exc:
             _handle_ruok_error(exc, "SessionMiddleware setup", data_dir)
+
+        # ── Global ASGI exception handler ──
+        # Catches any unhandled exception that escapes route-level try/except
+        # (e.g. response header encoding errors, middleware failures).
+        # Creates a RuOK session so the error is tracked and visible in WebUI.
+        from fastapi.responses import JSONResponse as _JSONResponse
+        from starlette.requests import Request as StarletteRequest
+
+        @app.exception_handler(Exception)
+        async def _ruok_global_exception_handler(
+            request: StarletteRequest, exc: Exception
+        ):
+            sid = _handle_ruok_error(
+                exc,
+                f"ASGI {request.method} {request.url.path}",
+                data_dir,
+            )
+            return _JSONResponse(
+                {
+                    "detail": (
+                        f"Internal error [{type(exc).__name__}] "
+                        f"— Session: {sid}"
+                    ),
+                },
+                status_code=500,
+            )
+
+        logger.info("RuOK global exception handler registered")
     else:
         logger.warning("RuOK: driver.server_app is not a FastAPI instance, " \
         "skipping middleware")

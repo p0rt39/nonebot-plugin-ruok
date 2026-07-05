@@ -1,8 +1,9 @@
-"""LogMonitor — intercepts ERROR/CRITICAL logs via loguru sink."""
+"""LogMonitor — intercepts ERROR/CRITICAL logs via loguru sink + stdlib logging."""
 from __future__ import annotations
 
 import json
 import asyncio
+import logging
 from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone
@@ -21,12 +22,14 @@ from ..protocol import Session, Occurrence, ReporterInfo
 
 
 class LogMonitor:
-    """Intercepts ERROR/CRITICAL logs via loguru sink, creates automatic Sessions."""
+    """Intercepts ERROR/CRITICAL logs via loguru sink and stdlib logging,
+    creating automatic Sessions for both."""
 
     def __init__(self, config: ScopedConfig, data_dir: Path):
         self.config = config
         self.data_dir = data_dir
         self._handler_id: int | None = None
+        self._logging_handler: _StdlibLogHandler | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
     # ── lifecycle ──
@@ -37,13 +40,22 @@ class LogMonitor:
         from nonebot.log import logger as nb_logger
 
         self._loop = asyncio.get_running_loop()
+
+        # ── loguru sink (nonebot / plugin logs) ──
         self._handler_id = nb_logger.add(
             _make_log_sink(self.config, self.data_dir, self._loop),
             level="ERROR",
             enqueue=True,
             serialize=True,
         )
-        logger.info("RuOK LogMonitor started (level=ERROR)")
+
+        # ── stdlib logging handler (uvicorn, starlette, etc.) ──
+        self._logging_handler = _StdlibLogHandler(
+            self.config, self.data_dir, self._loop
+        )
+        logging.getLogger().addHandler(self._logging_handler)
+
+        logger.info("RuOK LogMonitor started (level=ERROR, loguru + stdlib)")
 
     def stop(self) -> None:
         if self._handler_id is not None:
@@ -51,6 +63,61 @@ class LogMonitor:
 
             nb_logger.remove(self._handler_id)
             self._handler_id = None
+        if self._logging_handler is not None:
+            logging.getLogger().removeHandler(self._logging_handler)
+            self._logging_handler = None
+
+
+class _StdlibLogHandler(logging.Handler):
+    """Intercept Python stdlib ERROR/CRITICAL logs (e.g. uvicorn)
+    and create RuOK sessions, mirroring the loguru-sink behaviour."""
+
+    def __init__(
+        self, config: ScopedConfig, data_dir: Path, loop: asyncio.AbstractEventLoop
+    ) -> None:
+        super().__init__(level=logging.ERROR)
+        self._config = config
+        self._data_dir = data_dir
+        self._loop = loop
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            plugin_id: str = record.name
+            msg_text: str = self.format(record)
+            exc_text = ""
+            if record.exc_info:
+                import traceback
+                exc_text = "".join(
+                    traceback.format_exception(*record.exc_info)
+                )
+
+            signature = _make_signature(plugin_id, exc_text, msg_text)
+
+            existing = _find_existing_session(self._data_dir, signature)
+            if existing is not None:
+                existing.occurrences.append(Occurrence(source="automatic"))
+                existing.last_seen_at = datetime.now(timezone.utc)
+                _save_session(self._data_dir, existing)
+                return
+
+            session = Session(
+                session_id=_gen_session_id(),
+                source="automatic",
+                status="pending",
+                module_name=plugin_id,
+                error_signature=signature,
+                reporter=ReporterInfo(type="automatic"),
+                description=(
+                    f"```\n{msg_text}\n{exc_text}\n```"
+                ),
+                occurrences=[Occurrence(source="automatic")],
+            )
+            _save_session(self._data_dir, session)
+            logger.warning(
+                f"RuOK: new session {session.session_id} for {plugin_id}"
+            )
+        except Exception:
+            pass  # logging handler must never raise
 
 
 def _make_log_sink(
