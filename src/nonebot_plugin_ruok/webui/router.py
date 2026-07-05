@@ -1,33 +1,38 @@
 """SSR routes for RuOK WebUI — Jinja2 + HTMX + Pico.css."""
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-
-from ..collector import (
-    _network_tracker,
-    collect_all_statuses,
-    collect_fast_metrics,
-    delete_module,
-    get_linked_sessions,
-    get_session,
-    get_session_stats,
-    link_sessions,
-    list_modules,
-    list_sessions,
-    unlink_session,
-    update_session,
-    upsert_module,
+from fastapi import Form, Depends, Request, APIRouter
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
 )
-from ..config import ScopedConfig
-from ..protocol import ModuleDefinition
 
+from .sse import event_bus, sse_event_generator
 from .auth import WebUIAuth
 from .jinja import render
-from .sse import event_bus, sse_event_generator
+from ..config import ScopedConfig
+from ..protocol import ReporterInfo, ModuleDefinition
+from ..collector import (
+    get_session,
+    list_modules,
+    delete_module,
+    link_sessions,
+    list_sessions,
+    upsert_module,
+    create_session,
+    unlink_session,
+    update_session,
+    _network_tracker,
+    get_session_stats,
+    get_linked_sessions,
+    collect_all_statuses,
+    collect_fast_metrics,
+)
 
 
 def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
@@ -92,7 +97,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 nr = _network_tracker.get_rate()
             except Exception:
                 return HTMLResponse(
-                    '<article><p>⏳ 系统指标采集中，请稍候...</p></article>'
+                    "<article><p>⏳ 系统指标采集中，请稍候...</p></article>"
                 )
             return render(
                 "_dashboard_gauges.html.jinja2",
@@ -106,7 +111,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 nr = _network_tracker.get_rate()
             except Exception:
                 return HTMLResponse(
-                    '<article><p>⏳ 运行信息采集中，请稍候...</p></article>'
+                    "<article><p>⏳ 运行信息采集中，请稍候...</p></article>"
                 )
             return render(
                 "_dashboard_info.html.jinja2",
@@ -130,7 +135,10 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             fm = await collect_fast_metrics()
             nr = _network_tracker.get_rate()
         except Exception:
-            from ..protocol import FastMetricsSnapshot, NetworkRate
+            from ..protocol import (  # noqa: I001
+                FastMetricsSnapshot,
+                NetworkRate,
+            )
             fm = FastMetricsSnapshot()
             nr = NetworkRate()
         return render(
@@ -286,7 +294,11 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 current_plugin="",
                 current_after="",
                 current_before="",
-                headers={"HX-Trigger": '{"toast":"📝 Session 已创建","toastType":"success"}'},
+                headers={
+                    "HX-Trigger": (
+                        '{"toast":"📝 Session 已创建","toastType":"success"}'
+                    )
+                },
             )
         except Exception:
             return HTMLResponse(
@@ -307,8 +319,13 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=500,
             )
         return render(
-            "_session_card.html.jinja2", s=s,
-            headers={"HX-Trigger": '{"toast":"✅ 已确认 Session","toastType":"success"}'},
+            "_session_card.html.jinja2",
+            s=s,
+            headers={
+                "HX-Trigger": (
+                    '{"toast":"✅ 已确认 Session","toastType":"success"}'
+                )
+            },
         )
 
     @router.post("/ruok/_actions/solve/{session_id}")
@@ -324,8 +341,13 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=500,
             )
         return render(
-            "_session_card.html.jinja2", s=s,
-            headers={"HX-Trigger": '{"toast":"🟢 Session 已解决","toastType":"success"}'},
+            "_session_card.html.jinja2",
+            s=s,
+            headers={
+                "HX-Trigger": (
+                    '{"toast":"🟢 Session 已解决","toastType":"success"}'
+                )
+            },
         )
 
     @router.post("/ruok/_actions/ignore/{session_id}")
@@ -341,41 +363,71 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=500,
             )
         return render(
-            "_session_card.html.jinja2", s=s,
-            headers={"HX-Trigger": '{"toast":"⚪ Session 已忽略","toastType":"info"}'},
+            "_session_card.html.jinja2",
+            s=s,
+            headers={
+                "HX-Trigger": (
+                    '{"toast":"⚪ Session 已忽略","toastType":"info"}'
+                )
+            },
         )
 
     @router.post("/ruok/_actions/session-note/{session_id}")
-    async def action_session_note(session_id: str, developer_notes: str = Form("")):
+    async def action_session_note(
+        session_id: str, developer_notes: str = Form("")
+    ):
         try:
-            update_session(data_dir, session_id, {"developer_notes": developer_notes})
+            update_session(
+                data_dir, session_id, {"developer_notes": developer_notes}
+            )
         except Exception:
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">❌ 保存失败</p>',
                 status_code=500,
             )
         return HTMLResponse(
-            f'<div id="notes-area"><form hx-post="/ruok/_actions/session-note/{session_id}" hx-target="#notes-area" hx-swap="outerHTML"><textarea name="developer_notes" rows="3" style="width:100%;" placeholder="添加备注...">{developer_notes}</textarea><button type="submit">保存备注</button></form><p style="color: var(--pico-ins-color);">✅ 已保存</p></div>'
+            f'<div id="notes-area">'
+            f'<form hx-post="/ruok/_actions/session-note/{session_id}" '
+            f'hx-target="#notes-area" hx-swap="outerHTML">'
+            f'<textarea name="developer_notes" rows="3" '
+            f'style="width:100%;" placeholder="添加备注...">'
+            f'{developer_notes}</textarea>'
+            f'<button type="submit">保存备注</button></form>'
+            f'<p style="color: var(--pico-ins-color);">✅ 已保存</p></div>'
         )
 
     @router.post("/ruok/_actions/link/{session_id}")
-    async def action_link(session_id: str, other_id: str = Form(...)):
+    async def action_link(
+        session_id: str, other_id: str = Form(...)
+    ):
         ok = link_sessions(data_dir, session_id, other_id)
         if not ok:
-            return HTMLResponse('<p style="color:var(--pico-del-color);">Session 未找到或 ID 相同</p>', status_code=400)
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">'
+                'Session 未找到或 ID 相同</p>',
+                status_code=400,
+            )
         linked = get_linked_sessions(data_dir, session_id)
-        return render("_linked_list.html.jinja2", session_id=session_id, linked_sessions=linked)
+        return render(
+            "_linked_list.html.jinja2",
+            session_id=session_id,
+            linked_sessions=linked,
+        )
 
     @router.post("/ruok/_actions/unlink/{session_id}")
     async def action_unlink(session_id: str):
         unlink_session(data_dir, session_id)
-        return HTMLResponse('<p>已解除关联</p>')
+        return HTMLResponse("<p>已解除关联</p>")
 
     @router.post("/ruok/_actions/link/{session_id}/remove/{other_id}")
     async def action_unlink_other(session_id: str, other_id: str):
         unlink_session(data_dir, other_id)
         linked = get_linked_sessions(data_dir, session_id)
-        return render("_linked_list.html.jinja2", session_id=session_id, linked_sessions=linked)
+        return render(
+            "_linked_list.html.jinja2",
+            session_id=session_id,
+            linked_sessions=linked,
+        )
 
     @router.post("/ruok/_actions/module-upsert")
     async def action_module_upsert(

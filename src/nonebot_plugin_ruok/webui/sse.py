@@ -1,13 +1,13 @@
 """SSE (Server-Sent Events) endpoint and EventBus for real-time WebUI updates."""
 from __future__ import annotations
 
-import asyncio
 import json
+import asyncio
+from typing import Any, AsyncGenerator
 from datetime import datetime, timezone
-from typing import Any
 
-from fastapi.responses import StreamingResponse
 from nonebot import logger
+from fastapi.responses import StreamingResponse
 
 
 class EventBus:
@@ -59,7 +59,7 @@ async def sse_event_generator(
     config_ttl: float,
     collect_status_fn,
     event_bus_ref: EventBus,
-) -> str:
+) -> AsyncGenerator[str, None]:
     """Async generator yielding SSE text/event-stream content.
 
     - Full status (event: status) every *config_ttl* seconds.
@@ -74,7 +74,7 @@ async def sse_event_generator(
     tick_count = int(config_ttl)  # number of 1s ticks between full collections
 
     try:
-        from ..collector import collect_fast_metrics, _network_tracker
+        from ..collector import _network_tracker, collect_fast_metrics
 
         tick_count = int(config_ttl)
         ticks_since_metrics = 0

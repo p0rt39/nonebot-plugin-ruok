@@ -7,9 +7,9 @@ from __future__ import annotations
 import hashlib
 import secrets
 
-from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Form, Request, APIRouter
 from nonebot import logger
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .jinja import render
 

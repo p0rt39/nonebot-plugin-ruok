@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader
+from fastapi.responses import HTMLResponse
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
