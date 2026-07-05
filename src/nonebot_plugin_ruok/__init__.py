@@ -433,6 +433,13 @@ async def _startup():
     # Start LogMonitor (works regardless of driver type)
     log_monitor.start()
 
+    # Register summary notification job (best-effort, APScheduler optional)
+    try:
+        from .collectors.notifications import register_summary_job
+        register_summary_job(plugin_config, data_dir)
+    except Exception as exc:
+        logger.warning(f"RuOK: summary job registration failed: {exc}")
+
     logger.info("RuOK plugin started")
 
 

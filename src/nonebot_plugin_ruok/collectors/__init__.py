@@ -48,6 +48,7 @@ from .trackers import (
     _network_tracker,
 )
 from .notifications import (
+    register_summary_job,
     dispatch_notification,
 )
 
@@ -86,6 +87,7 @@ __all__ = [
     "link_sessions",
     "list_modules",
     "list_sessions",
+    "register_summary_job",
     "resolve_module_display",
     "unlink_session",
     "update_session",

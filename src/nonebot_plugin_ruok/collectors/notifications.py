@@ -242,3 +242,88 @@ def dispatch_notification(
                 tasks.append(asyncio.create_task(_send_webhook(rule, session)))
             else:
                 logger.warning(f"RuOK: unknown notification channel: {channel}")
+
+
+# ────────────────────────────────
+# 6. Summary notification (APScheduler)
+# ────────────────────────────────
+
+
+async def _send_summary(
+    config: ScopedConfig, data_dir: Path
+) -> None:
+    """Send a summary of unresolved sessions to superusers."""
+    import nonebot
+
+    try:
+        from .sessions import list_sessions
+
+        sessions = list_sessions(data_dir)
+        pending = [s for s in sessions if s.status == "pending"]
+        unsolved = [s for s in sessions if s.status == "unsolved"]
+        if not pending and not unsolved:
+            return
+
+        bots = nonebot.get_bots()
+        if not bots:
+            return
+        bot = next(iter(bots.values()))
+        superusers = get_driver().config.superusers
+        if not superusers:
+            return
+
+        text = (
+            f"📊 RuOK 定时汇总\n"
+            f"Pending: {len(pending)} | Unsolved: {len(unsolved)}\n"
+        )
+        if pending:
+            text += "\n— Pending —\n"
+            for s in pending[:5]:
+                text += (
+                    f"  {s.session_id} | {s.module_name} | "
+                    f"{s.first_seen_at.strftime('%H:%M')}\n"
+                )
+            if len(pending) > 5:
+                text += f"  ... 还有 {len(pending) - 5} 个\n"
+        if unsolved:
+            text += "\n— Unsolved —\n"
+            for s in unsolved[:5]:
+                text += (
+                    f"  {s.session_id} | {s.module_name} | "
+                    f"{s.first_seen_at.strftime('%H:%M')}\n"
+                )
+            if len(unsolved) > 5:
+                text += f"  ... 还有 {len(unsolved) - 5} 个\n"
+
+        for uid in superusers:
+            try:
+                await bot.send_private_msg(user_id=int(uid), message=text)
+            except Exception as exc:
+                logger.warning(f"RuOK: summary notify failed for {uid}: {exc}")
+    except Exception as exc:
+        logger.warning(f"RuOK: summary notification failed: {exc}")
+
+
+def register_summary_job(
+    config: ScopedConfig, data_dir: Path
+) -> None:
+    """Register a periodic summary job via APScheduler, if available."""
+    try:
+        from nonebot import require
+        require("nonebot_plugin_apscheduler")
+        from nonebot_plugin_apscheduler import scheduler
+    except Exception:
+        logger.info(
+            "RuOK: APScheduler not available, summary notifications disabled"
+        )
+        return
+
+    hours = config.summary_interval_hours or 4.0
+
+    @scheduler.scheduled_job("interval", hours=hours, misfire_grace_time=300)
+    async def _ruok_summary_job() -> None:
+        await _send_summary(config, data_dir)
+
+    logger.info(
+        f"RuOK: summary notification job registered (every {hours}h)"
+    )
