@@ -32,7 +32,7 @@ def _builtin_module() -> ModuleDefinition:
         name="ruok",
         display_name="RuOK",
         description="RuOK 插件自身 — 监控系统健康状态",
-        plugins=[],
+        plugins=["nonebot_plugin_ruok"],
         enabled=True,
     )
 
@@ -65,6 +65,13 @@ def list_modules(
     if not has_builtin:
         modules.insert(0, _builtin_module())
         _path_write_json(path, [m.model_dump() for m in modules])
+    else:
+        # Migration: ensure built-in RuOK module references itself
+        for m in modules:
+            if m.name == "ruok" and not m.plugins:
+                m.plugins = ["nonebot_plugin_ruok"]
+                _path_write_json(path, [mod.model_dump() for mod in modules])
+                break
 
     for mod in modules:
         mod.status = derive_module_status(data_dir, mod.name)
