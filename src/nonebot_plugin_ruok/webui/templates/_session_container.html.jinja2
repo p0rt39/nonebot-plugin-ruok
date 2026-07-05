@@ -1,0 +1,19 @@
+<!-- Stats overview -->
+<article style="padding: 1rem;">
+    <div class="grid" style="text-align: center;">
+        <div><span class="status-dot status-pending"></span> Pending: <strong>{{ stats.pending }}</strong></div>
+        <div><span class="status-dot status-unsolved"></span> Unsolved: <strong>{{ stats.unsolved }}</strong></div>
+        <div><span class="status-dot status-solved"></span> Solved: <strong>{{ stats.solved }}</strong></div>
+        <div><span class="status-dot status-ignored"></span> Ignored: <strong>{{ stats.ignored }}</strong></div>
+    </div>
+</article>
+
+<!-- Results count -->
+<div class="results-count">
+    共 {{ sessions | length }} 条结果
+</div>
+
+<!-- Session List (HTMX target) -->
+<div id="session-container">
+    {% include "_sessions_list.html.jinja2" %}
+</div>

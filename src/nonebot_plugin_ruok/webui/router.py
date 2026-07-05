@@ -400,22 +400,14 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 reporter=reporter,
                 source="manual",
             )
-            # Refresh session list
+            # Refresh session list + stats
             sessions = list_sessions(data_dir)
             stats = get_session_stats(data_dir)
-            all_modules = list_modules(data_dir, config)
+            # Return session-container partial (NOT the full page)
             return render(
-                "sessions.html.jinja2",
-                request=request,
+                "_session_container.html.jinja2",
                 sessions=sessions,
                 stats=stats,
-                all_modules=all_modules,
-                current_status="",
-                current_search="",
-                current_module="",
-                current_plugin="",
-                current_after="",
-                current_before="",
                 headers={
                     "HX-Trigger": (
                         '{"toast":"Session created","toastType":"success"}'
