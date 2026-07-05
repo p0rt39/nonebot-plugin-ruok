@@ -1,0 +1,136 @@
+"""Data models for RuOK plugin — health, session, module definitions."""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+
+# ────────────────────────────────
+# 1. Health check models
+# ────────────────────────────────
+
+HealthStatus = Literal["healthy", "unhealthy", "degraded", "unknown"]
+ModuleStatus = Literal["available", "degraded", "unavailable"]
+
+
+class CheckResult(BaseModel):
+    """A single sub-check result."""
+
+    name: str
+    status: HealthStatus
+    message: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
+    latency_ms: float | None = None
+    error: str | None = None
+
+
+class StatusResult(BaseModel):
+    """Plugin / component-level status report."""
+
+    plugin_name: str
+    plugin_type: str  # "builtin" | "application" | "library"
+    status: HealthStatus
+    checks: list[CheckResult] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class BotConnectionStatus(BaseModel):
+    """WebSocket connection tracking for one bot account."""
+
+    self_id: str
+    adapter: str
+    connected: bool
+    connected_at: datetime | None = None
+    disconnected_at: datetime | None = None
+    ws_closed: bool | None = None  # OneBot-specific
+    latency_ms: float | None = None  # bot.get_status() e2e latency
+    error: str | None = None
+
+
+class PluginHealthInfo(BaseModel):
+    """Five-layer plugin health model (L1-L5)."""
+
+    name: str
+    loaded: bool  # L1
+    metadata: dict[str, Any] | None = None  # L2
+    matchers: list[dict[str, Any]] = Field(default_factory=list)  # L3
+    health_hint: str = ""  # "load_failed" | "no_matchers" | "matchers_ok"
+    deep_check: dict[str, Any] | None = None  # L4 (opt-in)
+    log_errors: int = 0  # L5: recent error count
+
+
+class AggregatedStatus(BaseModel):
+    """Root API response."""
+
+    overall: ModuleStatus
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    bot: StatusResult | None = None
+    connections: list[BotConnectionStatus] = Field(default_factory=list)
+    plugins: list[PluginHealthInfo] = Field(default_factory=list)
+
+
+# ────────────────────────────────
+# 2. Session models
+# ────────────────────────────────
+
+SessionSource = Literal["automatic", "manual"]
+SessionStatus = Literal["pending", "unsolved", "solved", "ignored"]
+ReporterType = Literal["automatic", "user"]
+
+
+class ReporterInfo(BaseModel):
+    """Who / what created this session."""
+
+    type: ReporterType
+    user_id: str | None = None
+    group_id: str | None = None
+    platform: str | None = None
+
+
+class Occurrence(BaseModel):
+    """One capture / report within a session."""
+
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    record: dict[str, Any] | None = None  # full loguru record (automatic)
+    snapshot: AggregatedStatus | None = None  # health snapshot at capture time
+    source: SessionSource
+
+
+class Session(BaseModel):
+    """An abnormal event record — independent, linkable."""
+
+    session_id: str  # "ruok-{8 hex}"
+    source: SessionSource
+    status: SessionStatus = "pending"
+    module_name: str
+    error_signature: str | None = None  # dedup key (automatic only)
+
+    reporter: ReporterInfo = Field(default_factory=lambda: ReporterInfo(type="automatic"))
+    description: str = ""
+
+    first_seen_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_seen_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    resolved_at: datetime | None = None
+
+    linked_sessions: list[str] = Field(default_factory=list)
+    developer_notes: str | None = None
+
+    occurrences: list[Occurrence] = Field(default_factory=list)
+
+
+# ────────────────────────────────
+# 3. Module definition
+# ────────────────────────────────
+
+class ModuleDefinition(BaseModel):
+    """A user-facing feature module that maps to plugins."""
+
+    name: str  # "网易云"
+    display_name: str = ""
+    plugins: list[str] = Field(default_factory=list)  # ["nonebot_plugin_ncm"]
+    description: str | None = None
+    enabled: bool = True
+    status: ModuleStatus = "available"  # derived at query time
