@@ -529,7 +529,10 @@ async def collect_process_snapshot() -> ProcessSnapshot:
             try:
                 info = p.info
                 name = info["name"] or ""
-                if name.lower() in ("idle", "system"):
+                pid = info["pid"] or 0
+                # Skip idle/system processes (Windows: PID 0 "System Idle Process";
+                # Linux: no equivalent, psutil filters kernel threads automatically)
+                if pid == 0 or "idle" in name.lower() or not name:
                     continue
                 mem = info["memory_info"]
                 rss = mem.rss if mem else 0
