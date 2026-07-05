@@ -9,7 +9,7 @@
 [![uv](https://img.shields.io/badge/package%20manager-uv-black?style=flat-square&logo=uv)](https://github.com/astral-sh/uv)
 <br/>
 [![ruff](https://img.shields.io/badge/code%20style-ruff-black?style=flat-square&logo=ruff)](https://github.com/astral-sh/ruff)
-[![prek](https://img.shields.io/badge/hooks-prek-8A2BE2?style=flat-square)](https://github.com/j178/prek)
+[![coverage](https://img.shields.io/badge/coverage-46%25-yellow)](https://github.com/p0rt39/nonebot-plugin-ruok)
 [![pre-commit](https://results.pre-commit.ci/badge/github/p0rt39/nonebot-plugin-ruok/master.svg)](https://results.pre-commit.ci/latest/github/p0rt39/nonebot-plugin-ruok/master)
 
 </div>
@@ -27,75 +27,39 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 - 📡 **SSE 实时推送**：Dashboard 实时状态更新 + Session 变更即时通知
 - 📊 **数据可视化**：CPU/内存趋势折线图 + Session 状态饼图（Chart.js）
 - 🔐 **WebUI 登录认证**：可选 session-based 登录，与 API Key 分离管理
-- 🔎 **高级筛选**：Session 支持全文搜索、时间范围、模块、关联插件多维过滤
+- � **通知引擎**：多规则、冷却期、Bot 私聊 + Webhook 双通道
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: 自动捕获 / 手动上报
+    pending --> unsolved: confirm
+    pending --> ignored: ignore (误报)
+    unsolved --> solved: solve
+    unsolved --> ignored: ignore (误报)
+```
 
 ## 💿 安装
 
-<details open>
-<summary>使用 nb-cli 安装</summary>
-在 nonebot2 项目的根目录下打开命令行, 输入以下指令即可安装
+```bash
+# nb-cli（推荐）
+nb plugin install nonebot-plugin-ruok --upgrade
 
-    nb plugin install nonebot-plugin-ruok --upgrade
-使用 **pypi** 源安装
+# uv
+uv add nonebot-plugin-ruok
 
-    nb plugin install nonebot-plugin-ruok --upgrade -i "https://pypi.org/simple"
-使用**清华源**安装
+# pdm
+pdm add nonebot-plugin-ruok
 
-    nb plugin install nonebot-plugin-ruok --upgrade -i "https://pypi.tuna.tsinghua.edu.cn/simple"
+# poetry
+poetry add nonebot-plugin-ruok
+```
 
+安装后在 `pyproject.toml` 中注册插件：
 
-</details>
-
-<details>
-<summary>使用包管理器安装</summary>
-在 nonebot2 项目的插件目录下, 打开命令行, 根据你使用的包管理器, 输入相应的安装命令
-
-<details open>
-<summary>uv</summary>
-
-    uv add nonebot-plugin-ruok
-安装仓库 master 分支
-
-    uv add git+https://github.com/p0rt39/nonebot-plugin-ruok@master
-</details>
-
-<details>
-<summary>pdm</summary>
-
-    pdm add nonebot-plugin-ruok
-安装仓库 master 分支
-
-    pdm add git+https://github.com/p0rt39/nonebot-plugin-ruok@master
-</details>
-<details>
-<summary>poetry</summary>
-
-    poetry add nonebot-plugin-ruok
-安装仓库 master 分支
-
-    poetry add git+https://github.com/p0rt39/nonebot-plugin-ruok@master
-</details>
-
-打开 nonebot2 项目根目录下的 `pyproject.toml` 文件, 在 `[tool.nonebot]` 部分追加写入
-
-    plugins = ["nonebot_plugin_ruok"]
-
-</details>
-
-<details>
-<summary>使用 nbr 安装(使用 uv 管理依赖可用)</summary>
-
-[nbr](https://github.com/fllesser/nbr) 是一个基于 uv 的 nb-cli，可以方便地管理 nonebot2
-
-    nbr plugin install nonebot-plugin-ruok
-使用 **pypi** 源安装
-
-    nbr plugin install nonebot-plugin-ruok -i "https://pypi.org/simple"
-使用**清华源**安装
-
-    nbr plugin install nonebot-plugin-ruok -i "https://pypi.tuna.tsinghua.edu.cn/simple"
-
-</details>
+```toml
+[tool.nonebot]
+plugins = ["nonebot_plugin_ruok"]
+```
 
 ## ⚙️ 配置
 
@@ -116,6 +80,7 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 | :----- | :--: | :----: | :--- |
 | `RUOK__SESSION_ENABLED` | `bool` | `True` | 是否启用 Session 系统 |
 | `RUOK__AUTO_SESSION_ENABLED` | `bool` | `True` | 是否自动捕获 ERROR 日志生成 Session |
+| `RUOK__STRICT_EXCEPTION_CAPTURE` | `bool` | `False` | True=捕获所有 stdlib ERROR，False=仅框架级（uvicorn/starlette/fastapi/asyncio） |
 | `RUOK__CRISIS_MODE` | `bool` | `False` | 紧急模式：跳过所有上报权限检查（测试/紧急用） |
 | `RUOK__NOTIFY_SUPERUSERS` | `bool` | `True` | 新 Session 是否私聊通知 SUPERUSERS |
 | `RUOK__NOTIFY_INTERVAL_HOURS` | `float` | `4.0` | 同一 Session 再次通知的最小间隔（小时） |
@@ -140,6 +105,7 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 | `RUOK__CORS_ORIGINS` | `list[str]` | `["*"]` | CORS 允许的源列表 |
 | `RUOK__API_KEY` | `str` | `""` | API 密钥（为空则不校验） |
 | `RUOK__WEBUI_PASSWORD` | `str` | `""` | WebUI 登录密码（为空则不启用认证） |
+| `RUOK__SSE_PUBLIC` | `bool` | `False` | True 时 SSE 端点无需登录 |
 
 ### 时间序列指标
 
@@ -196,39 +162,88 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 
 所有接口前缀 `/ruok/api`，返回 JSON。
 
+**健康检查**
+
 | 端点 | 方法 | 说明 |
 | :--- | :--: | :--- |
-| `/ruok/api/status` | GET | 聚合健康状态（硬件+连接+插件+模块） |
+| `/ruok/api/status` | GET | 聚合健康状态（硬件 + 连接 + 插件 + 模块） |
 | `/ruok/api/health` | GET | 简单探针，200 或 503（K8s / Docker / Uptime） |
 | `/ruok/api/connections` | GET | 仅 WS 连接状态（轻量） |
-| `/ruok/api/sessions` | GET | Session 列表，支持 `?status=&module=&reporter=` 过滤 |
+
+**Session 管理**
+
+| 端点 | 方法 | 说明 |
+| :--- | :--: | :--- |
+| `/ruok/api/sessions` | GET | Session 列表，支持 `?status=&module=&reporter=&search=&plugin=&after=&before=` |
 | `/ruok/api/sessions` | POST | 创建 Session（WebUI 用） |
-| `/ruok/api/sessions/{id}` | GET | Session 详情 + 全部 Occurrence |
+| `/ruok/api/sessions/stats` | GET | 聚合统计（pending/unsolved/solved/ignored） |
+| `/ruok/api/sessions/{id}` | GET | Session 详情 |
+| `/ruok/api/sessions/{id}` | PATCH | 更新状态 / 开发者备注 |
 | `/ruok/api/sessions/{id}/link/{other}` | POST | 关联两个 Session |
-| `/ruok/api/sessions/stats` | GET | Session 聚合统计（pending/unsolved/solved/ignored 数量） |
-| `/ruok/api/modules` | GET | 模块列表（含实时派生状态） |
+| `/ruok/api/sessions/{id}/link` | DELETE | 解除关联 |
+| `/ruok/api/sessions/{id}/linked` | GET | 获取同组关联的 Session 列表 |
+
+**模块管理**
+
+| 端点 | 方法 | 说明 |
+| :--- | :--: | :--- |
+| `/ruok/api/modules` | GET | 模块列表（含实时推导状态） |
 | `/ruok/api/modules/{name}` | GET / PUT / DELETE | 模块 CRUD |
-| `/ruok/api/metrics/history` | GET | 时间序列指标，`?hours=24`（Dashboard 图表数据源） |
+
+**指标**
+
+| 端点 | 方法 | 说明 |
+| :--- | :--: | :--- |
+| `/ruok/api/metrics/history` | GET | 时间序列数据，`?hours=24`（Dashboard 图表数据源） |
 
 ### WebUI
 
 启动机器人后，浏览器访问 `http://<host>:<port>/ruok` 即可打开可视化面板。
 
-**页面功能**：
-
 | 页面 | 路由 | 说明 |
 | :--- | :--- | :--- |
-| 📊 总览 | `/ruok` | 整体状态 + 系统指标卡片 + 连接状态 + CPU/内存趋势图 + Session 统计饼图 + 模块状态表（HTMX 10s 自动刷新） |
-| 📋 Sessions | `/ruok/sessions` | Session 列表 + 高级筛选（全文搜索、状态、模块、关联插件、时间范围）+ 统计概览 |
-| 📝 Session 详情 | `/ruok/sessions/{id}` | 完整信息 + 状态时间线 + Occurrence 列表 + 关联 Session + 开发者备注（HTMX inline edit） |
-| 📦 模块管理 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件、启用状态） |
-| 🔔 通知规则 | `/ruok/notifications` | 查看已配置的通知规则（触发条件、冷却时间、通道） |
-| 🔐 登录 | `/ruok/login` | WebUI 登录页（仅当 `RUOK__WEBUI_PASSWORD` 非空时启用） |
+| 📊 总览 | `/ruok` | 系统指标卡片 + 连接状态 + CPU/内存趋势图 + Session 统计饼图 + 模块表 |
+| 📋 Sessions | `/ruok/sessions` | 列表 + 高级筛选（搜索、状态、模块、插件、时间范围） |
+| 📝 详情 | `/ruok/sessions/{id}` | 完整信息 + 状态时间线 + 关联 Session + 开发者备注 |
+| 📦 模块 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件、启用状态） |
+| 🔔 通知 | `/ruok/notifications` | 通知规则管理（触发条件、冷却、通道） |
+| 🔐 登录 | `/ruok/login` | 仅当 `RUOK__WEBUI_PASSWORD` 非空时启用 |
 
-**技术特性**：
+**技术架构**
 
-- 🧩 **SSR + HTMX + Pico.css**：服务端渲染 Jinja2 模板，HTMX 局部更新，零前端构建
-- 📡 **SSE 实时推送**：定时心跳 + 事件驱动，Dashboard 状态实时同步
-- 📈 **Chart.js 可视化**：CPU/内存趋势折线图 + Session 状态饼图，CDN 引入
-- 🔎 **高级筛选**：搜索框 300ms 防抖 + 下拉框即时过滤 + 日期范围选择器
-- 🔐 **可选认证**：SessionMiddleware + SHA256 密码哈希，与 API Key 分离管理
+| 层级 | 技术 | 用途 |
+|------|------|------|
+| 模板 | Jinja2 | SSR 页面渲染 |
+| 交互 | HTMX 2.x | 局部刷新、内联编辑 |
+| 实时 | SSE | ~1s 指标更新 + Session 变更推送 |
+| 样式 | Pico.css + 自定义 CSS | Glass 风格暗色模式 |
+| 图表 | Chart.js | 趋势折线图 + 状态饼图 |
+| DOM | idiomorph | Hero 区域 morph 过渡 |
+
+## 🏗️ 项目结构
+
+```
+src/nonebot_plugin_ruok/
+├── __init__.py          # 入口：PluginMetadata + 7 个 Matcher + WS 钩子 + 挂载
+├── config.py            # Pydantic 配置模型（ruok__ 作用域）
+├── protocol.py          # 全部数据模型
+├── api.py               # FastAPI JSON 路由（/ruok/api/*）
+├── collector.py         # 薄重导出层 → collectors/
+├── collectors/          # 核心引擎
+│   ├── metrics.py       # 系统指标 + WS 连接 + 插件清单 + 聚合
+│   ├── sessions.py      # Session CRUD + 关联 + 统计 + 错误处理
+│   ├── modules.py       # 模块定义 CRUD + 状态推导
+│   ├── monitor.py       # LogMonitor（loguru + stdlib）
+│   ├── notifications.py # 通知引擎（规则/冷却/BotDM/Webhook）
+│   └── trackers.py      # 网络/磁盘速率追踪
+└── webui/               # Web 面板
+    ├── router.py        # SSR 路由（页面 + HTMX partial + action）
+    ├── auth.py          # WebUI 登录认证
+    ├── sse.py           # EventBus + SSE 流生成器
+    ├── jinja.py         # Jinja2 环境 + 自定义 filter
+    └── templates/       # 18 个 Jinja2 模板
+```
+
+## 📄 许可证
+
+MIT © [p0rt39](https://github.com/p0rt39)
