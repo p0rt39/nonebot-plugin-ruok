@@ -448,7 +448,10 @@ async def collect_fast_metrics() -> FastMetricsSnapshot:
         import psutil
 
         # interval=1.0 gives stable readings matching Task Manager (~1s refresh)
-        cpu = psutil.cpu_percent(interval=1.0, percpu=True)
+        # Step 1: system-wide CPU (blocks 1s, establishes baseline)
+        cpu_overall = psutil.cpu_percent(interval=1.0)
+        # Step 2: per-core CPU (returns immediately, uses baseline from step 1)
+        cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
         mem = psutil.virtual_memory()
         swap = psutil.swap_memory()
 
@@ -484,8 +487,8 @@ async def collect_fast_metrics() -> FastMetricsSnapshot:
             pass
 
         return FastMetricsSnapshot(
-            cpu_percent=cpu[0] if cpu else 0.0,
-            cpu_per_core=cpu[1:] if len(cpu) > 1 else [],
+            cpu_percent=cpu_overall,
+            cpu_per_core=cpu_per_core if len(cpu_per_core) > 1 else [],
             memory_percent=mem.percent,
             memory_used=mem.used,
             memory_total=mem.total,
