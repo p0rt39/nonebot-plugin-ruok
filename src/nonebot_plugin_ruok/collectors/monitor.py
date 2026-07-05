@@ -69,18 +69,39 @@ class LogMonitor:
 
 
 class _StdlibLogHandler(logging.Handler):
-    """Intercept Python stdlib ERROR/CRITICAL logs (e.g. uvicorn)
-    and create RuOK sessions, mirroring the loguru-sink behaviour."""
+    """Intercept Python stdlib ERROR/CRITICAL logs and create RuOK sessions.
+
+    In non-strict mode (default) only captures framework-level loggers:
+    ``uvicorn``, ``starlette``, ``fastapi``, ``asyncio``, ``multipart``.
+    Set ``ruok__strict_exception_capture=true`` to capture all loggers.
+    """
+
+    _FRAMEWORK_PREFIXES: tuple[str, ...] = (
+        "uvicorn",
+        "starlette",
+        "fastapi",
+        "asyncio",
+    )
 
     def __init__(
-        self, config: ScopedConfig, data_dir: Path, loop: asyncio.AbstractEventLoop
+        self,
+        config: ScopedConfig,
+        data_dir: Path,
+        loop: asyncio.AbstractEventLoop,
     ) -> None:
         super().__init__(level=logging.ERROR)
         self._config = config
         self._data_dir = data_dir
         self._loop = loop
+        self._strict: bool = config.strict_exception_capture
+
+    def _is_framework(self, name: str) -> bool:
+        return name.startswith(self._FRAMEWORK_PREFIXES)
 
     def emit(self, record: logging.LogRecord) -> None:
+        # Non-strict mode: only intercept framework loggers
+        if not self._strict and not self._is_framework(record.name):
+            return
         try:
             plugin_id: str = record.name
             msg_text: str = self.format(record)
