@@ -89,14 +89,15 @@ async def sse_event_generator(
         # Background metrics task to avoid blocking tick interval
         _metrics_task: asyncio.Task | None = None
         _latest_metrics: dict[str, Any] | None = None
+        _cached_proc: dict[str, Any] = {}  # carry forward process data on light cycles
 
         async def _collect_metrics_background(full: bool = True) -> None:
             """Collect metrics in background, update cache on completion.
 
             *full=True*: collect everything including process snapshot.
-            *full=False*: skip process snapshot for faster 1s cycle.
+            *full=False*: reuse last process snapshot for faster 1s cycle.
             """
-            nonlocal _latest_metrics
+            nonlocal _latest_metrics, _cached_proc
             try:
                 fm = await collect_fast_metrics()
                 nr = _network_tracker.get_rate()
@@ -139,17 +140,16 @@ async def sse_event_generator(
                 # Process snapshot (heavy — only on full cycles, ~3s cadence)
                 if full:
                     ps_snap = await collect_process_snapshot()
-                    metrics["bot_vms"] = ps_snap.bot_vms
-                    metrics["bot_threads"] = ps_snap.bot_threads
-                    metrics["bot_cpu"] = ps_snap.bot_cpu_percent
-                    metrics["top_processes"] = [
-                        p.model_dump(mode="json") for p in ps_snap.top_processes
-                    ]
-                else:
-                    metrics["bot_vms"] = 0
-                    metrics["bot_threads"] = 0
-                    metrics["bot_cpu"] = 0.0
-                    metrics["top_processes"] = []
+                    _cached_proc = {
+                        "bot_vms": ps_snap.bot_vms,
+                        "bot_threads": ps_snap.bot_threads,
+                        "bot_cpu": ps_snap.bot_cpu_percent,
+                        "top_processes": [
+                            p.model_dump(mode="json") for p in ps_snap.top_processes
+                        ],
+                    }
+                # Always include process data (fresh or cached)
+                metrics.update(_cached_proc)
 
                 _latest_metrics = metrics
             except Exception as exc:
