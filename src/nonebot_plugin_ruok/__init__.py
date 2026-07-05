@@ -151,12 +151,18 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
         return
 
     parts = rest.split(maxsplit=1)
-    module_name = parts[0].strip() if parts else ""
+    user_input = parts[0].strip() if parts else ""
     description = parts[1].strip() if len(parts) > 1 else ""
 
-    if not module_name:
+    if not user_input:
         await ruok_cmd.finish("用法: /ruok no <模块> <描述>")
         return
+
+    # Resolve user input → module definition
+    from .collectors.modules import resolve_module_display
+
+    resolved = resolve_module_display(user_input, data_dir, plugin_config)
+    module_name = resolved.name if resolved is not None else user_input
 
     gid = getattr(event, "group_id", None)
     reporter = ReporterInfo(
@@ -176,9 +182,10 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
         from .collector import _notify_new_session
 
         _notify_new_session(session)
+    display = resolved.display_name if resolved is not None else user_input
     await ruok_cmd.finish(
         f"📝 已记录 | Session: {session.session_id}\n"
-        f"模块: {module_name}\n描述: {description}"
+        f"模块: {display}\n描述: {description}"
     )
 
 
@@ -205,7 +212,7 @@ async def _cmd_status() -> None:
                 "degraded": "🟡",
                 "unavailable": "🔴"
                 }.get(m.status, "⚪")
-        lines.append(f"{icon} {m.name} — {m.status}")
+        lines.append(f"{icon} {m.display_name or m.name} — {m.status}")
     await ruok_cmd.finish("\n".join(lines))
 
 

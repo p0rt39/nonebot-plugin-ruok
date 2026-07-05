@@ -131,3 +131,27 @@ def derive_module_status(data_dir: Path, module_name: str) -> ModuleStatus:
     if any(s.status == "pending" for s in sessions):
         return "degraded"
     return "available"
+
+
+# ────────────────────────────────
+# 4. display_name resolution
+# ────────────────────────────────
+
+
+def resolve_module_display(
+    user_input: str,
+    data_dir: Path,
+    config: ScopedConfig,
+) -> ModuleDefinition | None:
+    """Resolve user input to a ModuleDefinition.
+
+    Priority: display_name match → name match → None.
+    """
+    modules = list_modules(data_dir, config)
+    for m in modules:
+        if m.display_name and m.display_name.strip() == user_input:
+            return m
+    for m in modules:
+        if m.name == user_input:
+            return m
+    return None

@@ -17,6 +17,7 @@ from .modules import (
     delete_module,
     upsert_module,
     derive_module_status,
+    resolve_module_display,
 )
 from .monitor import (
     LogMonitor,
@@ -81,6 +82,7 @@ __all__ = [
     "link_sessions",
     "list_modules",
     "list_sessions",
+    "resolve_module_display",
     "unlink_session",
     "update_session",
     "upsert_module",

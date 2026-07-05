@@ -56,6 +56,7 @@ from .collectors import (  # noqa: F401 — re-export
     derive_module_status,
     _find_existing_session,
     _publish_session_event,
+    resolve_module_display,
     _collect_system_metrics,
     collect_process_snapshot,
     _collect_plugin_inventory,
