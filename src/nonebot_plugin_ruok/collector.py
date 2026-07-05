@@ -7,14 +7,11 @@ the ``collectors/`` subpackage.
 from __future__ import annotations
 
 import json
-import asyncio
 from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-import nonebot
-from nonebot import logger, get_driver
-
+from .config import ScopedConfig
 from .protocol import Session, MetricPoint
 
 # ── Re-export everything from the collectors subpackage ──
@@ -54,6 +51,7 @@ from .collectors import (  # noqa: F401 — re-export
     collect_all_statuses,
     collect_fast_metrics,
     derive_module_status,
+    dispatch_notification,
     _find_existing_session,
     _publish_session_event,
     resolve_module_display,
@@ -68,39 +66,11 @@ from .collectors import (  # noqa: F401 — re-export
 # ────────────────────────────────
 
 
-def _notify_new_session(session: Session) -> None:
-    """Send private-chat notification to SUPERUSERS about a new session."""
-    try:
-        bots = nonebot.get_bots()
-        if not bots:
-            return
-        bot = next(iter(bots.values()))
-        superusers = get_driver().config.superusers
-        if not superusers:
-            return
-
-        text = (
-            f"🔔 新的异常事件\n"
-            f"Session: {session.session_id}\n"
-            f"来源: {session.source}\n"
-            f"模块: {session.module_name}\n"
-            f"描述: {session.description[:200]}\n"
-            f"时间: {session.first_seen_at}"
-        )
-        _tasks: list[asyncio.Task] = []
-        for uid in superusers:
-            try:
-                _tasks.append(
-                    asyncio.create_task(
-                        bot.send_private_msg(user_id=int(uid), message=text)
-                    )
-                )
-            except (ValueError, RuntimeError) as exc:
-                logger.warning(
-                    f"RuOK: failed to notify superuser {uid}: {exc}"
-                )
-    except (RuntimeError, KeyError) as exc:
-        logger.warning(f"RuOK: notification failed: {exc}")
+def _notify_new_session(
+    session: Session, config: ScopedConfig, data_dir: Path
+) -> None:
+    """Send notifications for a new session via the rule engine."""
+    dispatch_notification(session, config, data_dir)
 
 
 # ────────────────────────────────

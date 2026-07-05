@@ -207,6 +207,8 @@ def _make_log_sink(
             # Late import to avoid circular dependency
             from ..collector import _notify_new_session
 
-            loop.call_soon_threadsafe(_notify_new_session, session)
+            loop.call_soon_threadsafe(
+                _notify_new_session, session, config, data_dir
+            )
 
     return _sink

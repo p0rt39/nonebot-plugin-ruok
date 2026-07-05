@@ -8,6 +8,14 @@
         "/^uv run pytest tests/ -q$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^uv run ruff check src/ ; uv run pytest tests/ -q$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^uv run ruff check --fix src/ ; uv run ruff check src/ ; uv run pytest tests/ -q$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

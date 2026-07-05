@@ -47,6 +47,9 @@ from .trackers import (
     _disk_tracker,
     _network_tracker,
 )
+from .notifications import (
+    dispatch_notification,
+)
 
 __all__ = [
     "DiskRateTracker",
@@ -75,6 +78,7 @@ __all__ = [
     "create_session",
     "delete_module",
     "derive_module_status",
+    "dispatch_notification",
     "get_linked_sessions",
     "get_module",
     "get_session",
