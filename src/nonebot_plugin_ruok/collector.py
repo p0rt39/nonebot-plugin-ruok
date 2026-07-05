@@ -523,16 +523,14 @@ async def collect_process_snapshot() -> ProcessSnapshot:
         bot_threads = bot_proc.num_threads()
         bot_cpu = bot_proc.cpu_percent()
 
-        # Top 5 processes by CPU (excluding idle/system)
+        # Top 5 processes by CPU (skip PID 0 — Windows System Idle Process)
         procs = []
         for p in psutil.process_iter(["name", "pid", "cpu_percent", "memory_info"]):
             try:
                 info = p.info
                 name = info["name"] or ""
                 pid = info["pid"] or 0
-                # Skip idle/system processes (Windows: PID 0 "System Idle Process";
-                # Linux: no equivalent, psutil filters kernel threads automatically)
-                if pid == 0 or "idle" in name.lower() or not name:
+                if pid == 0:
                     continue
                 mem = info["memory_info"]
                 rss = mem.rss if mem else 0
