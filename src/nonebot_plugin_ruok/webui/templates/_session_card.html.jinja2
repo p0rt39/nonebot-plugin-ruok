@@ -4,7 +4,7 @@
         <span class="status-dot status-{{ s.status }}"></span>
         <strong>{{ s.session_id }}</strong>
         <small style="margin-left: auto;">
-            {{ s.source }} · {{ s.first_seen_at.strftime('%m-%d %H:%M') }}
+            {{ s.source }} · {{ s.first_seen_at.astimezone().strftime('%m-%d %H:%M') }}
         </small>
     </header>
 

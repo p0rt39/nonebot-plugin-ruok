@@ -128,8 +128,13 @@
             }
             var tsEl = document.querySelector('#dashboard-hero .hero-ts');
             if (tsEl && d.timestamp) {
-                tsEl.textContent = new Date(d.timestamp).toISOString()
-                    .replace('T', ' ').replace(/\.\d+/, '') + ' UTC';
+                var dt = new Date(d.timestamp);
+                tsEl.textContent = dt.getFullYear() + '-' +
+                    String(dt.getMonth()+1).padStart(2,'0') + '-' +
+                    String(dt.getDate()).padStart(2,'0') + ' ' +
+                    String(dt.getHours()).padStart(2,'0') + ':' +
+                    String(dt.getMinutes()).padStart(2,'0') + ':' +
+                    String(dt.getSeconds()).padStart(2,'0');
             }
         } catch(ex) { console.error(DBG, 'tick 解析失败:', ex); }
     });

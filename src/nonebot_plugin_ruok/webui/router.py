@@ -54,6 +54,57 @@ def _render_module_edit_row(mod: ModuleDefinition) -> str:
         f'</td>'
         f'</tr>'
     )
+
+
+def _render_notification_form(rule: NotificationRule) -> str:
+    """Render the add/edit form pre-filled with an existing rule."""
+    on_status = ", ".join(rule.on_status)
+    on_module = ", ".join(rule.on_module)
+    channels = ", ".join(rule.channels)
+    webhook = rule.webhook_url or ""
+    enabled_checked = "checked" if rule.enabled else ""
+    return (
+        f'<details open style="margin-bottom:1.5rem">'
+        f'<summary>✏️ 编辑规则: {rule.name}</summary>'
+        f'<form hx-post="/ruok/_actions/notification-upsert"'
+        f' hx-target="#notifications-container" hx-swap="outerHTML"'
+        f' style="margin-top:1rem">'
+        f'<div class="grid">'
+        f'<label>规则名称'
+        f'<input type="text" name="name" value="{rule.name}" required>'
+        f'</label>'
+        f'<label>冷却时间 (分钟)'
+        f'<input type="number" name="cooldown_minutes"'
+        f' value="{rule.cooldown_minutes}" min="1" step="1">'
+        f'</label>'
+        f'</div>'
+        f'<div class="grid">'
+        f'<label>触发状态 (逗号分隔)'
+        f'<input type="text" name="on_status" value="{on_status}"'
+        f' placeholder="pending, unsolved">'
+        f'</label>'
+        f'<label>适用模块 (逗号分隔，留空=全部)'
+        f'<input type="text" name="on_module" value="{on_module}"'
+        f' placeholder="weather, music">'
+        f'</label>'
+        f'</div>'
+        f'<div class="grid">'
+        f'<label>通知通道 (逗号分隔)'
+        f'<input type="text" name="channels" value="{channels}"'
+        f' placeholder="bot_dm, webhook">'
+        f'</label>'
+        f'<label>Webhook URL (可选)'
+        f'<input type="url" name="webhook_url" value="{webhook}"'
+        f' placeholder="https://hooks.example.com/...">'
+        f'</label>'
+        f'</div>'
+        f'<label>'
+        f'<input type="checkbox" name="enabled" {enabled_checked}> 启用'
+        f'</label>'
+        f'<button type="submit">💾 保存规则</button>'
+        f'</form>'
+        f'</details>'
+    )
 from .auth import WebUIAuth
 from .jinja import render
 from ..config import ScopedConfig
@@ -61,6 +112,7 @@ from ..protocol import (
     NetworkRate,
     ReporterInfo,
     ModuleDefinition,
+    NotificationRule,
     FastMetricsSnapshot,
 )
 from ..collector import (
@@ -393,13 +445,16 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             )
         try:
             reporter = ReporterInfo(type="user", user_id="webui")
-            create_session(
+            session = create_session(
                 data_dir,
                 module_name=name,
                 description=description.strip() or "(无描述)",
                 reporter=reporter,
                 source="manual",
             )
+            # Dispatch notifications for the new session
+            from ..collectors.notifications import dispatch_notification
+            dispatch_notification(session, config, data_dir)
             # Refresh session list
             sessions = list_sessions(data_dir)
             stats = get_session_stats(data_dir)
@@ -805,5 +860,24 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             rules=rules,
             headers={"HX-Trigger": '{"toast":"Rule deleted","toastType":"info"}'},
         )
+
+    @router.get("/ruok/_actions/notification-edit-form/{name}")
+    async def action_notification_edit_form(name: str):
+        """Return the add/edit form pre-filled with an existing rule."""
+        try:
+            rules = _load_notification_rules()
+            rule = next((r for r in rules if r.name == name), None)
+            if rule is None:
+                return HTMLResponse("Rule not found", status_code=404)
+            return HTMLResponse(_render_notification_form(rule))
+        except Exception as exc:
+            sid = _handle_ruok_error(
+                exc, f"action_notification_edit_form {name}", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f'❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>',
+                status_code=500,
+            )
 
     return router

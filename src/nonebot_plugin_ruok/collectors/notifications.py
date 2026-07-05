@@ -14,6 +14,15 @@ from ..config import ScopedConfig
 from ..protocol import Session, NotificationRule
 
 # ────────────────────────────────
+# 0. Time formatting helper (UTC → local)
+# ────────────────────────────────
+
+
+def _fmt_time(dt: datetime, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """Convert a UTC datetime to local time and format it."""
+    return dt.astimezone().strftime(fmt)
+
+# ────────────────────────────────
 # 1. Rule loading / default
 # ────────────────────────────────
 
@@ -157,10 +166,18 @@ async def _send_bot_dm(session: Session) -> None:
         text = (
             f"🔔 新的异常事件\n"
             f"Session: {session.session_id}\n"
-            f"来源: {session.source}\n"
-            f"模块: {session.module_name}\n"
+            f"来源: {session.source}"
+        )
+        if session.reporter.user_id:
+            text += f"\n用户: {session.reporter.user_id}"
+        if session.reporter.group_id:
+            text += f"\n群号: {session.reporter.group_id}"
+        if session.reporter.platform:
+            text += f"\n平台: {session.reporter.platform}"
+        text += (
+            f"\n模块: {session.module_name}\n"
             f"描述: {session.description[:200]}\n"
-            f"时间: {session.first_seen_at}"
+            f"时间: {_fmt_time(session.first_seen_at)}"
         )
         for uid in superusers:
             try:
@@ -228,11 +245,14 @@ def dispatch_notification(
     cooldowns = _load_cooldowns(data_dir)
 
     for rule in matching:
-        if _is_cooling_down(rule.name, rule.cooldown_minutes, cooldowns):
+        # Cooldown key: per-rule + per-module (so different modules can
+        # trigger the same rule independently within cooldown window).
+        cooldown_key = f"{rule.name}:{session.module_name}"
+        if _is_cooling_down(cooldown_key, rule.cooldown_minutes, cooldowns):
             continue
 
         # Fire and update cooldown
-        _update_cooldown(rule.name, cooldowns, data_dir)
+        _update_cooldown(cooldown_key, cooldowns, data_dir)
 
         tasks: list[asyncio.Task[Any]] = []
         for channel in rule.channels:
@@ -281,7 +301,7 @@ async def _send_summary(
             for s in pending[:5]:
                 text += (
                     f"  {s.session_id} | {s.module_name} | "
-                    f"{s.first_seen_at.strftime('%H:%M')}\n"
+                    f"{_fmt_time(s.first_seen_at, '%H:%M')}\n"
                 )
             if len(pending) > 5:
                 text += f"  ... 还有 {len(pending) - 5} 个\n"
@@ -290,7 +310,7 @@ async def _send_summary(
             for s in unsolved[:5]:
                 text += (
                     f"  {s.session_id} | {s.module_name} | "
-                    f"{s.first_seen_at.strftime('%H:%M')}\n"
+                    f"{_fmt_time(s.first_seen_at, '%H:%M')}\n"
                 )
             if len(unsolved) > 5:
                 text += f"  ... 还有 {len(unsolved) - 5} 个\n"

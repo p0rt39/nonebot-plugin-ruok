@@ -229,7 +229,7 @@ async def _cmd_list() -> None:
         icon = {"pending": "🟡", "unsolved": "🔴"}.get(s.status, "⚪")
         lines.append(
             f"{icon} {s.session_id} | {s.module_name} | "
-            f"{s.status} | {s.first_seen_at.strftime('%H:%M')}"
+            f"{s.status} | {s.first_seen_at.astimezone().strftime('%H:%M')}"
         )
     if len(active) > 10:
         lines.append(f"... 还有 {len(active) - 10} 个，使用 /ruok lookup <id> 查看详情")
@@ -259,7 +259,8 @@ async def _cmd_lookup(rest: str) -> None:
         f"状态: {session.status} | 来源: {session.source}",
         f"模块: {session.module_name}",
         f"描述: {session.description[:200]}",
-        f"创建: {session.first_seen_at} | 最近: {session.last_seen_at}",
+        f"创建: {session.first_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"最近: {session.last_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
         f"重复次数: {len(session.occurrences)}",
     ]
     from .collector import get_linked_sessions
@@ -432,6 +433,10 @@ async def _startup():
 
     # Start LogMonitor (works regardless of driver type)
     log_monitor.start()
+
+    # Ensure notification rules are initialized on first run
+    from .collectors.notifications import _load_rules
+    _load_rules(data_dir, plugin_config)
 
     # Register summary notification job (best-effort, APScheduler optional)
     try:

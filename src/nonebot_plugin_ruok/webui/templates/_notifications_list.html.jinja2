@@ -41,6 +41,11 @@
         </table>
         <footer>
             <button class="outline secondary" style="font-size:0.8em;"
+                    hx-get="/ruok/_actions/notification-edit-form/{{ rule.name }}"
+                    hx-target="closest details" hx-swap="outerHTML">
+                ✏️ 编辑
+            </button>
+            <button class="outline secondary" style="font-size:0.8em;"
                     hx-post="/ruok/_actions/notification-delete/{{ rule.name }}"
                     hx-target="#notifications-container" hx-swap="outerHTML"
                     hx-confirm="确定删除规则「{{ rule.name }}」？">

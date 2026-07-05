@@ -49,16 +49,16 @@
     <div class="timeline">
         <div class="timeline-item">
             <span class="status-dot status-pending"></span>
-            <strong>首次发现</strong>: {{ session.first_seen_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+            <strong>首次发现</strong>: {{ session.first_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
         </div>
         <div class="timeline-item">
             <span class="status-dot status-{{ session.status }}"></span>
-            <strong>最近更新</strong>: {{ session.last_seen_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+            <strong>最近更新</strong>: {{ session.last_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
         </div>
         {% if session.resolved_at %}
         <div class="timeline-item">
             <span class="status-dot status-solved"></span>
-            <strong>解决时间</strong>: {{ session.resolved_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+            <strong>解决时间</strong>: {{ session.resolved_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
         </div>
         {% endif %}
     </div>
@@ -84,7 +84,7 @@
     {% for o in session.occurrences | reverse %}
     <details {% if loop.first %}open{% endif %}>
         <summary>
-            #{{ loop.revindex }} — {{ o.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
+            #{{ loop.revindex }} — {{ o.timestamp.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
             <small>({{ o.source }})</small>
         </summary>
         <div style="margin-top: 0.5rem;">

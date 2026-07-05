@@ -7,6 +7,6 @@
         {% endif %}
     </div>
     <div class="hero-ts" style="color: rgba(255,255,255,0.75); margin-top: 0.5rem; font-size:0.85em;">
-        {{ status.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+        {{ status.timestamp.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
     </div>
 </article>
