@@ -378,31 +378,57 @@ async def collect_all_statuses(
         pass
     plugins = _collect_plugin_inventory()
 
-    # Derive overall — modules > connections > system health
-    overall: ModuleStatus = "available"
-
-    # 1. Check module status (most important)
+    # Load module definitions (with real-time derived status)
     try:
         modules = list_modules(data_dir, config)
     except (json.JSONDecodeError, OSError, ValueError):
         modules = []
-    if any(m.status == "unavailable" for m in modules):
+
+    # Derive overall — per spec:
+    #   Unavailable: no connections / all disconnected, OR all modules unavailable
+    #   Degraded:    sustained CPU/RAM thresholds, OR any module degraded/unavailable
+    #   Available:   otherwise
+    overall: ModuleStatus = "available"
+
+    # ── 1. Unavailable ────────────────────────────────
+    # 1a. No connections or all disconnected
+    has_connections = len(connections) > 0
+    all_disconnected = has_connections and all(not c.connected for c in connections)
+    if not has_connections or all_disconnected:
         overall = "unavailable"
-    elif any(m.status == "degraded" for m in modules):
-        overall = "degraded"
 
-    # 2. Check connections (if no module issue)
+    # 1b. ALL modules are unavailable
+    if overall != "unavailable" and modules:
+        if all(m.status == "unavailable" for m in modules):
+            overall = "unavailable"
+
+    # ── 2. Degraded ───────────────────────────────────
     if overall == "available":
-        if any(not c.connected for c in connections):
-            overall = (
-                "unavailable"
-                if all(not c.connected for c in connections)
-                else "degraded"
-            )
+        # 2a. Any module degraded or unavailable
+        if any(m.status in ("degraded", "unavailable") for m in modules):
+            overall = "degraded"
 
-    # 3. Check system health (if still ok)
-    if overall == "available" and worst_status in ("unhealthy", "degraded"):
-        overall = "degraded"
+        # 2b. CPU >= 90% (instant trigger)
+        if overall == "available":
+            cpu_pct = _extract_cpu_percent(sys_results)
+            if cpu_pct is not None and cpu_pct >= 90.0:
+                overall = "degraded"
+
+        # 2c. CPU >= 70% sustained for 10+ minutes
+        if overall == "available" and cpu_pct is not None and cpu_pct >= 70.0:
+            if _threshold_exceeded_for(
+                data_dir, "cpu_percent", 70.0, minutes=10.0
+            ):
+                overall = "degraded"
+
+        # 2d. RAM >= 90% sustained for 10+ minutes
+        if overall == "available":
+            mem_pct = _extract_memory_percent(sys_results)
+            if mem_pct is not None and mem_pct >= 90.0:
+                if _threshold_exceeded_for(
+                    data_dir, "memory_percent", 90.0, minutes=10.0
+                ):
+                    overall = "degraded"
 
     result = AggregatedStatus(
         overall=overall,
@@ -438,6 +464,36 @@ async def collect_all_statuses(
         pass  # Metrics are best-effort
 
     return result
+
+
+def _threshold_exceeded_for(
+    data_dir: Path,
+    field: str,
+    threshold: float,
+    minutes: float = 10.0,
+) -> bool:
+    """Check if *field* has been >= *threshold* for at least *minutes* minutes.
+
+    Queries historical MetricPoints and returns True when >= 90% of data
+    points in the time window exceed the threshold.  Requires at least
+    3 data points in the window to avoid false positives on cold starts.
+    """
+    from ..collector import MetricsStore  # late import: avoid circular
+
+    try:
+        points = MetricsStore.query(data_dir, hours=minutes / 60.0 + 0.05)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+    if len(points) < 3:
+        return False
+
+    exceeding = sum(
+        1
+        for p in points
+        if getattr(p, field, None) is not None and getattr(p, field) >= threshold
+    )
+    return exceeding >= len(points) * 0.9
 
 
 def _extract_cpu_percent(checks: list[CheckResult]) -> float | None:
