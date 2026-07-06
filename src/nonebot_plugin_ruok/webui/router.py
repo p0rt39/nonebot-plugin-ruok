@@ -8,6 +8,7 @@ from typing import Any
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import quote
+from collections.abc import Callable
 
 from fastapi import Form, Query, Depends, Request, APIRouter, HTTPException
 from fastapi.responses import (
@@ -19,6 +20,7 @@ from fastapi.responses import (
 from .sse import event_bus, sse_event_generator
 from .auth import (
     WebUIAuth,
+    StoredWebUIUser,
     CurrentWebUIUser,
     UserManagementError,
     UserRegistrationError,
@@ -118,6 +120,53 @@ def _account_reporter_id(user: CurrentWebUIUser) -> str | None:
     if user.admin_source == "builtin":
         return "webui-admin"
     return user.bound_user_id
+
+
+def _reporter_identity(user_id: str, platform: str | None) -> str:
+    """Format a platform identity for display."""
+    if platform:
+        return f"{platform}: {user_id}"
+    return user_id
+
+
+def _find_bound_reporter_user(
+    reporter: ReporterInfo,
+    users: list[StoredWebUIUser],
+) -> StoredWebUIUser | None:
+    """Find the WebUI user currently bound to a session reporter identity."""
+    if not reporter.user_id:
+        return None
+    for user in users:
+        if user.bound_user_id != reporter.user_id:
+            continue
+        if reporter.platform is None or user.bound_platform is None:
+            return user
+        if user.bound_platform == reporter.platform:
+            return user
+    return None
+
+
+def _reporter_display_factory(
+    users: list[StoredWebUIUser],
+) -> Callable[[ReporterInfo], str]:
+    """Build a per-render reporter display formatter from current bindings."""
+
+    def _reporter_display(reporter: ReporterInfo) -> str:
+        if not reporter.user_id:
+            return ""
+
+        bound_user = _find_bound_reporter_user(reporter, users)
+        if bound_user is None:
+            return _reporter_identity(reporter.user_id, reporter.platform)
+
+        bound_user_id = bound_user.bound_user_id or reporter.user_id
+        bound_platform = bound_user.bound_platform or reporter.platform
+        return (
+            f"{bound_user.username}"
+            f"（{_reporter_identity(bound_user_id, bound_platform)}）"
+        )
+
+    return _reporter_display
 
 
 def _error_html(message: str, status_code: int = 400) -> HTMLResponse:
@@ -284,6 +333,7 @@ def create_webui_router(
                 auth_key=auth_key,
                 auth_key_expired=auth_key_expired,
                 auth_key_expires_at=auth_key_expires_at,
+                reporter_display=_reporter_display_factory(auth.list_users()),
             )
 
         # SSE/polling partial renders (other panels)
@@ -396,6 +446,7 @@ def create_webui_router(
                 current_plugin=plugin,
                 current_after=after,
                 current_before=before,
+                reporter_display=_reporter_display_factory(auth.list_users()),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_sessions", data_dir)
@@ -427,6 +478,7 @@ def create_webui_router(
                 session_description=session_description,
                 session_traceback=session_traceback,
                 linked_sessions=linked,
+                reporter_display=_reporter_display_factory(auth.list_users()),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"page_session_detail {session_id}", data_dir)
@@ -487,6 +539,7 @@ def create_webui_router(
                 linked_plugins=linked_plugins,
                 all_plugins=plugin_names,
                 extra_plugins=_extra_module_plugins(mod, plugin_names),
+                reporter_display=_reporter_display_factory(auth.list_users()),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"page_module_detail {name}", data_dir)
@@ -612,6 +665,7 @@ def create_webui_router(
                 "_session_container.html.jinja2",
                 sessions=sessions,
                 stats=stats,
+                reporter_display=_reporter_display_factory(auth.list_users()),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "partial_sessions", data_dir)
@@ -652,7 +706,13 @@ def create_webui_router(
                 status_code=403,
             )
         try:
-            reporter = ReporterInfo(type="user", user_id=_account_reporter_id(user))
+            reporter = ReporterInfo(
+                type="user",
+                user_id=_account_reporter_id(user),
+                platform=(
+                    None if user.admin_source == "builtin" else user.bound_platform
+                ),
+            )
             session = create_session(
                 data_dir,
                 module_name=name,
@@ -671,6 +731,7 @@ def create_webui_router(
                         data_dir,
                         reporter_user_id=user.bound_user_id,
                     ),
+                    reporter_display=_reporter_display_factory(auth.list_users()),
                     headers={
                         "HX-Trigger": (
                             '{"toast":"Session created","toastType":"success"}'
@@ -685,6 +746,7 @@ def create_webui_router(
                 "_session_container.html.jinja2",
                 sessions=sessions,
                 stats=stats,
+                reporter_display=_reporter_display_factory(auth.list_users()),
                 headers={
                     "HX-Trigger": ('{"toast":"Session created","toastType":"success"}')
                 },
@@ -990,6 +1052,7 @@ def create_webui_router(
         return render(
             "_session_card.html.jinja2",
             s=s,
+            reporter_display=_reporter_display_factory(auth.list_users()),
             headers={
                 "HX-Trigger": ('{"toast":"Session confirmed","toastType":"success"}')
             },
@@ -1017,6 +1080,7 @@ def create_webui_router(
         return render(
             "_session_card.html.jinja2",
             s=s,
+            reporter_display=_reporter_display_factory(auth.list_users()),
             headers={
                 "HX-Trigger": ('{"toast":"Session resolved","toastType":"success"}')
             },
@@ -1044,6 +1108,7 @@ def create_webui_router(
         return render(
             "_session_card.html.jinja2",
             s=s,
+            reporter_display=_reporter_display_factory(auth.list_users()),
             headers={"HX-Trigger": ('{"toast":"Session ignored","toastType":"info"}')},
         )
 

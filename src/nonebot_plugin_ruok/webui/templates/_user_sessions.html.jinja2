@@ -20,6 +20,10 @@
                     {{ s.status | _status_label }}
                 </span>
             </p>
+            {% if s.reporter.user_id %}
+            {% set reporter_label = reporter_display(s.reporter) if reporter_display is defined else s.reporter.user_id %}
+            <p><small>上报者: {{ reporter_label }}</small></p>
+            {% endif %}
             <p>{{ s.description[:260] }}{% if s.description|length > 260 %}...{% endif %}</p>
         </article>
         {% endfor %}

@@ -32,8 +32,9 @@
         <div>
             <h4>上报者</h4>
             <table>
+                {% set reporter_label = reporter_display(session.reporter) if reporter_display is defined else session.reporter.user_id %}
                 <tr><td><strong>类型</strong></td><td>{{ session.reporter.type }}</td></tr>
-                <tr><td><strong>用户</strong></td><td>{{ session.reporter.user_id or '—' }}</td></tr>
+                <tr><td><strong>用户</strong></td><td>{{ reporter_label or '—' }}</td></tr>
                 <tr><td><strong>群组</strong></td><td>{{ session.reporter.group_id or '—' }}</td></tr>
                 <tr><td><strong>平台</strong></td><td>{{ session.reporter.platform or '—' }}</td></tr>
             </table>

@@ -19,7 +19,8 @@
                 </span>
             </p>
             {% if s.reporter.user_id %}
-            <p><small>上报者: {{ s.reporter.user_id }}{% if s.reporter.group_id %} (群: {{ s.reporter.group_id }}){% endif %}</small></p>
+            {% set reporter_label = reporter_display(s.reporter) if reporter_display is defined else s.reporter.user_id %}
+            <p><small>上报者: {{ reporter_label }}{% if s.reporter.group_id %} (群: {{ s.reporter.group_id }}){% endif %}</small></p>
             {% endif %}
         </div>
         <div>
