@@ -12,7 +12,7 @@
 [![uv](https://img.shields.io/badge/package%20manager-uv-black?style=flat-square&logo=uv)](https://github.com/astral-sh/uv)
 <br/>
 [![ruff](https://img.shields.io/badge/code%20style-ruff-black?style=flat-square&logo=ruff)](https://github.com/astral-sh/ruff)
-[![pre-commit](https://results.pre-commit.ci/badge/github/p0rt39/nonebot-plugin-ruok/master.svg)](https://results.pre-commit.ci/latest/github/p0rt39/nonebot-plugin-ruok/master)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
 </div>
 
@@ -387,12 +387,12 @@ uv run pyright
 uv run pytest
 ```
 
-项目使用 pre-commit，包含 ruff、typos、uv lock/sync 等 hook：
+项目使用 `prek` 执行 `.pre-commit-config.yaml` 中定义的 hooks，包含 ruff、typos、uv lock/sync 等检查：
 
 ```powershell
-pre-commit run --all-files
+prek run --all-files
 ```
 
 ## 许可证
 
-MIT © [p0rt39](https://github.com/p0rt39)
+Apache License 2.0 © [p0rt39](https://github.com/p0rt39)
