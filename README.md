@@ -274,29 +274,74 @@ stateDiagram-v2
 
 ## HTTP API
 
-所有端点前缀为 `/ruok/api`。
+所有端点前缀为 `/ruok/api`，返回 JSON。API 鉴权与 WebUI 登录态相互独立：如果配置了 `RUOK__API_KEY`，请求必须带上以下任一凭据；未配置时不校验 API key。
+
+```http
+X-RuOK-API-Key: your-token
+Authorization: Bearer your-token
+```
 
 ### 健康与指标
 
 | 方法 | 端点 | 说明 |
 | :--- | :--- | :--- |
-| `GET` | `/status` | 聚合健康状态 |
-| `GET` | `/health` | 简单健康探针，返回 200 或 503 |
-| `GET` | `/connections` | Bot 连接状态 |
-| `GET` | `/metrics/history?hours=24` | 时间序列指标 |
+| `GET` | `/ruok/api/status` | 聚合健康状态，包含 overall、连接、插件、模块状态原因 |
+| `GET` | `/ruok/api/health` | 简单健康探针；健康返回 200，不可用返回 503 |
+| `GET` | `/ruok/api/connections` | Bot 连接状态列表 |
+| `GET` | `/ruok/api/metrics/history?hours=24` | 查询最近 `hours` 小时的时间序列指标，范围 0.5 到 168 小时 |
 
-### Sessions
+### Session API
 
 | 方法 | 端点 | 说明 |
 | :--- | :--- | :--- |
-| `GET` | `/sessions` | 列表，支持 `status`、`module`、`reporter`、`search`、`plugin`、`after`、`before` |
-| `POST` | `/sessions` | 创建 Session |
-| `GET` | `/sessions/stats` | Session 统计 |
-| `GET` | `/sessions/{id}` | Session 详情 |
-| `PATCH` | `/sessions/{id}` | 更新状态或备注 |
-| `POST` | `/sessions/{id}/link/{other}` | 关联两个 Session |
-| `DELETE` | `/sessions/{id}/link` | 解除当前 Session 的关联组 |
-| `GET` | `/sessions/{id}/linked` | 查看关联 Session |
+| `GET` | `/ruok/api/sessions` | Session 列表 |
+| `POST` | `/ruok/api/sessions` | 创建 Session |
+| `GET` | `/ruok/api/sessions/stats` | Session 统计 |
+| `GET` | `/ruok/api/sessions/{id}` | Session 详情 |
+| `PATCH` | `/ruok/api/sessions/{id}` | 局部更新 Session 状态、开发者备注，或确认影响插件 |
+| `POST` | `/ruok/api/sessions/{id}/link/{other}` | 将两个 Session 放入同一关联组 |
+| `DELETE` | `/ruok/api/sessions/{id}/link` | 让当前 Session 退出关联组 |
+| `GET` | `/ruok/api/sessions/{id}/linked` | 查看同组关联 Session |
+
+`GET /ruok/api/sessions` 支持查询参数：
+
+| 参数 | 说明 |
+| :--- | :--- |
+| `status` | 状态过滤，可传 `pending`、`unsolved`、`solved`、`ignored`，也可用逗号组合 |
+| `module` | 模块名过滤 |
+| `reporter` | 上报用户 ID 过滤 |
+| `search` | 搜索 Session ID、模块、描述、上报者、错误签名、影响插件 |
+| `plugin` | 插件名过滤，包含模块关联插件和已确认的 `affected_plugins` |
+| `after` / `before` | ISO datetime 时间范围，例如 `2026-07-01T00:00:00` |
+
+创建 Session：
+
+```http
+POST /ruok/api/sessions
+Content-Type: application/json
+
+{
+  "module_name": "music",
+  "description": "播放失败",
+  "reporter_type": "user",
+  "user_id": "12345678",
+  "group_id": "87654321",
+  "platform": "OneBot V11",
+  "source": "manual"
+}
+```
+
+修改状态或备注：
+
+```http
+PATCH /ruok/api/sessions/ruok-1234abcd
+Content-Type: application/json
+
+{
+  "status": "solved",
+  "developer_notes": "已修复并发布"
+}
+```
 
 确认并指定影响插件：
 
@@ -312,14 +357,44 @@ Content-Type: application/json
 
 `affected_plugins` 只能随 `status="unsolved"` 一起提交，并会按 Session 原模块当前插件列表校验。非法插件返回 400。
 
-### Modules
+### Module API
 
 | 方法 | 端点 | 说明 |
 | :--- | :--- | :--- |
-| `GET` | `/modules` | 模块列表，含实时推导状态 |
-| `GET` | `/modules/{name}` | 模块详情 |
-| `PUT` | `/modules/{name}` | 创建或更新模块 |
-| `DELETE` | `/modules/{name}` | 删除模块 |
+| `GET` | `/ruok/api/modules` | 模块列表，含实时推导状态和状态原因 |
+| `GET` | `/ruok/api/modules/{name}` | 模块详情 |
+| `PUT` | `/ruok/api/modules/{name}` | 创建或更新指定模块定义 |
+| `DELETE` | `/ruok/api/modules/{name}` | 删除模块定义 |
+
+创建或更新模块：
+
+```http
+PUT /ruok/api/modules/music
+Content-Type: application/json
+
+{
+  "display_name": "音乐",
+  "plugins": ["nonebot_plugin_music", "nonebot_plugin_playlist"],
+  "description": "音乐相关功能"
+}
+```
+
+删除模块：
+
+```http
+DELETE /ruok/api/modules/music
+```
+
+### 常见状态码
+
+| 状态码 | 含义 |
+| :--- | :--- |
+| `200` | 请求成功 |
+| `400` | 请求内容不合法，例如影响插件不属于 Session 原模块 |
+| `401` | API key 缺失或错误 |
+| `403` | Session 系统被禁用，相关写操作不可用 |
+| `404` | Session 或模块不存在 |
+| `503` | `/health` 探针判断服务不可用 |
 
 ## 数据文件
 
