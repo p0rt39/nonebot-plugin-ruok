@@ -114,6 +114,34 @@ def test_webui_sessions_fallback_reporter_display_includes_platform(
     assert "上报者: OneBot V11: 10001" in response.text
 
 
+def test_webui_platform_marker_uses_bound_platform_for_display(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+    result = auth.register_user("alice", "secret")
+    auth.bind_auth_key(result.auth_key, "10001", "OneBot V11")
+    create_session(
+        tmp_path,
+        "music",
+        "webui user issue",
+        ReporterInfo(type="user", user_id="10001", platform="webui"),
+        source="manual",
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert response.status_code == 200
+    assert "alice（OneBot V11: 10001）" in response.text
+    assert "上报者: webui: 10001" not in response.text
+
+
 def test_session_detail_renders_automatic_traceback_as_code_block(
     tmp_path: Path,
 ) -> None:

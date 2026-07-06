@@ -122,6 +122,11 @@ def _account_reporter_id(user: CurrentWebUIUser) -> str | None:
     return user.bound_user_id
 
 
+def _account_reporter_platform(user: CurrentWebUIUser) -> str:
+    """Return the reporter platform marker used for WebUI manual reports."""
+    return "webui"
+
+
 def _reporter_identity(user_id: str, platform: str | None) -> str:
     """Format a platform identity for display."""
     if platform:
@@ -139,7 +144,7 @@ def _find_bound_reporter_user(
     for user in users:
         if user.bound_user_id != reporter.user_id:
             continue
-        if reporter.platform is None or user.bound_platform is None:
+        if reporter.platform in (None, "webui") or user.bound_platform is None:
             return user
         if user.bound_platform == reporter.platform:
             return user
@@ -709,9 +714,7 @@ def create_webui_router(
             reporter = ReporterInfo(
                 type="user",
                 user_id=_account_reporter_id(user),
-                platform=(
-                    None if user.admin_source == "builtin" else user.bound_platform
-                ),
+                platform=_account_reporter_platform(user),
             )
             session = create_session(
                 data_dir,

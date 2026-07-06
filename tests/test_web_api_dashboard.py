@@ -147,7 +147,7 @@ def test_webui_bound_user_report_uses_bound_user_id_and_sees_own_sessions(
     assert response.status_code == 200
     assert len(mine) == 1
     assert mine[0].reporter.user_id == "10001"
-    assert mine[0].reporter.platform == "OneBot V11"
+    assert mine[0].reporter.platform == "webui"
     assert "mine" in response.text
     assert "alice（OneBot V11: 10001）" in response.text
     assert "other user issue" not in response.text
