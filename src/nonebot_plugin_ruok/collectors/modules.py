@@ -32,7 +32,6 @@ def _builtin_module() -> ModuleDefinition:
         display_name="RuOK",
         description="RuOK 插件自身 — 监控系统健康状态",
         plugins=["nonebot_plugin_ruok"],
-        enabled=True,
     )
 
 

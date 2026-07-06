@@ -28,30 +28,26 @@
                    value="{{ current_module.description or '' if current_module else '' }}"
                    placeholder="可选描述">
         </label>
-        <label>
-            已加载插件
+        <fieldset>
+            <legend>已加载插件</legend>
             {% if all_plugins %}
-            <select name="selected_plugins" multiple size="{{ [all_plugins|length, 8]|min }}">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.35rem 0.75rem;max-height:240px;overflow:auto;padding:0.65rem;border:1px solid var(--pico-muted-border-color);border-radius:var(--radius-sm);">
                 {% for p in all_plugins %}
-                <option value="{{ p }}"
-                        {% if current_module and p in current_module.plugins %}selected{% endif %}>
-                    {{ p }}
-                </option>
+                <label style="display:flex;align-items:center;gap:0.45rem;margin:0;min-width:0;">
+                    <input type="checkbox" name="selected_plugins" value="{{ p }}"
+                           {% if current_module and p in current_module.plugins %}checked{% endif %}>
+                    <span style="overflow-wrap:anywhere;">{{ p }}</span>
+                </label>
                 {% endfor %}
-            </select>
+            </div>
             {% else %}
             <input type="text" disabled value="暂无已加载插件">
             {% endif %}
-        </label>
+        </fieldset>
         <label>
             其他插件名 (逗号或换行分隔)
             <textarea name="plugins" rows="3"
                       placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">{{ extra_plugins | default([]) | join(',') }}</textarea>
-        </label>
-        <label>
-            <input type="checkbox" name="enabled"
-                   {% if current_module is none or current_module.enabled %}checked{% endif %}>
-            启用
         </label>
         <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
             <button type="submit">保存</button>

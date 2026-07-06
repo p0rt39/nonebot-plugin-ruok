@@ -125,7 +125,6 @@ class ModuleDefinition(BaseModel):
     display_name: str = ""
     plugins: list[str] = Field(default_factory=list)  # ["nonebot_plugin_ncm"]
     description: str | None = None
-    enabled: bool = True
     status: ModuleStatus = "available"  # derived at query time
 
 

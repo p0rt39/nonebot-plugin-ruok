@@ -22,20 +22,33 @@
                        min="1" step="1">
             </label>
         </div>
-        <div class="grid">
-            <label>
-                触发状态 (逗号分隔)
-                <input type="text" name="on_status"
-                       value="{{ current_rule.on_status | join(',') if current_rule else 'pending,unsolved' }}"
-                       placeholder="pending, unsolved">
-            </label>
-            <label>
-                适用模块 (逗号分隔，留空=全部)
-                <input type="text" name="on_module"
-                       value="{{ current_rule.on_module | join(',') if current_rule else '' }}"
-                       placeholder="weather, music">
-            </label>
-        </div>
+        <label>
+            触发状态 (逗号分隔)
+            <input type="text" name="on_status"
+                   value="{{ current_rule.on_status | join(',') if current_rule else 'pending,unsolved' }}"
+                   placeholder="pending, unsolved">
+        </label>
+        <fieldset>
+            <legend>适用模块 (不选择=全部)</legend>
+            {% if all_modules %}
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.35rem 0.75rem;max-height:240px;overflow:auto;padding:0.65rem;border:1px solid var(--pico-muted-border-color);border-radius:var(--radius-sm);">
+                {% for m in all_modules %}
+                <label style="display:flex;align-items:center;gap:0.45rem;margin:0;min-width:0;">
+                    <input type="checkbox" name="selected_modules" value="{{ m.name }}"
+                           {% if current_rule and m.name in current_rule.on_module %}checked{% endif %}>
+                    <span style="overflow-wrap:anywhere;">{{ m.display_name or m.name }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <input type="text" disabled value="暂无模块定义">
+            {% endif %}
+        </fieldset>
+        <label>
+            其他模块名 (逗号或换行分隔)
+            <textarea name="on_module" rows="2"
+                      placeholder="weather, music">{{ extra_modules | default([]) | join(',') }}</textarea>
+        </label>
         <div class="grid">
             <label>
                 通知通道 (逗号分隔)

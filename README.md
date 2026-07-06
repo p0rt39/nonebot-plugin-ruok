@@ -205,7 +205,7 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 | 📊 总览 | `/ruok` | 系统指标卡片 + 连接状态 + CPU/内存趋势图 + Session 统计饼图 + 模块表 |
 | 📋 Sessions | `/ruok/sessions` | 列表 + 高级筛选（搜索、状态、模块、插件、时间范围） |
 | 📝 详情 | `/ruok/sessions/{id}` | 完整信息 + 状态时间线 + 关联 Session + 开发者备注 |
-| 📦 模块 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件、启用状态） |
+| 📦 模块 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件） |
 | 🔔 通知 | `/ruok/notifications` | 通知规则管理（触发条件、冷却、通道） |
 | 🔐 登录 | `/ruok/login` | 仅当 `RUOK__WEBUI_PASSWORD` 非空时启用 |
 

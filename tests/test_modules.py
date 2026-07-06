@@ -6,6 +6,7 @@ to avoid __init__.py's require() before NoneBot init.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -20,7 +21,6 @@ class TestListModules:
         ruok_mod = next((m for m in modules if m.name == "ruok"), None)
         assert ruok_mod is not None
         assert ruok_mod.display_name == "RuOK"
-        assert ruok_mod.enabled is True
         assert "nonebot_plugin_ruok" in ruok_mod.plugins
 
     def test_persisted_on_disk(self, tmp_path: Path) -> None:
@@ -30,6 +30,28 @@ class TestListModules:
         config = ScopedConfig()
         list_modules(tmp_path, config)
         assert (tmp_path / "modules.json").exists()
+
+    def test_ignores_legacy_enabled_field(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors.modules import get_module
+
+        (tmp_path / "modules.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "name": "legacy",
+                        "display_name": "Legacy",
+                        "plugins": [],
+                        "enabled": False,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        mod = get_module(tmp_path, ScopedConfig(), "legacy")
+        assert mod is not None
+        assert mod.name == "legacy"
 
 
 class TestUpsertModule:
@@ -47,7 +69,6 @@ class TestUpsertModule:
             display_name="天气",
             plugins=["nonebot_plugin_weather"],
             description="天气查询模块",
-            enabled=True,
         )
         upsert_module(tmp_path, definition)
         modules = list_modules(tmp_path, config)
@@ -74,7 +95,6 @@ class TestUpsertModule:
             display_name="网易云音乐",
             plugins=["nonebot_plugin_ncm"],
             description="updated",
-            enabled=False,
         )
         upsert_module(tmp_path, updated)
 
@@ -82,7 +102,6 @@ class TestUpsertModule:
         assert mod is not None
         assert mod.display_name == "网易云音乐"
         assert mod.description == "updated"
-        assert mod.enabled is False
 
 
 class TestDeleteModule:

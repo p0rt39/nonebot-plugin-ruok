@@ -72,8 +72,8 @@ def _extra_module_plugins(
     return [plugin for plugin in module.plugins if plugin not in loaded]
 
 
-def _parse_module_plugins(selected: list[str], raw: str) -> list[str]:
-    """Parse selected and manually typed plugin names, preserving order."""
+def _parse_form_values(selected: list[str], raw: str) -> list[str]:
+    """Parse selected and manually typed form values, preserving order."""
     parsed: list[str] = []
     for item in [*selected, raw]:
         for plugin in item.replace("\n", ",").split(","):
@@ -81,6 +81,21 @@ def _parse_module_plugins(selected: list[str], raw: str) -> list[str]:
             if name and name not in parsed:
                 parsed.append(name)
     return parsed
+
+
+def _parse_module_plugins(selected: list[str], raw: str) -> list[str]:
+    """Parse selected and manually typed plugin names."""
+    return _parse_form_values(selected, raw)
+
+
+def _extra_notification_modules(
+    rule: NotificationRule | None, module_names: list[str]
+) -> list[str]:
+    """Return rule module names that are not in the module definition list."""
+    if rule is None:
+        return []
+    known = set(module_names)
+    return [module for module in rule.on_module if module not in known]
 
 
 def _module_detail_url(name: str) -> str:
@@ -324,11 +339,14 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     ) -> HTMLResponse:
         try:
             rules = _load_notification_rules()
+            modules = list_modules(data_dir, config)
             return render(
                 "notifications.html.jinja2",
                 request=request,
                 rules=rules,
                 rule=None,
+                all_modules=modules,
+                extra_modules=[],
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_notifications", data_dir)
@@ -627,7 +645,6 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         plugins: str = Form(""),
         selected_plugins: list[str] = Form(default_factory=list),
         return_to_detail: bool = Form(False),
-        enabled: bool = Form(True),
         _guard_ok: None = Depends(_webui_guard),
     ) -> HTMLResponse | JSONResponse:
         try:
@@ -667,7 +684,6 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 display_name=new_display,
                 plugins=plugins_list,
                 description=description.strip() or None,
-                enabled=enabled,
             )
             if normalized_original and normalized_original != normalized_name:
                 delete_module(data_dir, normalized_original)
@@ -778,9 +794,10 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         request: Request,
         name: str = Form(...),
         original_name: str = Form(""),
-        enabled: bool = Form(True),
+        enabled: bool = Form(False),
         on_status: str = Form("pending,unsolved"),
         on_module: str = Form(""),
+        selected_modules: list[str] = Form(default_factory=list),
         cooldown_minutes: float = Form(60.0),
         channels: str = Form("bot_dm"),
         webhook_url: str = Form(""),
@@ -807,7 +824,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 name=normalized_name,
                 enabled=enabled,
                 on_status=[s.strip() for s in on_status.split(",") if s.strip()],
-                on_module=[m.strip() for m in on_module.split(",") if m.strip()],
+                on_module=_parse_form_values(selected_modules, on_module),
                 cooldown_minutes=cooldown_minutes,
                 channels=[c.strip() for c in channels.split(",") if c.strip()],
                 webhook_url=webhook_url or None,
@@ -868,13 +885,27 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     ) -> HTMLResponse:
         """Return the notification form, optionally pre-filled for editing."""
         try:
+            modules = list_modules(data_dir, config)
             if not name:
-                return render("_notification_form.html.jinja2", rule=None)
+                return render(
+                    "_notification_form.html.jinja2",
+                    rule=None,
+                    all_modules=modules,
+                    extra_modules=[],
+                )
             rules = _load_notification_rules()
             rule = next((r for r in rules if r.name == name), None)
             if rule is None:
                 return HTMLResponse("Rule not found", status_code=404)
-            return render("_notification_form.html.jinja2", rule=rule)
+            return render(
+                "_notification_form.html.jinja2",
+                rule=rule,
+                all_modules=modules,
+                extra_modules=_extra_notification_modules(
+                    rule,
+                    [module.name for module in modules],
+                ),
+            )
         except Exception as exc:
             sid = _handle_ruok_error(
                 exc, f"action_notification_edit_form {name}", data_dir

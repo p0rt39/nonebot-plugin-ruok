@@ -173,6 +173,36 @@ def test_notifications_page_uses_form_panel_and_card_actions(tmp_path: Path) -> 
     assert 'hx-post="/ruok/_actions/notification-delete"' in response.text
 
 
+def test_notification_form_supports_multiple_module_selection(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = ScopedConfig()
+    _upsert_module(tmp_path, ModuleDefinition(name="module_a", display_name="A"))
+    _upsert_module(tmp_path, ModuleDefinition(name="module_b", display_name="B"))
+    client = _client(config, tmp_path)
+
+    response = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={
+            "name": "multi modules",
+            "enabled": "on",
+            "on_status": "pending",
+            "selected_modules": ["module_a", "module_b"],
+            "on_module": "module_c\nmodule_a",
+            "cooldown_minutes": "15",
+            "channels": "bot_dm",
+        },
+    )
+
+    rules = _load_notification_rules(config, tmp_path)
+    rule = next(rule for rule in rules if rule.name == "multi modules")
+    assert response.status_code == 200
+    assert rule.on_module == ["module_a", "module_b", "module_c"]
+
+
 def test_notification_edit_form_loads_special_character_name(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import NotificationRule
@@ -194,6 +224,36 @@ def test_notification_edit_form_loads_special_character_name(tmp_path: Path) -> 
     assert response.status_code == 200
     assert 'name="original_name"' in response.text
     assert f'value="{rule_name}"' in response.text
+
+
+def test_notification_edit_form_checks_configured_modules(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ModuleDefinition, NotificationRule
+
+    config = ScopedConfig()
+    _upsert_module(tmp_path, ModuleDefinition(name="module_a", display_name="A"))
+    _upsert_module(tmp_path, ModuleDefinition(name="module_b", display_name="B"))
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [
+            NotificationRule(
+                name="module rule",
+                on_module=["module_a", "module_c"],
+            )
+        ],
+    )
+    client = _client(config, tmp_path)
+
+    response = client.get(
+        "/ruok/_actions/notification-edit-form",
+        params={"name": "module rule"},
+    )
+
+    assert response.status_code == 200
+    assert 'name="selected_modules" value="module_a"' in response.text
+    assert "checked" in response.text
+    assert ">module_c</textarea>" in response.text
 
 
 def test_notification_edit_renames_without_duplicate(tmp_path: Path) -> None:
@@ -307,7 +367,8 @@ def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
     assert 'name="original_name"' in response.text
     assert 'name="return_to_detail"' in response.text
     assert 'hx-post="/ruok/_actions/module-delete"' in response.text
-    assert 'name="selected_plugins"' in response.text
+    assert 'type="checkbox" name="selected_plugins"' in response.text
+    assert 'name="enabled"' not in response.text
 
 
 def test_module_edit_form_loads_special_character_name(tmp_path: Path) -> None:
@@ -354,7 +415,6 @@ def test_module_edit_renames_without_duplicate(tmp_path: Path) -> None:
             "display_name": "New",
             "description": "updated",
             "plugins": "plugin_a,plugin_b",
-            "enabled": "on",
         },
     )
 
@@ -385,7 +445,6 @@ def test_module_detail_edit_redirects_and_accepts_multiple_plugins(
             "selected_plugins": ["plugin_a", "plugin_b"],
             "plugins": "plugin_c\nplugin_a",
             "return_to_detail": "true",
-            "enabled": "on",
         },
     )
 
@@ -413,7 +472,6 @@ def test_module_rename_conflict_returns_400(tmp_path: Path) -> None:
             "original_name": "first",
             "name": "second",
             "display_name": "First",
-            "enabled": "on",
         },
     )
 

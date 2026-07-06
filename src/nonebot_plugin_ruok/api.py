@@ -289,7 +289,6 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             display_name=body.get("display_name", name),
             plugins=body.get("plugins", []),
             description=body.get("description"),
-            enabled=body.get("enabled", True),
         )
         upsert_module(data_dir, definition)
         _cache.pop("status", None)
