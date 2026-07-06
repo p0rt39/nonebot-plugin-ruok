@@ -89,7 +89,9 @@ username: admin
 password: RUOK__WEBUI_ADMIN_PASSWORD
 ```
 
-如果没有配置 `RUOK__WEBUI_SECRET_KEY`，WebUI session 会使用启动时随机密钥，重启后登录态失效。
+如果没有配置 `RUOK__WEBUI_SECRET_KEY`，WebUI session 会使用启动时随机密钥。
+这不会影响本次运行内的登录、注册、绑定等功能，但 Bot 重启后旧登录态和“保持登录”
+cookie 无法继续校验，用户需要重新登录。
 
 ## 配置项
 
@@ -132,7 +134,7 @@ password: RUOK__WEBUI_ADMIN_PASSWORD
 | `RUOK__CORS_ORIGINS` | `list[str]` | `["*"]` | API CORS 允许源 |
 | `RUOK__API_KEY` | `str` | `""` | API key；为空则 API 不校验 |
 | `RUOK__WEBUI_ADMIN_PASSWORD` | `str` | `""` | 内置 `admin` 账户密码；为空则 WebUI 无法登录 |
-| `RUOK__WEBUI_SECRET_KEY` | `str` | `""` | WebUI session 签名密钥；为空则每次启动随机 |
+| `RUOK__WEBUI_SECRET_KEY` | `str` | `""` | WebUI session 签名密钥；为空则每次启动随机，重启后登录态/保持登录降级为失效 |
 | `RUOK__SSE_PUBLIC` | `bool` | `false` | 是否允许未登录访问 SSE |
 
 API key 可通过任一方式传递：
@@ -300,6 +302,8 @@ stateDiagram-v2
 - 忘记密码入口。
 
 应用不会保存明文密码。普通用户密码使用 PBKDF2-HMAC-SHA256 加盐哈希。保持登录 token 存储为哈希，修改密码、重设密码、删除账号或管理员密码变化后会失效。
+如果未配置固定的 `RUOK__WEBUI_SECRET_KEY`，这些 token 只能在当前进程生命周期内正常使用；
+Bot 重启后会因 session 签名密钥变化而要求重新登录。
 
 ## HTTP API
 
