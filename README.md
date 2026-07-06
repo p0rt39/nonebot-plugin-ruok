@@ -2,257 +2,397 @@
     <a href="https://v2.nonebot.dev/store">
     <img src="https://raw.githubusercontent.com/fllesser/nonebot-plugin-template/refs/heads/resource/.docs/NoneBotPlugin.svg" width="310" alt="logo"></a>
 
-## ✨ nonebot-plugin-ruok ✨
+# nonebot-plugin-ruok
+
+**NoneBot2 健康监控、异常 Session 追踪与 WebUI 面板**
+
 [![LICENSE](https://img.shields.io/github/license/p0rt39/nonebot-plugin-ruok.svg)](./LICENSE)
 [![pypi](https://img.shields.io/pypi/v/nonebot-plugin-ruok.svg)](https://pypi.python.org/pypi/nonebot-plugin-ruok)
 [![python](https://img.shields.io/badge/python-3.10|3.11|3.12|3.13-blue.svg)](https://www.python.org)
 [![uv](https://img.shields.io/badge/package%20manager-uv-black?style=flat-square&logo=uv)](https://github.com/astral-sh/uv)
 <br/>
 [![ruff](https://img.shields.io/badge/code%20style-ruff-black?style=flat-square&logo=ruff)](https://github.com/astral-sh/ruff)
-[![coverage](https://img.shields.io/badge/coverage-46%25-yellow)](https://github.com/p0rt39/nonebot-plugin-ruok)
 [![pre-commit](https://results.pre-commit.ci/badge/github/p0rt39/nonebot-plugin-ruok/master.svg)](https://results.pre-commit.ci/latest/github/p0rt39/nonebot-plugin-ruok/master)
 
 </div>
 
-## 📖 介绍
+## 介绍
 
-RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，零侵入设计，无需其他插件配合：
+RuOK 是一个面向 NoneBot2 的运行状态观察与异常处理插件。它会收集系统指标、Bot 连接状态、已加载插件信息，自动捕获 ERROR/CRITICAL 日志生成可追踪 Session，并提供 SSR WebUI、HTTP API、通知规则与聊天指令。
 
-- 🔍 **硬件 & 连接监控**：CPU / 内存 / 磁盘 / 网络 + WS 连接状态 + e2e 延迟
-- 📋 **插件内省**：自动扫描所有已加载插件的 Matcher、元信息、加载状态
-- 🚨 **日志错误自动捕获**：loguru sink 全局拦截 ERROR，自动创建追踪 Session
-- 📝 **手动问题上报**：用户通过 `/ruok no <模块> <描述>` 主动报告，自动捕获上报者信息
-- 🔄 **Session 状态机**：`pending(🟡)→unsolved(🔴)→solved(🟢)`，支持忽略误报
-- 🌐 **HTTP API + WebUI**：`/ruok/api/*` JSON 接口 + `/ruok` 可视化面板，同一端口
-- 📡 **SSE 实时推送**：Dashboard 实时状态更新 + Session 变更即时通知
-- 📊 **数据可视化**：CPU/内存趋势折线图 + Session 状态饼图（Chart.js）
-- 🔐 **WebUI 分级鉴权**：内置管理员 + 普通用户账号，支持聊天平台账号绑定上报
-- � **通知引擎**：多规则、冷却期、Bot 私聊 + Webhook 双通道
+它适合用来回答这些问题：
 
-```mermaid
-stateDiagram-v2
-    [*] --> pending: 自动捕获 / 手动上报
-    pending --> unsolved: confirm
-    pending --> ignored: ignore (误报)
-    unsolved --> solved: solve
-    unsolved --> ignored: ignore (误报)
-```
+- Bot 现在整体是否健康？
+- 哪些模块被上报为异常？
+- 某个异常是否已经确认、解决或忽略？
+- 一个插件被确认异常后，会影响哪些关联模块？
+- 普通用户能否安全地通过 WebUI 上报自己的问题？
 
-## 💿 安装
+核心能力：
+
+- 系统指标：CPU、内存、磁盘、网络、进程、运行时间。
+- 连接监控：Bot 连接/断开、适配器、自身 ID、可选深度延迟检查。
+- 插件内省：已加载插件、元信息、Matcher、健康提示。
+- Session 追踪：自动捕获日志错误，支持手动上报、查找、备注、关联、确认、解决、忽略。
+- 插件级影响传播：确认 Session 时可指定影响插件，相关模块自动进入 `unavailable`。
+- WebUI：管理员完整面板，普通用户精简面板。
+- 账号体系：内置 admin、普通用户注册、平台账号绑定、记住登录、自助重设密码。
+- 通知规则：按状态/模块触发，支持 Bot 私聊与 Webhook，带冷却时间。
+- API：`/ruok/api/*` JSON 接口，支持可选 API key。
+- 实时更新：WebUI 通过 SSE 获取指标和 Session 变更。
+
+## 安装
+
+使用 nb-cli：
 
 ```bash
-# nb-cli（推荐）
 nb plugin install nonebot-plugin-ruok --upgrade
+```
 
-# uv
+或使用常见 Python 包管理器：
+
+```bash
 uv add nonebot-plugin-ruok
-
-# pdm
 pdm add nonebot-plugin-ruok
-
-# poetry
 poetry add nonebot-plugin-ruok
 ```
 
-安装后在 `pyproject.toml` 中注册插件：
+在 NoneBot 项目的 `pyproject.toml` 中注册插件：
 
 ```toml
 [tool.nonebot]
 plugins = ["nonebot_plugin_ruok"]
 ```
 
-## ⚙️ 配置
+如果使用 OneBot V11，确保项目已安装并加载对应适配器。当前主要测试适配器为 OneBot V11；平台绑定逻辑基于 NoneBot 的 `Event.get_user_id()` 和 `Bot.type`，但非 OneBot 场景不是主要保证路径。
 
-在 nonebot2 项目的 `.env` 文件中，添加以下配置项即可。
+## 最小配置
+
+WebUI 登录需要管理员密码。推荐至少配置：
+
+```dotenv
+RUOK__WEBUI_ADMIN_PASSWORD=change-me
+RUOK__WEBUI_SECRET_KEY=replace-with-a-long-random-secret
+RUOK__API_KEY=optional-api-token
+```
+
+启动后访问：
+
+```text
+http://<host>:<port>/ruok
+```
+
+内置管理员账号固定为：
+
+```text
+username: admin
+password: RUOK__WEBUI_ADMIN_PASSWORD
+```
+
+如果没有配置 `RUOK__WEBUI_SECRET_KEY`，WebUI session 会使用启动时随机密钥，重启后登录态失效。
+
+## 配置项
+
+所有配置位于 `.env` 中的 `RUOK__...` 作用域。
 
 ### 健康检查
 
 | 配置项 | 类型 | 默认值 | 说明 |
-| :----- | :--: | :----: | :--- |
-| `RUOK__CHECK_TIMEOUT` | `float` | `5.0` | 健康检查超时时间（秒） |
-| `RUOK__WS_DEEP_CHECK_TIMEOUT` | `float` | `3.0` | WS 深度检查超时（秒），`bot.get_status()` 最大等待 |
-| `RUOK__CACHE_TTL` | `float` | `10.0` | API 缓存有效期（秒），减少重复采集 |
-| `RUOK__ENABLE_DEEP_WS_CHECK` | `bool` | `True` | 是否执行 e2e 延迟检测（`get_status()`） |
+| :--- | :--- | :--- | :--- |
+| `RUOK__CHECK_TIMEOUT` | `float` | `5.0` | 健康检查超时时间，单位秒 |
+| `RUOK__WS_DEEP_CHECK_TIMEOUT` | `float` | `3.0` | Bot 深度检查超时时间 |
+| `RUOK__CACHE_TTL` | `float` | `10.0` | API 聚合状态缓存时间 |
+| `RUOK__ENABLE_DEEP_WS_CHECK` | `bool` | `true` | 是否调用 `bot.get_status()` 做深度连接检查 |
 
-### Session 追踪
-
-| 配置项 | 类型 | 默认值 | 说明 |
-| :----- | :--: | :----: | :--- |
-| `RUOK__SESSION_ENABLED` | `bool` | `True` | 是否启用 Session 系统 |
-| `RUOK__AUTO_SESSION_ENABLED` | `bool` | `True` | 是否自动捕获 ERROR 日志生成 Session |
-| `RUOK__STRICT_EXCEPTION_CAPTURE` | `bool` | `False` | True=捕获所有 stdlib ERROR，False=仅框架级（uvicorn/starlette/fastapi/asyncio） |
-| `RUOK__CRISIS_MODE` | `bool` | `False` | 紧急模式：跳过所有上报权限检查（测试/紧急用） |
-| `RUOK__NOTIFY_SUPERUSERS` | `bool` | `True` | 新 Session 是否私聊通知 SUPERUSERS |
-| `RUOK__NOTIFY_INTERVAL_HOURS` | `float` | `4.0` | 同一 Session 再次通知的最小间隔（小时） |
-| `RUOK__SUMMARY_INTERVAL_HOURS` | `float` | `4.0` | 定时汇总未解决 Session 的间隔（小时） |
-
-### 权限控制
+### Session 与上报
 
 | 配置项 | 类型 | 默认值 | 说明 |
-| :----- | :--: | :----: | :--- |
-| `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 允许上报问题的用户白名单（平台用户 ID 字符串） |
-| `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 允许上报问题的群白名单（群号字符串） |
+| :--- | :--- | :--- | :--- |
+| `RUOK__SESSION_ENABLED` | `bool` | `true` | 是否启用 Session 系统 |
+| `RUOK__AUTO_SESSION_ENABLED` | `bool` | `true` | 是否自动捕获日志错误生成 Session |
+| `RUOK__STRICT_EXCEPTION_CAPTURE` | `bool` | `false` | 是否捕获所有 stdlib ERROR/CRITICAL；默认只捕获框架相关 logger |
+| `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 允许上报的用户 ID |
+| `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 允许上报的群 ID |
+| `RUOK__CRISIS_MODE` | `bool` | `false` | 跳过上报权限检查，适合测试或紧急场景 |
+| `RUOK__NOTIFY_SUPERUSERS` | `bool` | `true` | 新 Session 是否通知 SUPERUSER |
+| `RUOK__NOTIFY_INTERVAL_HOURS` | `float` | `4.0` | 同一 Session 再次通知的最小间隔 |
+| `RUOK__SUMMARY_INTERVAL_HOURS` | `float` | `4.0` | 未解决 Session 汇总通知间隔 |
 
-**上报权限判断优先级**：
-> SUPERUSERS → 已绑定 WebUI 用户 → 白名单用户 → 群管理员/群主 → 白名单群群员
+上报权限顺序：
 
-**`crisis_mode=True` 时全部跳过** *(启发自Cloudflare的Zero Trust Mode，Reversed)* 。
+1. `RUOK__CRISIS_MODE=true`
+2. NoneBot `SUPERUSERS`
+3. 已绑定 WebUI 用户
+4. `RUOK__REPORT_WHITELIST_USERS`
+5. 群管理员或群主
+6. `RUOK__REPORT_WHITELIST_GROUPS`
 
-### API / WebUI
+### API 与 WebUI
 
 | 配置项 | 类型 | 默认值 | 说明 |
-| :----- | :--: | :----: | :--- |
-| `RUOK__CORS_ORIGINS` | `list[str]` | `["*"]` | CORS 允许的源列表 |
-| `RUOK__API_KEY` | `str` | `""` | API 密钥（为空则不校验） |
-| `RUOK__WEBUI_ADMIN_PASSWORD` | `str` | `""` | WebUI 内置管理员 `admin` 的登录密码（为空则 WebUI 无法登录） |
-| `RUOK__SSE_PUBLIC` | `bool` | `False` | True 时 SSE 端点无需登录 |
+| :--- | :--- | :--- | :--- |
+| `RUOK__CORS_ORIGINS` | `list[str]` | `["*"]` | API CORS 允许源 |
+| `RUOK__API_KEY` | `str` | `""` | API key；为空则 API 不校验 |
+| `RUOK__WEBUI_ADMIN_PASSWORD` | `str` | `""` | 内置 `admin` 账户密码；为空则 WebUI 无法登录 |
+| `RUOK__WEBUI_SECRET_KEY` | `str` | `""` | WebUI session 签名密钥；为空则每次启动随机 |
+| `RUOK__SSE_PUBLIC` | `bool` | `false` | 是否允许未登录访问 SSE |
 
-### 时间序列指标
+API key 可通过任一方式传递：
+
+```http
+X-RuOK-API-Key: your-token
+Authorization: Bearer your-token
+```
+
+### 指标
 
 | 配置项 | 类型 | 默认值 | 说明 |
-| :----- | :--: | :----: | :--- |
-| `RUOK__METRICS_RETENTION_DAYS` | `int` | `7` | Dashboard 趋势图数据保留天数 |
+| :--- | :--- | :--- | :--- |
+| `RUOK__METRICS_RETENTION_DAYS` | `int` | `7` | 指标数据保留天数 |
 
 ### 通知规则
 
-`RUOK__NOTIFICATION_RULES` 为 JSON 数组，每项结构：
+`RUOK__NOTIFICATION_RULES` 是 JSON 数组，也可在 WebUI 通知页面管理。
 
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
-| `name` | `str` | 规则名称 |
-| `enabled` | `bool` | 是否启用（默认 `true`） |
-| `on_status` | `list[str]` | 触发通知的 Session 状态，如 `["pending", "unsolved"]` |
-| `on_module` | `list[str]` | 适用模块名列表（空 = 全部） |
-| `cooldown_minutes` | `float` | 同规则冷却时间（分钟，默认 `60.0`） |
-| `channels` | `list[str]` | 通知通道：`bot_dm`（Bot 私聊）、`webhook`（HTTP POST） |
-| `webhook_url` | `str` | `webhook` 通道的目标 URL
+| `name` | `str` | 规则名，唯一键 |
+| `enabled` | `bool` | 是否启用 |
+| `on_status` | `list[str]` | 触发状态，例如 `["pending", "unsolved"]` |
+| `on_module` | `list[str]` | 触发模块；空列表表示全部模块 |
+| `cooldown_minutes` | `float` | 同规则冷却时间 |
+| `channels` | `list[str]` | `bot_dm`、`webhook` |
+| `webhook_url` | `str | null` | Webhook URL |
 
-### 配置示例
+示例：
 
 ```dotenv
-# .env
-RUOK__CHECK_TIMEOUT=10.0
-RUOK__CACHE_TTL=30.0
-RUOK__ENABLE_DEEP_WS_CHECK=true
-RUOK__AUTO_SESSION_ENABLED=true
-RUOK__NOTIFY_SUPERUSERS=true
-RUOK__REPORT_WHITELIST_USERS=["123456789", "987654321"]
-RUOK__REPORT_WHITELIST_GROUPS=["1000000"]
-RUOK__WEBUI_ADMIN_PASSWORD=mysecret
-RUOK__METRICS_RETENTION_DAYS=7
 RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["pending","unsolved"],"on_module":[],"cooldown_minutes":60,"channels":["bot_dm"]}]'
 ```
 
-## 🎉 使用
+## 聊天指令
 
-### 聊天指令
+| 指令 | 权限 | 说明 |
+| :--- | :--- | :--- |
+| `/ruok` | 所有人 | 显示帮助 |
+| `/ruok status` | 所有人 | 查看模块实时状态 |
+| `/ruok list` | 所有人 | 列出最多 10 个活跃 Session |
+| `/ruok lookup <id>` | 所有人 | 查看 Session 详情 |
+| `/ruok bind <auth_key>` | 普通 WebUI 用户 | 绑定 WebUI 账号与当前平台用户 |
+| `/ruok reset` | 已绑定普通 WebUI 用户 | 生成一次性密码重置码；群聊触发时通过私聊发送 |
+| `/ruok no <模块> <描述>` | 有上报权限的用户 | 手动上报问题，创建 Session |
+| `/ruok confirm <id> [插件...]` | SUPERUSER | 确认问题，可指定一个或多个影响插件 |
+| `/ruok solve <id>` | SUPERUSER | 标记已解决 |
+| `/ruok ignore <id>` | SUPERUSER | 忽略误报 |
 
-| 指令 | 权限 | 范围 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `/ruok` | 所有人 | 群聊/私聊 | 显示帮助信息 |
-| `/ruok status` | 所有人 | 群聊/私聊 | 查看所有模块实时状态（🟢🟡🔴） |
-| `/ruok bind <auth_key>` | 普通 WebUI 用户 | 群聊/私聊 | 将 WebUI 账户绑定到当前聊天平台用户 |
-| `/ruok no <模块> <描述>` | 已绑定用户/白名单/群管/SUPERUSER | 群聊/私聊 | 手动上报问题，创建 Session |
-| `/ruok list` | 所有人 | 群聊/私聊 | 列出活跃 Session（最多 10 条） |
-| `/ruok lookup <id>` | 所有人 | 群聊/私聊 | 查看 Session 详情（含重复次数、关联） |
-| `/ruok confirm <id>` | SUPERUSER | 群聊/私聊 | 确认问题 → `pending→unsolved` |
-| `/ruok solve <id>` | SUPERUSER | 群聊/私聊 | 标记已解决 → `solved` |
-| `/ruok ignore <id>` | SUPERUSER | 群聊/私聊 | 忽略误报 → `ignored` |
+`/ruok confirm` 的插件参数支持空格或逗号：
 
-### HTTP API
+```text
+/ruok confirm ruok-1234abcd nonebot_plugin_a nonebot_plugin_b
+/ruok confirm ruok-1234abcd nonebot_plugin_a,nonebot_plugin_b
+```
 
-所有接口前缀 `/ruok/api`，返回 JSON。
+不传插件时，Session 仍会从 `pending` 变为 `unsolved`，但不会产生插件级传播影响。
 
-**健康检查**
+## Session 状态与插件影响传播
 
-| 端点 | 方法 | 说明 |
-| :--- | :--: | :--- |
-| `/ruok/api/status` | GET | 聚合健康状态（硬件 + 连接 + 插件 + 模块） |
-| `/ruok/api/health` | GET | 简单探针，200 或 503（K8s / Docker / Uptime） |
-| `/ruok/api/connections` | GET | 仅 WS 连接状态（轻量） |
+Session 状态机：
 
-**Session 管理**
+```mermaid
+stateDiagram-v2
+    [*] --> pending: 自动捕获 / 手动上报
+    pending --> unsolved: confirm
+    pending --> ignored: ignore
+    unsolved --> solved: solve
+    unsolved --> ignored: ignore
+```
 
-| 端点 | 方法 | 说明 |
-| :--- | :--: | :--- |
-| `/ruok/api/sessions` | GET | Session 列表，支持 `?status=&module=&reporter=&search=&plugin=&after=&before=` |
-| `/ruok/api/sessions` | POST | 创建 Session（WebUI 用） |
-| `/ruok/api/sessions/stats` | GET | 聚合统计（pending/unsolved/solved/ignored） |
-| `/ruok/api/sessions/{id}` | GET | Session 详情 |
-| `/ruok/api/sessions/{id}` | PATCH | 更新状态 / 开发者备注 |
-| `/ruok/api/sessions/{id}/link/{other}` | POST | 关联两个 Session |
-| `/ruok/api/sessions/{id}/link` | DELETE | 解除关联 |
-| `/ruok/api/sessions/{id}/linked` | GET | 获取同组关联的 Session 列表 |
+模块状态由 Session 动态推导：
 
-**模块管理**
+- 本模块有 `pending` Session：模块为 `degraded`。
+- 本模块有 `unsolved` Session：模块为 `unavailable`。
+- 某模块有 `pending` Session：该模块当前关联的所有插件会传播 `degraded` 到共享插件的模块。
+- 某 Session 被 confirm 且指定 `affected_plugins`：共享这些插件的模块会进入 `unavailable`。
+- confirm 不指定插件：仅原模块直接 `unavailable`，不传播。
+- 同一插件仍有其他活跃 Session 时，解决其中一个不会提前恢复模块状态。
 
-| 端点 | 方法 | 说明 |
-| :--- | :--: | :--- |
-| `/ruok/api/modules` | GET | 模块列表（含实时推导状态） |
-| `/ruok/api/modules/{name}` | GET / PUT / DELETE | 模块 CRUD |
+确认后的影响插件可以在 WebUI Session 列表或详情页继续修改。修改后，旧插件影响会解除，新插件影响会重新计算。
 
-**指标**
+## WebUI
 
-| 端点 | 方法 | 说明 |
-| :--- | :--: | :--- |
-| `/ruok/api/metrics/history` | GET | 时间序列数据，`?hours=24`（Dashboard 图表数据源） |
+访问 `/ruok` 打开 WebUI。
 
-### WebUI
+### 管理员
 
-启动机器人后，浏览器访问 `http://<host>:<port>/ruok` 即可打开可视化面板。
+管理员包括：
+
+- 内置 `admin` 账户。
+- 已绑定平台账号且平台用户 ID 命中 NoneBot `SUPERUSERS` 的普通 WebUI 用户。
+
+管理员可访问：
 
 | 页面 | 路由 | 说明 |
 | :--- | :--- | :--- |
-| 📊 总览 | `/ruok` | 系统指标卡片 + 连接状态 + CPU/内存趋势图 + Session 统计饼图 + 模块表 |
-| 📋 Sessions | `/ruok/sessions` | 列表 + 高级筛选（搜索、状态、模块、插件、时间范围） |
-| 📝 详情 | `/ruok/sessions/{id}` | 完整信息 + 状态时间线 + 关联 Session + 开发者备注 |
-| 📦 模块 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件） |
-| 🔔 通知 | `/ruok/notifications` | 通知规则管理（触发条件、冷却、通道） |
-| 👤 账号 | `/ruok/users` | 管理员管理用户；普通用户改密、换绑、注销账号 |
-| 🔐 登录 | `/ruok/login` | 管理员账号固定为 `admin`，密码来自 `RUOK__WEBUI_ADMIN_PASSWORD` |
-| 🧾 注册 | `/ruok/register` | 普通用户注册，生成 10 分钟有效的一次性绑定码 |
+| 总览 | `/ruok` | 系统指标、连接、插件、模块、趋势、Session 统计 |
+| Sessions | `/ruok/sessions` | 搜索、筛选、确认、解决、忽略、关联、备注 |
+| Session 详情 | `/ruok/sessions/{id}` | 完整信息、用户说明、Traceback、关联 Session、影响插件 |
+| 模块 | `/ruok/modules` | 模块列表与创建 |
+| 模块详情 | `/ruok/modules/{name}` | 编辑名称、显示名、描述、关联插件、删除 |
+| 通知 | `/ruok/notifications` | 通知规则列表与创建 |
+| 通知详情 | `/ruok/notifications/{name}` | 编辑规则、触发状态、模块、冷却、通道、删除 |
+| 用户 | `/ruok/users` | 用户搜索、创建、改名、重置密码、绑定码、清除绑定、删除 |
 
-管理员可访问完整 WebUI。普通用户只能访问精简总览、模块健康状态、绑定提示、手动上报入口和自己的上报记录；普通用户必须先通过 `/ruok bind <auth_key>` 绑定当前聊天平台账号后才能使用 WebUI 上报。
+### 普通用户
 
-内置 `admin` 账号不写入用户存储，密码只通过 `.env` 管理。普通 WebUI 账号绑定的当前平台用户 ID 如果命中 NoneBot `SUPERUSERS`，会动态获得 WebUI 管理员权限；从 `SUPERUSERS` 移除后权限自动失效，不会永久写入 `webui_users.json`。
+普通用户可注册 WebUI 账号。注册后页面会显示 10 分钟有效的一次性 `auth_key`，用户需要在聊天中发送：
 
-当前主要测试适配器为 OneBot V11。绑定机制基于 NoneBot `Event.get_user_id()` 和 `Bot.type` 记录平台用户身份，理论上可用于其他适配器，但非 OneBot 场景未作为主支持路径保证。
-
-**技术架构**
-
-| 层级 | 技术 | 用途 |
-|------|------|------|
-| 模板 | Jinja2 | SSR 页面渲染 |
-| 交互 | HTMX 2.x | 局部刷新、内联编辑 |
-| 实时 | SSE | ~1s 指标更新 + Session 变更推送 |
-| 样式 | Pico.css + 自定义 CSS | Glass 风格暗色模式 |
-| 图表 | Chart.js | 趋势折线图 + 状态饼图 |
-| DOM | idiomorph | Hero 区域 morph 过渡 |
-
-## 🏗️ 项目结构
-
+```text
+/ruok bind <auth_key>
 ```
+
+普通用户可访问：
+
+- 精简总览。
+- Overall 和模块健康状态。
+- 自己的绑定状态。
+- WebUI 手动上报入口。
+- 自己上报的 Session。
+- 账号自助页面：修改密码、重新生成绑定码、注销账号。
+
+普通用户不能访问模块管理、通知管理、全局 Sessions、系统指标详情、趋势数据和管理动作。
+
+### 登录体验
+
+登录页支持：
+
+- 浏览器/系统密码管理器的 `autocomplete`。
+- 记住用户名 cookie。
+- 保持登录 30 天的可撤销 token cookie。
+- 忘记密码入口。
+
+应用不会保存明文密码。普通用户密码使用 PBKDF2-HMAC-SHA256 加盐哈希。保持登录 token 存储为哈希，修改密码、重设密码、删除账号或管理员密码变化后会失效。
+
+## HTTP API
+
+所有端点前缀为 `/ruok/api`。
+
+### 健康与指标
+
+| 方法 | 端点 | 说明 |
+| :--- | :--- | :--- |
+| `GET` | `/status` | 聚合健康状态 |
+| `GET` | `/health` | 简单健康探针，返回 200 或 503 |
+| `GET` | `/connections` | Bot 连接状态 |
+| `GET` | `/metrics/history?hours=24` | 时间序列指标 |
+
+### Sessions
+
+| 方法 | 端点 | 说明 |
+| :--- | :--- | :--- |
+| `GET` | `/sessions` | 列表，支持 `status`、`module`、`reporter`、`search`、`plugin`、`after`、`before` |
+| `POST` | `/sessions` | 创建 Session |
+| `GET` | `/sessions/stats` | Session 统计 |
+| `GET` | `/sessions/{id}` | Session 详情 |
+| `PATCH` | `/sessions/{id}` | 更新状态或备注 |
+| `POST` | `/sessions/{id}/link/{other}` | 关联两个 Session |
+| `DELETE` | `/sessions/{id}/link` | 解除当前 Session 的关联组 |
+| `GET` | `/sessions/{id}/linked` | 查看关联 Session |
+
+确认并指定影响插件：
+
+```http
+PATCH /ruok/api/sessions/ruok-1234abcd
+Content-Type: application/json
+
+{
+  "status": "unsolved",
+  "affected_plugins": ["nonebot_plugin_a", "nonebot_plugin_b"]
+}
+```
+
+`affected_plugins` 只能随 `status="unsolved"` 一起提交，并会按 Session 原模块当前插件列表校验。非法插件返回 400。
+
+### Modules
+
+| 方法 | 端点 | 说明 |
+| :--- | :--- | :--- |
+| `GET` | `/modules` | 模块列表，含实时推导状态 |
+| `GET` | `/modules/{name}` | 模块详情 |
+| `PUT` | `/modules/{name}` | 创建或更新模块 |
+| `DELETE` | `/modules/{name}` | 删除模块 |
+
+## 数据文件
+
+RuOK 使用 `nonebot-plugin-localstore` 的插件数据目录。
+
+| 文件 | 说明 |
+| :--- | :--- |
+| `sessions/{session_id}.json` | Session 事实源 |
+| `plugin_impacts.json` | 从活跃 Session 重建的插件影响索引 |
+| `modules.json` | 模块定义 |
+| `notification_rules.json` | 通知规则 |
+| `notification_cooldowns.json` | 通知冷却状态 |
+| `metrics/YYYY-MM-DD.json` | 每日指标数据 |
+| `webui_users.json` | 普通 WebUI 用户、绑定码、平台绑定、重置 key |
+| `webui_remember_tokens.json` | 记住登录 token 哈希 |
+
+`plugin_impacts.json` 是缓存，不是权威状态。缺失、损坏或过期时会从 Session 文件重建。
+
+## 项目结构
+
+```text
 src/nonebot_plugin_ruok/
-├── __init__.py          # 入口：PluginMetadata + 7 个 Matcher + WS 钩子 + 挂载
-├── config.py            # Pydantic 配置模型（ruok__ 作用域）
-├── protocol.py          # 全部数据模型
-├── api.py               # FastAPI JSON 路由（/ruok/api/*）
-├── collector.py         # 薄重导出层 → collectors/
-├── collectors/          # 核心引擎
-│   ├── metrics.py       # 系统指标 + WS 连接 + 插件清单 + 聚合
-│   ├── sessions.py      # Session CRUD + 关联 + 统计 + 错误处理
-│   ├── modules.py       # 模块定义 CRUD + 状态推导
-│   ├── monitor.py       # LogMonitor（loguru + stdlib）
-│   ├── notifications.py # 通知引擎（规则/冷却/BotDM/Webhook）
-│   └── trackers.py      # 网络/磁盘速率追踪
-└── webui/               # Web 面板
-    ├── router.py        # SSR 路由（页面 + HTMX partial + action）
-    ├── auth.py          # WebUI 登录认证
-    ├── sse.py           # EventBus + SSE 流生成器
-    ├── jinja.py         # Jinja2 环境 + 自定义 filter
-    └── templates/       # 18 个 Jinja2 模板
+├── __init__.py          # 插件入口、命令、NoneBot 生命周期、路由挂载
+├── config.py            # RUOK__ 配置模型
+├── protocol.py          # Pydantic 数据模型
+├── api.py               # /ruok/api/* JSON API
+├── collector.py         # collectors 的兼容重导出层
+├── collectors/
+│   ├── metrics.py       # 系统指标、连接、插件内省、聚合状态
+│   ├── sessions.py      # Session CRUD、关联、统计、插件影响索引
+│   ├── modules.py       # 模块 CRUD、状态推导、相关 Session 查询
+│   ├── monitor.py       # loguru / stdlib 日志捕获
+│   ├── notifications.py # 通知规则、冷却、Bot DM、Webhook、汇总任务
+│   └── trackers.py      # 网络和磁盘 I/O 速率追踪
+└── webui/
+    ├── auth.py          # WebUI 账号、绑定、记住登录、密码重设
+    ├── router.py        # SSR 页面、HTMX partial/action、SSE
+    ├── sse.py           # EventBus 和 SSE 生成器
+    ├── jinja.py         # Jinja 环境和过滤器
+    └── templates/       # Jinja2 页面与 partial
 ```
 
-## 📄 许可证
+测试位于 `tests/`：
+
+- `plugin_test.py`：NoneBot 命令与 OneBot V11 交互。
+- `test_sessions.py`：Session 存储、筛选、关联、影响索引。
+- `test_modules.py`：模块 CRUD 和状态推导。
+- `test_collector.py`：指标、进程、网络/磁盘速率。
+- `test_web_api_*.py`：API、WebUI、鉴权、Dashboard、Sessions、模块、通知、用户管理。
+
+## 开发
+
+推荐使用 `uv`：
+
+```powershell
+uv sync --all-groups
+```
+
+常用检查：
+
+```powershell
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+```
+
+项目使用 pre-commit，包含 ruff、typos、uv lock/sync 等 hook：
+
+```powershell
+pre-commit run --all-files
+```
+
+## 许可证
 
 MIT © [p0rt39](https://github.com/p0rt39)
