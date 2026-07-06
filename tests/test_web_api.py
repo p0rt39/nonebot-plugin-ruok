@@ -272,6 +272,9 @@ def test_webui_login_ui_is_modern_auth_shell(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert 'class="auth-shell"' in response.text
+    assert 'class="auth-panel auth-card"' in response.text
+    assert 'class="auth-form"' in response.text
+    assert 'class="auth-input-wrap"' in response.text
     assert 'data-password-toggle="login-password"' in response.text
     assert 'autocomplete="username"' in response.text
 
@@ -410,7 +413,9 @@ def test_webui_users_page_admin_can_manage_users(tmp_path: Path) -> None:
         "/ruok/_actions/user-create",
         data={"username": "紧急 用户/a", "password": "secret"},
     )
+    created_trigger = json.loads(created.headers["HX-Trigger"])
     assert created.status_code == 200
+    assert created_trigger == {"toast": "User created", "toastType": "success"}
     assert "/ruok bind" in created.text
     assert "紧急 用户/a" in created.text
 
@@ -422,7 +427,9 @@ def test_webui_users_page_admin_can_manage_users(tmp_path: Path) -> None:
             "new_password": "new-secret",
         },
     )
+    updated_trigger = json.loads(updated.headers["HX-Trigger"])
     assert updated.status_code == 200
+    assert updated_trigger == {"toast": "User saved", "toastType": "success"}
     assert "renamed user" in updated.text
 
     _login_user(_client(config, tmp_path), "renamed user", "new-secret")
@@ -431,15 +438,27 @@ def test_webui_users_page_admin_can_manage_users(tmp_path: Path) -> None:
         "/ruok/_actions/user-auth-key",
         data={"username": "renamed user"},
     )
+    issued_trigger = json.loads(issued.headers["HX-Trigger"])
     assert issued.status_code == 200
+    assert issued_trigger == {"toast": "Auth key issued", "toastType": "success"}
     assert "renamed user" in issued.text
     assert "/ruok bind" in issued.text
+
+    cleared = client.post(
+        "/ruok/_actions/user-clear-binding",
+        data={"username": "renamed user"},
+    )
+    cleared_trigger = json.loads(cleared.headers["HX-Trigger"])
+    assert cleared.status_code == 200
+    assert cleared_trigger == {"toast": "Binding cleared", "toastType": "info"}
 
     deleted = client.post(
         "/ruok/_actions/user-delete",
         data={"username": "renamed user"},
     )
+    deleted_trigger = json.loads(deleted.headers["HX-Trigger"])
     assert deleted.status_code == 200
+    assert deleted_trigger == {"toast": "User deleted", "toastType": "info"}
     users = json.loads((tmp_path / "webui_users.json").read_text("utf-8"))["users"]
     assert users == []
 
@@ -512,14 +531,18 @@ def test_webui_normal_user_can_change_password_rebind_and_delete(
             "new_password_confirm": "new-secret",
         },
     )
+    changed_trigger = json.loads(changed.headers["HX-Trigger"])
     assert changed.status_code == 200
+    assert changed_trigger == {"toast": "Password changed", "toastType": "success"}
     _login_user(_client(config, tmp_path), "alice", "new-secret")
 
     rebind = client.post(
         "/ruok/_actions/account-rebind-key",
         data={"current_password": "new-secret"},
     )
+    rebind_trigger = json.loads(rebind.headers["HX-Trigger"])
     assert rebind.status_code == 200
+    assert rebind_trigger == {"toast": "Auth key issued", "toastType": "success"}
     assert "/ruok bind" in rebind.text
     rebound_user = WebUIAuth(config, tmp_path).get_user("alice")
     assert rebound_user is not None

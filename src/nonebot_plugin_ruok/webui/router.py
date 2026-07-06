@@ -660,8 +660,15 @@ def create_webui_router(
         user: CurrentWebUIUser,
         *,
         search: str = "",
+        toast: str = "",
+        toast_type: str = "success",
     ) -> HTMLResponse:
         stored_user = None if user.username == "admin" else auth.get_user(user.username)
+        headers = (
+            {"HX-Trigger": f'{{"toast":"{toast}","toastType":"{toast_type}"}}'}
+            if toast
+            else None
+        )
         return render(
             "_users_panel.html.jinja2",
             request=request,
@@ -670,6 +677,7 @@ def create_webui_router(
             user_search=search,
             stored_user=stored_user,
             auth=auth,
+            headers=headers,
         )
 
     @router.post("/ruok/_actions/user-create")
@@ -722,7 +730,12 @@ def create_webui_router(
                 new_username=new_username or None,
                 new_password=new_password or None,
             )
-            return _render_users_panel(request, user, search=search)
+            return _render_users_panel(
+                request,
+                user,
+                search=search,
+                toast="User saved",
+            )
         except UserManagementError as exc:
             return _error_html(str(exc))
 
@@ -769,7 +782,13 @@ def create_webui_router(
     ) -> HTMLResponse:
         try:
             auth.clear_binding(username)
-            return _render_users_panel(request, user, search=search)
+            return _render_users_panel(
+                request,
+                user,
+                search=search,
+                toast="Binding cleared",
+                toast_type="info",
+            )
         except UserManagementError as exc:
             return _error_html(str(exc))
 
@@ -782,7 +801,13 @@ def create_webui_router(
     ) -> HTMLResponse:
         try:
             auth.delete_user(username)
-            return _render_users_panel(request, user, search=search)
+            return _render_users_panel(
+                request,
+                user,
+                search=search,
+                toast="User deleted",
+                toast_type="info",
+            )
         except UserManagementError as exc:
             return _error_html(str(exc))
 
@@ -800,7 +825,11 @@ def create_webui_router(
             return _error_html("两次输入的密码不一致")
         try:
             auth.change_user_password(user.username, current_password, new_password)
-            return _render_users_panel(request, auth.current_user(request) or user)
+            return _render_users_panel(
+                request,
+                auth.current_user(request) or user,
+                toast="Password changed",
+            )
         except UserManagementError as exc:
             return _error_html(str(exc))
 

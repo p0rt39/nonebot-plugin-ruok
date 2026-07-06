@@ -1,24 +1,49 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}RuOK{% endblock %}</title>
+    <script>
+        (function(){var t=localStorage.getItem('ruok-theme')||'light';document.documentElement.setAttribute('data-theme',t);})();
+    </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <style>
         :root {
-            --auth-border: rgba(25, 36, 54, 0.12);
-            --auth-panel: rgba(255, 255, 255, 0.86);
+            --pico-font-size: 95%;
+            --glass-bg: rgba(255,255,255,0.62);
+            --glass-border: rgba(255,255,255,0.72);
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-md: 0 4px 16px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+            --shadow-lg: 0 18px 56px rgba(25,36,54,0.14), 0 8px 24px rgba(25,36,54,0.08);
+            --radius-sm: 10px;
+            --radius-md: 16px;
+            --radius-lg: 24px;
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             --auth-muted: #667085;
-            --auth-accent: #2f6fed;
-            --auth-accent-soft: rgba(47, 111, 237, 0.1);
+            --auth-heading: #182230;
+            --auth-accent: #667eea;
+            --auth-accent-2: #14b8a6;
+            --auth-accent-soft: rgba(102,126,234,0.12);
+            --auth-danger: #b42318;
+            --auth-success: #027a48;
+        }
+        [data-theme="dark"] {
+            --glass-bg: rgba(30,30,40,0.62);
+            --glass-border: rgba(255,255,255,0.1);
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+            --shadow-md: 0 4px 16px rgba(0,0,0,0.25);
+            --shadow-lg: 0 18px 56px rgba(0,0,0,0.38);
+            --auth-muted: #98a2b3;
+            --auth-heading: #f2f4f7;
         }
         body {
             min-height: 100vh;
             margin: 0;
-            background:
-                radial-gradient(circle at top left, rgba(47, 111, 237, 0.16), transparent 34rem),
-                linear-gradient(135deg, #f7f9fc 0%, #eef3f8 100%);
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4ecf7 50%, #dce8f5 100%);
+        }
+        [data-theme="dark"] body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
         }
         .auth-shell {
             min-height: 100vh;
@@ -27,32 +52,46 @@
             padding: 2rem 1rem;
         }
         .auth-panel {
-            width: min(100%, 460px);
-            background: var(--auth-panel);
-            border: 1px solid var(--auth-border);
-            border-radius: 18px;
-            box-shadow: 0 24px 70px rgba(25, 36, 54, 0.12);
+            width: min(100%, 440px);
+            background: var(--glass-bg) !important;
+            backdrop-filter: blur(18px) saturate(140%);
+            -webkit-backdrop-filter: blur(18px) saturate(140%);
+            border: 1px solid var(--glass-border) !important;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
             padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .auth-panel::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto;
+            height: 4px;
+            background: linear-gradient(90deg, var(--auth-accent), var(--auth-accent-2));
         }
         .auth-brand {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            margin-bottom: 1.5rem;
+            display: grid;
+            justify-items: center;
+            gap: 0.8rem;
+            margin-bottom: 1.6rem;
+            text-align: center;
         }
         .auth-mark {
             display: grid;
-            width: 2.6rem;
-            height: 2.6rem;
+            width: 3rem;
+            height: 3rem;
             place-items: center;
-            border-radius: 12px;
-            background: var(--auth-accent);
+            border-radius: var(--radius-md);
+            background: linear-gradient(135deg, var(--auth-accent), var(--auth-accent-2));
             color: #fff;
             font-weight: 700;
+            box-shadow: var(--shadow-md);
         }
         .auth-title {
             margin: 0;
-            font-size: 1.3rem;
+            color: var(--auth-heading);
+            font-size: 1.35rem;
             line-height: 1.2;
         }
         .auth-subtitle {
@@ -60,49 +99,85 @@
             color: var(--auth-muted);
             font-size: 0.92rem;
         }
+        .auth-form {
+            display: grid;
+            gap: 0.95rem;
+        }
+        .auth-field {
+            display: grid;
+            gap: 0.4rem;
+            margin: 0;
+            color: var(--auth-heading);
+            font-weight: 600;
+        }
+        .auth-field input {
+            width: 100%;
+            min-height: 3rem;
+            margin: 0;
+            border-radius: var(--radius-sm) !important;
+            transition: border-color var(--transition), box-shadow var(--transition);
+        }
+        .auth-field input:focus {
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.2);
+        }
+        .auth-input-wrap {
+            position: relative;
+            display: block;
+        }
         .auth-alert {
             padding: 0.75rem 0.9rem;
-            border-radius: 12px;
+            border-radius: var(--radius-sm);
             margin-bottom: 1rem;
             background: rgba(217, 45, 32, 0.08);
-            color: #b42318;
+            color: var(--auth-danger);
             border: 1px solid rgba(217, 45, 32, 0.16);
         }
         .auth-success {
             padding: 0.75rem 0.9rem;
-            border-radius: 12px;
+            border-radius: var(--radius-sm);
             margin-bottom: 1rem;
             background: rgba(18, 183, 106, 0.08);
-            color: #027a48;
+            color: var(--auth-success);
             border: 1px solid rgba(18, 183, 106, 0.16);
         }
         .auth-key {
             overflow-wrap: anywhere;
             font-size: 0.96rem;
             padding: 0.75rem;
-            border-radius: 12px;
+            border-radius: var(--radius-sm);
             background: var(--auth-accent-soft);
             border: 1px solid rgba(47, 111, 237, 0.16);
         }
-        .password-field {
-            position: relative;
-        }
         .password-field input {
-            padding-right: 4.6rem;
+            padding-right: 4.7rem;
         }
         .password-toggle {
             position: absolute;
             right: 0.55rem;
-            top: 2.15rem;
+            top: 50%;
+            transform: translateY(-50%);
             width: auto;
+            min-height: 2rem;
             padding: 0.28rem 0.55rem;
             margin: 0;
-            border-radius: 8px;
+            border-radius: var(--radius-sm) !important;
             font-size: 0.82rem;
+        }
+        button, [role="button"], input[type="submit"] {
+            border-radius: var(--radius-sm) !important;
+            transition: all var(--transition) !important;
+            font-weight: 500;
+        }
+        button:hover, [role="button"]:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+        .password-toggle:hover {
+            transform: translateY(-50%);
         }
         .auth-actions {
             display: flex;
-            justify-content: space-between;
+            justify-content: center;
             align-items: center;
             gap: 0.75rem;
             margin-top: 1rem;
@@ -117,14 +192,18 @@
         @media (max-width: 520px) {
             .auth-panel {
                 padding: 1.35rem;
-                border-radius: 14px;
+                border-radius: var(--radius-md);
+            }
+            .auth-brand {
+                justify-items: start;
+                text-align: left;
             }
         }
     </style>
 </head>
 <body>
     <main class="auth-shell">
-        <section class="auth-panel">
+        <section class="auth-panel auth-card">
             <div class="auth-brand">
                 <div class="auth-mark">R</div>
                 <div>

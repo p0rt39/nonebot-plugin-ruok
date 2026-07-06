@@ -95,6 +95,14 @@
             from { opacity: 0; transform: translateY(16px); }
             to   { opacity: 1; transform: translateY(0); }
         }
+        @keyframes toastSlideIn {
+            from { opacity: 0; transform: translateX(24px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes toastSlideOut {
+            from { opacity: 1; transform: translateX(0); }
+            to   { opacity: 0; transform: translateX(24px); }
+        }
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50%      { opacity: 0.5; }
@@ -599,6 +607,16 @@
         .htmx-indicator { opacity: 0; transition: opacity 0.2s ease; }
         .htmx-request .htmx-indicator { opacity: 1; }
         .htmx-request.htmx-indicator { opacity: 1; }
+        .htmx-busy {
+            opacity: 0.72;
+            pointer-events: none;
+        }
+        button.htmx-busy,
+        [role="button"].htmx-busy,
+        input[type="submit"].htmx-busy {
+            transform: translateY(0) !important;
+            box-shadow: none !important;
+        }
 
         /* ── Footer ── */
         footer {
@@ -638,18 +656,20 @@
             max-width: 360px;
         }
         .toast {
-            padding: 0.75rem 1.25rem;
+            padding: 0.8rem 1rem;
             border-radius: var(--radius-sm);
             color: #fff; font-weight: 500;
             box-shadow: var(--shadow-lg);
-            animation: fadeInUp 0.3s ease-out;
+            animation: toastSlideIn 0.24s ease-out;
             backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.22);
         }
         .toast-success { background: rgba(46,204,64,0.9); }
         .toast-warning { background: rgba(255,220,0,0.9); color: #000; }
         .toast-error   { background: rgba(255,65,54,0.9); }
         .toast-info    { background: rgba(102,126,234,0.9); }
-        .toast-removing { animation: fadeInUp 0.3s ease-out reverse; }
+        .toast-removing { animation: toastSlideOut 0.2s ease-in forwards; }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -825,6 +845,36 @@
                 }
             }
         } catch(_) {}
+    });
+})();
+</script>
+<script>
+// ── HTMX button feedback ──
+(function() {
+    function submitterFromEvent(event) {
+        var elt = event.detail && event.detail.elt;
+        if (!elt) return null;
+        if (elt.matches('button, [role="button"], input[type="submit"]')) return elt;
+        if (elt.tagName === 'FORM') {
+            return elt.querySelector('button[type="submit"], input[type="submit"]');
+        }
+        return elt.closest('button, [role="button"], input[type="submit"]');
+    }
+
+    document.body.addEventListener('htmx:beforeRequest', function(event) {
+        var button = submitterFromEvent(event);
+        if (!button) return;
+        button.classList.add('htmx-busy');
+        button.setAttribute('aria-busy', 'true');
+        button.dataset.ruokBusy = 'true';
+    });
+
+    document.body.addEventListener('htmx:afterRequest', function(event) {
+        document.querySelectorAll('[data-ruok-busy="true"]').forEach(function(button) {
+            button.classList.remove('htmx-busy');
+            button.removeAttribute('aria-busy');
+            delete button.dataset.ruokBusy;
+        });
     });
 })();
 </script>

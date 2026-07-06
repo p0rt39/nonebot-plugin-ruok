@@ -11,23 +11,25 @@
     未配置 <code>RUOK__WEBUI_ADMIN_PASSWORD</code>，WebUI 登录不可用。
 </p>
 {% endif %}
-<form method="post" action="/ruok/login">
-    <label>
-        用户名
+<form method="post" action="/ruok/login" class="auth-form">
+    <label class="auth-field">
+        <span>用户名</span>
         <input type="text" name="username" required autofocus
                value="{{ username or '' }}" autocomplete="username"
                placeholder="admin 或普通用户"
                {% if error %}aria-invalid="true"{% endif %}>
     </label>
-    <label class="password-field">
-        密码
-        <input id="login-password" type="password" name="password" required
-               autocomplete="current-password" placeholder="输入账户密码"
-               {% if error %}aria-invalid="true"{% endif %}>
-        <button type="button" class="secondary outline password-toggle"
-                data-password-toggle="login-password" aria-label="显示密码">
-            显示
-        </button>
+    <label class="auth-field password-field">
+        <span>密码</span>
+        <span class="auth-input-wrap">
+            <input id="login-password" type="password" name="password" required
+                   autocomplete="current-password" placeholder="输入账户密码"
+                   {% if error %}aria-invalid="true"{% endif %}>
+            <button type="button" class="secondary outline password-toggle"
+                    data-password-toggle="login-password" aria-label="显示密码">
+                显示
+            </button>
+        </span>
     </label>
     <button type="submit" class="full-width" {% if not admin_configured %}disabled{% endif %}>
         登录

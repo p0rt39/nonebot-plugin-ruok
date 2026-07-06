@@ -20,31 +20,35 @@
 </p>
 <a href="/ruok" role="button" class="full-width" style="text-align:center;">进入总览</a>
 {% else %}
-<form method="post" action="/ruok/register">
-    <label>
-        用户名
+<form method="post" action="/ruok/register" class="auth-form">
+    <label class="auth-field">
+        <span>用户名</span>
         <input type="text" name="username" required autofocus
                value="{{ username or '' }}" autocomplete="username"
                {% if error %}aria-invalid="true"{% endif %}>
     </label>
-    <label class="password-field">
-        密码
-        <input id="register-password" type="password" name="password" required
-               autocomplete="new-password" {% if error %}aria-invalid="true"{% endif %}>
-        <button type="button" class="secondary outline password-toggle"
-                data-password-toggle="register-password" aria-label="显示密码">
-            显示
-        </button>
+    <label class="auth-field password-field">
+        <span>密码</span>
+        <span class="auth-input-wrap">
+            <input id="register-password" type="password" name="password" required
+                   autocomplete="new-password" {% if error %}aria-invalid="true"{% endif %}>
+            <button type="button" class="secondary outline password-toggle"
+                    data-password-toggle="register-password" aria-label="显示密码">
+                显示
+            </button>
+        </span>
     </label>
-    <label class="password-field">
-        确认密码
-        <input id="register-password-confirm" type="password" name="password_confirm"
-               required autocomplete="new-password"
-               {% if error %}aria-invalid="true"{% endif %}>
-        <button type="button" class="secondary outline password-toggle"
-                data-password-toggle="register-password-confirm" aria-label="显示密码">
-            显示
-        </button>
+    <label class="auth-field password-field">
+        <span>确认密码</span>
+        <span class="auth-input-wrap">
+            <input id="register-password-confirm" type="password" name="password_confirm"
+                   required autocomplete="new-password"
+                   {% if error %}aria-invalid="true"{% endif %}>
+            <button type="button" class="secondary outline password-toggle"
+                    data-password-toggle="register-password-confirm" aria-label="显示密码">
+                显示
+            </button>
+        </span>
     </label>
     <button type="submit" class="full-width">注册</button>
 </form>
