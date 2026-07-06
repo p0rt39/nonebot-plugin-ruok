@@ -748,6 +748,9 @@ def test_notification_detail_contains_edit_and_delete_actions(tmp_path: Path) ->
     assert 'name="original_name"' in response.text
     assert 'name="return_to_detail"' in response.text
     assert 'hx-post="/ruok/_actions/notification-delete"' in response.text
+    assert 'hx-target="closest details"' in response.text
+    assert "notification-edit-form?" in response.text
+    assert "取消" in response.text
     assert "待确认" in response.text
     assert "未解决" in response.text
 
@@ -1010,6 +1013,10 @@ def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
     assert 'name="selected_plugins" value="nonebot_plugin_ruok"' in response.text
     assert 'name="enabled"' not in response.text
     assert "← 返回模块列表" in response.text
+    assert response.text.count("返回模块列表") == 1
+    assert "取消" in response.text
+    assert "module-edit-form?" in response.text
+    assert 'hx-target="closest details"' in response.text
     assert "Back to Modules" not in response.text
     assert 'class="secondary outline ruok-button-danger"' in response.text
 

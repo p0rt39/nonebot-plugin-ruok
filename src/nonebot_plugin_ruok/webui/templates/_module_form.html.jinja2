@@ -74,9 +74,14 @@
                       placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">{{ extra_plugins | default([]) | join(',') }}</textarea>
         </label>
         <div class="ruok-button-row">
-            <button type="submit">保存模块</button>
+            <button type="submit" class="ruok-button">保存模块</button>
             {% if current_module %}
-            <a href="/ruok/modules" role="button" class="outline secondary ruok-button">返回模块列表</a>
+            <button type="button" class="outline secondary ruok-button"
+                    hx-get="/ruok/_actions/module-edit-form?{{ {'name': current_module.name} | urlencode }}"
+                    hx-target="closest details"
+                    hx-swap="outerHTML">
+                取消
+            </button>
             {% endif %}
         </div>
         <div id="module-edit-result"></div>

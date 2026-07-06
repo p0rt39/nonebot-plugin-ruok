@@ -70,12 +70,12 @@
             启用
         </label>
         <div class="ruok-button-row">
-            <button type="submit">💾 保存规则</button>
+            <button type="submit" class="ruok-button">💾 保存规则</button>
             {% if current_rule %}
-            <button type="button" class="outline secondary"
-                    hx-get="/ruok/_actions/notification-edit-form"
-                    hx-target="#notification-form-panel"
-                    hx-swap="innerHTML">
+            <button type="button" class="outline secondary ruok-button"
+                    hx-get="/ruok/_actions/notification-edit-form?{{ {'name': current_rule.name} | urlencode }}"
+                    hx-target="closest details"
+                    hx-swap="outerHTML">
                 取消
             </button>
             {% endif %}
