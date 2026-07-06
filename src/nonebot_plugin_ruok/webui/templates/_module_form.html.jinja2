@@ -73,7 +73,7 @@
             <textarea name="plugins" rows="3"
                       placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">{{ extra_plugins | default([]) | join(',') }}</textarea>
         </label>
-        <div class="ruok-button-row">
+        <div class="ruok-form-actions">
             <button type="submit" class="ruok-button">保存模块</button>
             {% if current_module %}
             <button type="button" class="outline secondary ruok-button"

@@ -229,6 +229,20 @@
         .ruok-button-full {
             width: 100%;
         }
+        .ruok-form-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+            gap: 0.6rem;
+            align-items: stretch;
+            max-width: 22rem;
+        }
+        .ruok-form-actions button,
+        .ruok-form-actions [role="button"] {
+            width: 100%;
+            min-height: 2.55rem;
+            margin-bottom: 0;
+            text-align: center;
+        }
 
         /* ── Form inputs ── */
         input, select, textarea {

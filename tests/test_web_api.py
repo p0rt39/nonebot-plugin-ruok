@@ -749,6 +749,7 @@ def test_notification_detail_contains_edit_and_delete_actions(tmp_path: Path) ->
     assert 'name="return_to_detail"' in response.text
     assert 'hx-post="/ruok/_actions/notification-delete"' in response.text
     assert 'hx-target="closest details"' in response.text
+    assert 'class="ruok-form-actions"' in response.text
     assert "notification-edit-form?" in response.text
     assert "取消" in response.text
     assert "待确认" in response.text
@@ -1017,6 +1018,7 @@ def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
     assert "取消" in response.text
     assert "module-edit-form?" in response.text
     assert 'hx-target="closest details"' in response.text
+    assert 'class="ruok-form-actions"' in response.text
     assert "Back to Modules" not in response.text
     assert 'class="secondary outline ruok-button-danger"' in response.text
 
