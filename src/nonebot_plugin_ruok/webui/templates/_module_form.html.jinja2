@@ -1,0 +1,61 @@
+{% set current_module = module | default(none) %}
+<details open style="margin-bottom:1.5rem;">
+    <summary>{% if current_module %}✏️ 编辑模块{% else %}➕ 添加模块{% endif %}</summary>
+    <form hx-post="/ruok/_actions/module-upsert"
+          hx-target="#module-list"
+          hx-swap="outerHTML"
+          style="margin-top:1rem;">
+        {% if current_module %}
+        <input type="hidden" name="original_name" value="{{ current_module.name }}">
+        {% endif %}
+        <div class="grid">
+            <label>
+                模块名
+                <input type="text" name="name" required
+                       value="{{ current_module.name if current_module else '' }}"
+                       placeholder="e.g. weather">
+            </label>
+            <label>
+                显示名
+                <input type="text" name="display_name"
+                       value="{{ current_module.display_name if current_module else '' }}"
+                       placeholder="天气插件">
+            </label>
+        </div>
+        <label>
+            描述
+            <input type="text" name="description"
+                   value="{{ current_module.description or '' if current_module else '' }}"
+                   placeholder="可选描述">
+        </label>
+        <label>
+            关联插件 (逗号分隔，可输入筛选)
+            <input type="text" name="plugins" list="plugin-list"
+                   value="{{ current_module.plugins | join(',') if current_module else '' }}"
+                   placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">
+            {% if all_plugins %}
+            <datalist id="plugin-list">
+                {% for p in all_plugins %}
+                <option value="{{ p }}">
+                {% endfor %}
+            </datalist>
+            {% endif %}
+        </label>
+        <label>
+            <input type="checkbox" name="enabled"
+                   {% if current_module is none or current_module.enabled %}checked{% endif %}>
+            启用
+        </label>
+        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+            <button type="submit">保存</button>
+            {% if current_module %}
+            <button type="button" class="outline secondary"
+                    hx-get="/ruok/_actions/module-edit-form"
+                    hx-target="#module-form-panel"
+                    hx-swap="innerHTML">
+                取消
+            </button>
+            {% endif %}
+        </div>
+    </form>
+</details>

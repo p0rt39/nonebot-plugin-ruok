@@ -22,24 +22,28 @@
                 {% else %}⚪{% endif %}
                 {{ m.status }}
             </td>
-            <td><strong><a href="/ruok/modules/{{ m.name }}">{{ m.display_name or m.name }}</a></strong></td>
+            <td><strong><a href="/ruok/modules/{{ m.name | urlencode }}">{{ m.display_name or m.name }}</a></strong></td>
             <td>{{ m.display_name }}</td>
             <td>{{ m.plugins | length }}</td>
             <td>{{ m.description or '—' }}</td>
             <td>
                 <button class="outline secondary" style="padding:2px 6px;font-size:0.78em;"
-                        hx-get="/ruok/_actions/module-edit-form/{{ m.name }}"
-                        hx-target="closest tr"
-                        hx-swap="outerHTML">
+                        hx-get="/ruok/_actions/module-edit-form?{{ {'name': m.name} | urlencode }}"
+                        hx-target="#module-form-panel"
+                        hx-swap="innerHTML">
                     Edit
                 </button>
-                <button class="outline secondary" style="padding:2px 6px;font-size:0.78em;"
-                        hx-post="/ruok/_actions/module-delete/{{ m.name }}"
-                        hx-target="#module-list"
-                        hx-swap="outerHTML"
-                        hx-confirm="确定删除模块「{{ m.display_name or m.name }}」？">
-                    Del
-                </button>
+                <form hx-post="/ruok/_actions/module-delete"
+                      hx-target="#module-list"
+                      hx-swap="outerHTML"
+                      hx-confirm="确定删除模块「{{ m.display_name or m.name }}」？"
+                      style="display:inline;margin:0;">
+                    <input type="hidden" name="name" value="{{ m.name }}">
+                    <button type="submit" class="outline secondary"
+                            style="padding:2px 6px;font-size:0.78em;">
+                        Del
+                    </button>
+                </form>
             </td>
         </tr>
         {% endfor %}

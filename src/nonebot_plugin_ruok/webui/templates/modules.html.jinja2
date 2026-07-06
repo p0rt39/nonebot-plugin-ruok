@@ -6,39 +6,9 @@
 
 <h3>📦 模块管理</h3>
 
-<!-- Add Module Form -->
-<details>
-    <summary>➕ 添加 / 更新模块</summary>
-    <form hx-post="/ruok/_actions/module-upsert" hx-target="#module-list" hx-swap="outerHTML" style="margin-top: 1rem;">
-        <div class="grid">
-            <label>
-                模块名
-                <input type="text" name="name" required placeholder="e.g. weather">
-            </label>
-            <label>
-                显示名
-                <input type="text" name="display_name" placeholder="天气插件">
-            </label>
-        </div>
-        <label>
-            描述
-            <input type="text" name="description" placeholder="可选描述">
-        </label>
-        <label>
-            关联插件 (逗号分隔，可输入筛选)
-            <input type="text" name="plugins" list="plugin-list"
-                   placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">
-            {% if all_plugins %}
-            <datalist id="plugin-list">
-                {% for p in all_plugins %}
-                <option value="{{ p }}">
-                {% endfor %}
-            </datalist>
-            {% endif %}
-        </label>
-        <button type="submit">保存</button>
-    </form>
-</details>
+<div id="module-form-panel">
+    {% include "_module_form.html.jinja2" %}
+</div>
 
 <!-- Module List -->
 {% include "_modules_table.html.jinja2" %}

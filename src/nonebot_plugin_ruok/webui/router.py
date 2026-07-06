@@ -56,46 +56,9 @@ def _query_metrics_history(data_dir: Path, hours: float = 1.0) -> list[dict[str,
     ]
 
 
-def _render_module_edit_row(mod: ModuleDefinition) -> str:
-    """Render an inline edit form row for a module."""
-    from urllib.parse import quote
-
-    plugins_str = html.escape(", ".join(mod.plugins), quote=True)
-    desc = html.escape(mod.description or "", quote=True)
-    dname = html.escape(mod.display_name or mod.name, quote=True)
-    mod_name = html.escape(mod.name, quote=True)
-    mod_name_url = quote(mod.name, safe="")
-    fid = html.escape(f"edit-frm-{mod.name}", quote=True)
-    return (
-        f'<tr id="{fid}">'
-        f"<td></td>"  # status
-        f"<td><strong>{mod_name}</strong></td>"  # name — readonly
-        f"<td>"
-        f'<input type="text" name="display_name" value="{dname}"'
-        f' style="margin-bottom:0;font-size:0.85em">'
-        f"</td>"
-        f"<td>"
-        f'<input type="text" name="plugins" value="{plugins_str}"'
-        f' style="margin-bottom:0;font-size:0.85em"'
-        f' placeholder="逗号分隔">'
-        f"</td>"
-        f"<td>"
-        f'<input type="text" name="description" value="{desc}"'
-        f' style="margin-bottom:0;font-size:0.85em">'
-        f"</td>"
-        f'<td style="white-space:nowrap">'
-        f'<button class="outline" style="padding:2px 6px;font-size:0.78em"'
-        f' hx-post="/ruok/_actions/module-edit-save/{mod_name_url}"'
-        f' hx-include="#{fid} input"'
-        f' hx-target="#module-list" hx-swap="outerHTML">'
-        f"Save</button> "
-        f'<button class="outline secondary" style="padding:2px 6px;font-size:0.78em"'
-        f' hx-get="/ruok/_partials/modules"'
-        f' hx-target="#module-list" hx-swap="outerHTML">'
-        f"Cancel</button>"
-        f"</td>"
-        f"</tr>"
-    )
+def _plugin_names() -> list[str]:
+    """Return loaded plugin names for module form suggestions."""
+    return [plugin.name for plugin in _collect_plugin_inventory(skip_ruok=False)]
 
 
 def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
@@ -280,13 +243,13 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         try:
             modules = list_modules(data_dir, config)
             # Gather loaded plugin names for datalist suggestions
-            all_plugins = _collect_plugin_inventory(skip_ruok=False)
-            plugin_names = [p.name for p in all_plugins]
+            plugin_names = _plugin_names()
             return render(
                 "modules.html.jinja2",
                 request=request,
                 modules=modules,
                 all_plugins=plugin_names,
+                module=None,
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_modules", data_dir)
@@ -627,36 +590,54 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def action_module_upsert(
         request: Request,
         name: str = Form(...),
+        original_name: str = Form(""),
         display_name: str = Form(""),
         description: str = Form(""),
         plugins: str = Form(""),
         enabled: bool = Form(True),
         _guard_ok: None = Depends(_webui_guard),
     ) -> HTMLResponse:
-        # Validate display_name uniqueness
-        new_display = display_name.strip() or name
-        existing_mod = get_module(data_dir, config, name)
-        if new_display and (
-            existing_mod is None or new_display != existing_mod.display_name
-        ):
-            all_modules = list_modules(data_dir, config)
-            for m in all_modules:
-                if m.name != name and m.display_name == new_display:
+        try:
+            normalized_name = name.strip()
+            normalized_original = original_name.strip()
+            if not normalized_name:
+                return HTMLResponse(
+                    '<p style="color:var(--pico-del-color);">❌ 模块名不能为空</p>',
+                    status_code=400,
+                )
+
+            modules_before = list_modules(data_dir, config)
+            if normalized_original and normalized_original != normalized_name:
+                if any(m.name == normalized_name for m in modules_before):
+                    return HTMLResponse(
+                        f'<p style="color:var(--pico-del-color);">'
+                        f'❌ 模块 "{normalized_name}" 已存在</p>',
+                        status_code=400,
+                    )
+
+            new_display = display_name.strip() or normalized_name
+            replace_name = normalized_original or normalized_name
+            for module in modules_before:
+                if module.name == replace_name:
+                    continue
+                if module.display_name == new_display:
                     return HTMLResponse(
                         f'<p style="color:var(--pico-del-color);">'
                         f'❌ 显示名 "{new_display}" 已被模块 '
-                        f'"{m.display_name or m.name}" 使用</p>',
+                        f'"{module.display_name or module.name}" 使用</p>',
                         status_code=400,
                     )
-        plugins_list = [p.strip() for p in plugins.split(",") if p.strip()]
-        definition = ModuleDefinition(
-            name=name,
-            display_name=display_name or name,
-            plugins=plugins_list,
-            description=description or None,
-            enabled=enabled,
-        )
-        try:
+
+            plugins_list = [p.strip() for p in plugins.split(",") if p.strip()]
+            definition = ModuleDefinition(
+                name=normalized_name,
+                display_name=new_display,
+                plugins=plugins_list,
+                description=description.strip() or None,
+                enabled=enabled,
+            )
+            if normalized_original and normalized_original != normalized_name:
+                delete_module(data_dir, normalized_original)
             upsert_module(data_dir, definition)
             modules = list_modules(data_dir, config)
         except Exception as exc:
@@ -666,16 +647,27 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 f"❌ 保存失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        return render("_modules_table.html.jinja2", request=request, modules=modules)
+        return render(
+            "_modules_table.html.jinja2",
+            request=request,
+            modules=modules,
+            headers={
+                "HX-Trigger": (
+                    '{"toast":"Module saved","toastType":"success",'
+                    '"refresh":"#module-form-panel",'
+                    '"refreshUrl":"/ruok/_actions/module-edit-form"}'
+                )
+            },
+        )
 
-    @router.post("/ruok/_actions/module-delete/{name}")
+    @router.post("/ruok/_actions/module-delete")
     async def action_module_delete(
-        name: str,
         request: Request,
+        name: str = Form(...),
         _guard_ok: None = Depends(_webui_guard),
     ) -> HTMLResponse:
         try:
-            delete_module(data_dir, name)
+            delete_module(data_dir, name.strip())
             modules = list_modules(data_dir, config)
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_module_delete {name}", data_dir)
@@ -686,71 +678,32 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             )
         return render("_modules_table.html.jinja2", request=request, modules=modules)
 
-    # ── Inline edit ──
-
-    @router.get("/ruok/_actions/module-edit-form/{name}")
+    @router.get("/ruok/_actions/module-edit-form")
     async def action_module_edit_form(
-        name: str,
+        name: str = "",
         _guard_ok: None = Depends(_webui_guard),
     ) -> HTMLResponse:
         try:
+            plugin_names = _plugin_names()
+            if not name:
+                return render(
+                    "_module_form.html.jinja2",
+                    module=None,
+                    all_plugins=plugin_names,
+                )
             mod = get_module(data_dir, config, name)
             if mod is None:
                 return HTMLResponse("<p>Module not found</p>", status_code=404)
-            return HTMLResponse(_render_module_edit_row(mod))
+            return render(
+                "_module_form.html.jinja2",
+                module=mod,
+                all_plugins=plugin_names,
+            )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_module_edit_form {name}", data_dir)
             return HTMLResponse(
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
-                status_code=500,
-            )
-
-    @router.post("/ruok/_actions/module-edit-save/{name}")
-    async def action_module_edit_save(
-        name: str,
-        display_name: str = Form(""),
-        description: str = Form(""),
-        plugins: str = Form(""),
-        _guard_ok: None = Depends(_webui_guard),
-    ) -> HTMLResponse:
-        try:
-            mod = get_module(data_dir, config, name)
-            if mod is None:
-                return HTMLResponse("<p>Module not found</p>", status_code=404)
-            # Validate display_name uniqueness
-            new_display = display_name.strip()
-            if new_display and new_display != mod.display_name:
-                all_modules = list_modules(data_dir, config)
-                for m in all_modules:
-                    if m.name != name and m.display_name == new_display:
-                        return HTMLResponse(
-                            f'<p style="color:var(--pico-del-color);">'
-                            f'❌ 显示名 "{new_display}" 已被模块 '
-                            f'"{m.display_name or m.name}" 使用</p>',
-                            status_code=400,
-                        )
-            plugins_list = [p.strip() for p in plugins.split(",") if p.strip()]
-            definition = ModuleDefinition(
-                name=name,
-                display_name=new_display or name,
-                plugins=plugins_list,
-                description=description.strip() or None,
-                enabled=mod.enabled,
-            )
-            upsert_module(data_dir, definition)
-            # Return refreshed modules table
-            modules = list_modules(data_dir, config)
-            return render(
-                "_modules_table.html.jinja2",
-                request=None,
-                modules=modules,
-            )
-        except Exception as exc:
-            sid = _handle_ruok_error(exc, f"action_module_edit_save {name}", data_dir)
-            return HTMLResponse(
-                f'<p style="color:var(--pico-del-color);">'
-                f"❌ 保存失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
 

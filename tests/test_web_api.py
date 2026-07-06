@@ -34,6 +34,18 @@ def _load_notification_rules(config, data_dir: Path):
     return _load_rules(data_dir, config)
 
 
+def _upsert_module(data_dir: Path, module) -> None:
+    from nonebot_plugin_ruok.collectors.modules import upsert_module
+
+    upsert_module(data_dir, module)
+
+
+def _module_names(config, data_dir: Path) -> list[str]:
+    from nonebot_plugin_ruok.collectors.modules import list_modules
+
+    return [module.name for module in list_modules(data_dir, config)]
+
+
 def test_api_key_required_when_configured(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.config import ScopedConfig
 
@@ -264,3 +276,119 @@ def test_notification_delete_accepts_special_character_name(tmp_path: Path) -> N
     rules = _load_notification_rules(config, tmp_path)
     assert response.status_code == 200
     assert [rule.name for rule in rules] == ["keep"]
+
+
+def test_modules_page_uses_form_panel_and_card_actions(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    client = _client(ScopedConfig(), tmp_path)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    assert 'id="module-form-panel"' in response.text
+    assert 'id="module-list"' in response.text
+    assert 'hx-target="closest tr"' not in response.text
+    assert "module-edit-form?" in response.text
+    assert 'hx-post="/ruok/_actions/module-delete"' in response.text
+
+
+def test_module_edit_form_loads_special_character_name(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = ScopedConfig()
+    module_name = "mod with/slash"
+    _upsert_module(
+        tmp_path,
+        ModuleDefinition(
+            name=module_name,
+            display_name="特殊模块",
+            plugins=["plugin_a"],
+            description="desc",
+        ),
+    )
+    client = _client(config, tmp_path)
+
+    response = client.get(
+        "/ruok/_actions/module-edit-form",
+        params={"name": module_name},
+    )
+
+    assert response.status_code == 200
+    assert 'name="original_name"' in response.text
+    assert f'value="{module_name}"' in response.text
+    assert 'value="plugin_a"' in response.text
+
+
+def test_module_edit_renames_without_duplicate(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = ScopedConfig()
+    _upsert_module(tmp_path, ModuleDefinition(name="old/name", display_name="Old"))
+    client = _client(config, tmp_path)
+
+    response = client.post(
+        "/ruok/_actions/module-upsert",
+        data={
+            "original_name": "old/name",
+            "name": "new name",
+            "display_name": "New",
+            "description": "updated",
+            "plugins": "plugin_a,plugin_b",
+            "enabled": "on",
+        },
+    )
+
+    names = _module_names(config, tmp_path)
+    assert response.status_code == 200
+    assert "old/name" not in names
+    assert "new name" in names
+    assert response.headers["HX-Trigger"]
+
+
+def test_module_rename_conflict_returns_400(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = ScopedConfig()
+    _upsert_module(tmp_path, ModuleDefinition(name="first", display_name="First"))
+    _upsert_module(tmp_path, ModuleDefinition(name="second", display_name="Second"))
+    client = _client(config, tmp_path)
+
+    response = client.post(
+        "/ruok/_actions/module-upsert",
+        data={
+            "original_name": "first",
+            "name": "second",
+            "display_name": "First",
+            "enabled": "on",
+        },
+    )
+
+    names = _module_names(config, tmp_path)
+    assert response.status_code == 400
+    assert "first" in names
+    assert "second" in names
+
+
+def test_module_delete_accepts_special_character_name(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = ScopedConfig()
+    module_name = "mod with/slash"
+    _upsert_module(tmp_path, ModuleDefinition(name=module_name))
+    _upsert_module(tmp_path, ModuleDefinition(name="keep"))
+    client = _client(config, tmp_path)
+
+    response = client.post(
+        "/ruok/_actions/module-delete",
+        data={"name": module_name},
+    )
+
+    names = _module_names(config, tmp_path)
+    assert response.status_code == 200
+    assert module_name not in names
+    assert "keep" in names
