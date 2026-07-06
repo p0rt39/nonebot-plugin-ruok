@@ -27,7 +27,6 @@
                 <tr><td><strong>来源</strong></td><td>{{ session.source }}</td></tr>
                 <tr><td><strong>模块</strong></td><td>{{ session.module_name }}</td></tr>
                 <tr><td><strong>签名</strong></td><td><code>{{ session.error_signature or '—' }}</code></td></tr>
-                <tr><td><strong>描述</strong></td><td><pre style="white-space: pre-wrap; font-size: 0.9em;">{{ session.description }}</pre></td></tr>
             </table>
         </div>
         <div>
@@ -41,6 +40,23 @@
         </div>
     </div>
 </article>
+
+<!-- Submitted Description / Automatic Error Summary -->
+<article>
+    <h4>{% if session.source == 'manual' %}🧾 用户提交说明{% else %}🧾 异常摘要{% endif %}</h4>
+    {% if session_description %}
+    <pre class="session-description-block">{{ session_description }}</pre>
+    {% else %}
+    <p style="opacity:0.6;">暂无说明</p>
+    {% endif %}
+</article>
+
+{% if session_traceback %}
+<article>
+    <h4>🧵 Traceback</h4>
+    <pre class="session-traceback"><code>{{ session_traceback }}</code></pre>
+</article>
+{% endif %}
 
 <!-- Timeline -->
 <article>
@@ -144,6 +160,22 @@
         gap: 0.5rem;
         padding: 0.5rem 0;
         border-bottom: 1px solid rgba(0,0,0,0.06);
+    }
+    .session-description-block,
+    .session-traceback {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 0;
+        padding: 0.85rem;
+        border-radius: var(--radius-sm);
+        background: rgba(0,0,0,0.04);
+    }
+    .session-traceback {
+        max-height: 520px;
+        overflow: auto;
+    }
+    .session-traceback code {
+        white-space: inherit;
     }
 </style>
 

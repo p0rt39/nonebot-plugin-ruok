@@ -158,6 +158,56 @@ def test_dashboard_trends_do_not_replace_canvas_with_htmx(tmp_path: Path) -> Non
     assert "ruok:metrics" in response.text
 
 
+def test_session_detail_renders_manual_description_separately(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    session = create_session(
+        tmp_path,
+        "music",
+        "用户描述第一行\n用户描述第二行",
+        ReporterInfo(type="user", user_id="u1"),
+        source="manual",
+    )
+    client = _client(ScopedConfig(), tmp_path)
+
+    response = client.get(f"/ruok/sessions/{session.session_id}")
+
+    assert response.status_code == 200
+    assert "用户提交说明" in response.text
+    assert 'class="session-description-block"' in response.text
+    assert "用户描述第一行" in response.text
+    assert "<strong>描述</strong>" not in response.text
+
+
+def test_session_detail_renders_automatic_traceback_as_code_block(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    session = create_session(
+        tmp_path,
+        "ruok",
+        "**异常类型**: RuntimeError\n\n```\nTraceback line 1\nRuntimeError: boom\n```",
+        ReporterInfo(type="automatic"),
+        source="automatic",
+    )
+    client = _client(ScopedConfig(), tmp_path)
+
+    response = client.get(f"/ruok/sessions/{session.session_id}")
+
+    assert response.status_code == 200
+    assert "异常摘要" in response.text
+    assert "Traceback" in response.text
+    assert '<pre class="session-traceback"><code>Traceback line 1' in response.text
+    assert "RuntimeError: boom" in response.text
+
+
 def test_notifications_page_uses_form_panel_and_card_actions(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.config import ScopedConfig
 

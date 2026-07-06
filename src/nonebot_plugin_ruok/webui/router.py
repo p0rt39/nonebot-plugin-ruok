@@ -103,6 +103,22 @@ def _module_detail_url(name: str) -> str:
     return f"/ruok/modules/{quote(name, safe='')}"
 
 
+def _split_session_description(description: str) -> tuple[str, str]:
+    """Split a session description into prose and fenced code content."""
+    marker = "```"
+    start = description.find(marker)
+    if start == -1:
+        return description.strip(), ""
+
+    end = description.find(marker, start + len(marker))
+    if end == -1:
+        return description.strip(), ""
+
+    prose = description[:start].strip()
+    code = description[start + len(marker) : end].strip()
+    return prose, code
+
+
 def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     """Build SSR router for the RuOK WebUI."""
     router = APIRouter(tags=["ruok-webui"])
@@ -264,10 +280,15 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             if session is None:
                 return HTMLResponse("<p>Session not found</p>", status_code=404)
             linked = get_linked_sessions(data_dir, session_id)
+            session_description, session_traceback = _split_session_description(
+                session.description
+            )
             return render(
                 "sessions_detail.html.jinja2",
                 request=request,
                 session=session,
+                session_description=session_description,
+                session_traceback=session_traceback,
                 linked_sessions=linked,
             )
         except Exception as exc:
