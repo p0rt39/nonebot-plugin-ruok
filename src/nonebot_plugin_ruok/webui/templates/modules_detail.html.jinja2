@@ -28,9 +28,22 @@
 </article>
 
 <!-- Actions -->
-<div style="margin-bottom:1.5rem;">
+<div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1.5rem;">
     <a href="/ruok/modules" role="button" class="secondary outline">← Back to Modules</a>
+    <form hx-post="/ruok/_actions/module-delete"
+          hx-target="body"
+          hx-swap="none"
+          hx-confirm="确定删除模块「{{ module.display_name or module.name }}」？"
+          style="margin:0;">
+        <input type="hidden" name="name" value="{{ module.name }}">
+        <input type="hidden" name="redirect_to" value="/ruok/modules">
+        <button type="submit" class="outline secondary">删除模块</button>
+    </form>
 </div>
+
+<!-- Edit Module -->
+<h4>✏️ 编辑模块</h4>
+{% include "_module_form.html.jinja2" %}
 
 <!-- Linked Plugins -->
 {% if linked_plugins %}

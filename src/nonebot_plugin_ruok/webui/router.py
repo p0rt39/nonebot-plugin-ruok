@@ -7,6 +7,7 @@ import asyncio
 from typing import Any
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import Form, Query, Depends, Request, APIRouter, HTTPException
 from fastapi.responses import (
@@ -59,6 +60,32 @@ def _query_metrics_history(data_dir: Path, hours: float = 1.0) -> list[dict[str,
 def _plugin_names() -> list[str]:
     """Return loaded plugin names for module form suggestions."""
     return [plugin.name for plugin in _collect_plugin_inventory(skip_ruok=False)]
+
+
+def _extra_module_plugins(
+    module: ModuleDefinition | None, plugin_names: list[str]
+) -> list[str]:
+    """Return configured module plugins that are not in the loaded plugin list."""
+    if module is None:
+        return []
+    loaded = set(plugin_names)
+    return [plugin for plugin in module.plugins if plugin not in loaded]
+
+
+def _parse_module_plugins(selected: list[str], raw: str) -> list[str]:
+    """Parse selected and manually typed plugin names, preserving order."""
+    parsed: list[str] = []
+    for item in [*selected, raw]:
+        for plugin in item.replace("\n", ",").split(","):
+            name = plugin.strip()
+            if name and name not in parsed:
+                parsed.append(name)
+    return parsed
+
+
+def _module_detail_url(name: str) -> str:
+    """Build a WebUI module detail URL for arbitrary module names."""
+    return f"/ruok/modules/{quote(name, safe='')}"
 
 
 def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
@@ -249,6 +276,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 request=request,
                 modules=modules,
                 all_plugins=plugin_names,
+                extra_plugins=[],
                 module=None,
             )
         except Exception as exc:
@@ -259,7 +287,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=500,
             )
 
-    @router.get("/ruok/modules/{name}", response_class=HTMLResponse)
+    @router.get("/ruok/modules/{name:path}", response_class=HTMLResponse)
     async def page_module_detail(
         request: Request, name: str, _guard_ok=Depends(_webui_guard)
     ) -> HTMLResponse:
@@ -271,6 +299,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             sessions = list_sessions(data_dir, module_name=name)
             # Plugin health for associated plugins
             all_plugins = _collect_plugin_inventory(skip_ruok=False)
+            plugin_names = [plugin.name for plugin in all_plugins]
             linked_plugins = [p for p in all_plugins if p.name in mod.plugins]
             return render(
                 "modules_detail.html.jinja2",
@@ -278,6 +307,8 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 module=mod,
                 sessions=sessions,
                 linked_plugins=linked_plugins,
+                all_plugins=plugin_names,
+                extra_plugins=_extra_module_plugins(mod, plugin_names),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"page_module_detail {name}", data_dir)
@@ -586,7 +617,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             linked_sessions=linked,
         )
 
-    @router.post("/ruok/_actions/module-upsert")
+    @router.post("/ruok/_actions/module-upsert", response_model=None)
     async def action_module_upsert(
         request: Request,
         name: str = Form(...),
@@ -594,9 +625,11 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         display_name: str = Form(""),
         description: str = Form(""),
         plugins: str = Form(""),
+        selected_plugins: list[str] = Form(default_factory=list),
+        return_to_detail: bool = Form(False),
         enabled: bool = Form(True),
         _guard_ok: None = Depends(_webui_guard),
-    ) -> HTMLResponse:
+    ) -> HTMLResponse | JSONResponse:
         try:
             normalized_name = name.strip()
             normalized_original = original_name.strip()
@@ -628,7 +661,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                         status_code=400,
                     )
 
-            plugins_list = [p.strip() for p in plugins.split(",") if p.strip()]
+            plugins_list = _parse_module_plugins(selected_plugins, plugins)
             definition = ModuleDefinition(
                 name=normalized_name,
                 display_name=new_display,
@@ -647,6 +680,14 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 f"❌ 保存失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+        if return_to_detail:
+            return JSONResponse(
+                {"ok": True},
+                headers={
+                    "HX-Redirect": _module_detail_url(normalized_name),
+                    "HX-Trigger": '{"toast":"Module saved","toastType":"success"}',
+                },
+            )
         return render(
             "_modules_table.html.jinja2",
             request=request,
@@ -660,12 +701,13 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             },
         )
 
-    @router.post("/ruok/_actions/module-delete")
+    @router.post("/ruok/_actions/module-delete", response_model=None)
     async def action_module_delete(
         request: Request,
         name: str = Form(...),
+        redirect_to: str = Form("/ruok/modules"),
         _guard_ok: None = Depends(_webui_guard),
-    ) -> HTMLResponse:
+    ) -> HTMLResponse | JSONResponse:
         try:
             delete_module(data_dir, name.strip())
             modules = list_modules(data_dir, config)
@@ -675,6 +717,14 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 删除失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
+            )
+        if redirect_to:
+            return JSONResponse(
+                {"ok": True},
+                headers={
+                    "HX-Redirect": redirect_to,
+                    "HX-Trigger": '{"toast":"Module deleted","toastType":"info"}',
+                },
             )
         return render("_modules_table.html.jinja2", request=request, modules=modules)
 
@@ -690,6 +740,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                     "_module_form.html.jinja2",
                     module=None,
                     all_plugins=plugin_names,
+                    extra_plugins=[],
                 )
             mod = get_module(data_dir, config, name)
             if mod is None:
@@ -698,6 +749,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 "_module_form.html.jinja2",
                 module=mod,
                 all_plugins=plugin_names,
+                extra_plugins=_extra_module_plugins(mod, plugin_names),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_module_edit_form {name}", data_dir)

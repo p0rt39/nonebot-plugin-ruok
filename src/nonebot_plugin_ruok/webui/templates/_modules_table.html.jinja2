@@ -9,7 +9,6 @@
             <th>显示名</th>
             <th>插件数</th>
             <th>描述</th>
-            <th>操作</th>
         </tr>
     </thead>
     <tbody>
@@ -26,28 +25,6 @@
             <td>{{ m.display_name }}</td>
             <td>{{ m.plugins | length }}</td>
             <td>{{ m.description or '—' }}</td>
-            <td>
-                <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;">
-                <button class="outline secondary"
-                        style="width:4.2rem;margin:0;padding:2px 6px;font-size:0.78em;line-height:1.4;display:inline-flex;align-items:center;justify-content:center;"
-                        hx-get="/ruok/_actions/module-edit-form?{{ {'name': m.name} | urlencode }}"
-                        hx-target="#module-form-panel"
-                        hx-swap="innerHTML">
-                    Edit
-                </button>
-                <form hx-post="/ruok/_actions/module-delete"
-                      hx-target="#module-list"
-                      hx-swap="outerHTML"
-                      hx-confirm="确定删除模块「{{ m.display_name or m.name }}」？"
-                      style="display:inline-flex;align-items:center;margin:0;padding:0;">
-                    <input type="hidden" name="name" value="{{ m.name }}">
-                    <button type="submit" class="outline secondary"
-                            style="width:4.2rem;margin:0;padding:2px 6px;font-size:0.78em;line-height:1.4;display:inline-flex;align-items:center;justify-content:center;">
-                        Del
-                    </button>
-                </form>
-                </div>
-            </td>
         </tr>
         {% endfor %}
     </tbody>

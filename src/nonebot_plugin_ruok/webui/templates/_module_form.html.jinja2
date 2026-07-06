@@ -2,11 +2,11 @@
 <details open style="margin-bottom:1.5rem;">
     <summary>{% if current_module %}✏️ 编辑模块{% else %}➕ 添加模块{% endif %}</summary>
     <form hx-post="/ruok/_actions/module-upsert"
-          hx-target="#module-list"
-          hx-swap="outerHTML"
+          {% if current_module %}hx-target="#module-edit-result" hx-swap="innerHTML"{% else %}hx-target="#module-list" hx-swap="outerHTML"{% endif %}
           style="margin-top:1rem;">
         {% if current_module %}
         <input type="hidden" name="original_name" value="{{ current_module.name }}">
+        <input type="hidden" name="return_to_detail" value="true">
         {% endif %}
         <div class="grid">
             <label>
@@ -29,17 +29,24 @@
                    placeholder="可选描述">
         </label>
         <label>
-            关联插件 (逗号分隔，可输入筛选)
-            <input type="text" name="plugins" list="plugin-list"
-                   value="{{ current_module.plugins | join(',') if current_module else '' }}"
-                   placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">
+            已加载插件
             {% if all_plugins %}
-            <datalist id="plugin-list">
+            <select name="selected_plugins" multiple size="{{ [all_plugins|length, 8]|min }}">
                 {% for p in all_plugins %}
-                <option value="{{ p }}">
+                <option value="{{ p }}"
+                        {% if current_module and p in current_module.plugins %}selected{% endif %}>
+                    {{ p }}
+                </option>
                 {% endfor %}
-            </datalist>
+            </select>
+            {% else %}
+            <input type="text" disabled value="暂无已加载插件">
             {% endif %}
+        </label>
+        <label>
+            其他插件名 (逗号或换行分隔)
+            <textarea name="plugins" rows="3"
+                      placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">{{ extra_plugins | default([]) | join(',') }}</textarea>
         </label>
         <label>
             <input type="checkbox" name="enabled"
@@ -49,13 +56,9 @@
         <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
             <button type="submit">保存</button>
             {% if current_module %}
-            <button type="button" class="outline secondary"
-                    hx-get="/ruok/_actions/module-edit-form"
-                    hx-target="#module-form-panel"
-                    hx-swap="innerHTML">
-                取消
-            </button>
+            <a href="/ruok/modules" role="button" class="outline secondary">返回模块列表</a>
             {% endif %}
         </div>
+        <div id="module-edit-result"></div>
     </form>
 </details>
