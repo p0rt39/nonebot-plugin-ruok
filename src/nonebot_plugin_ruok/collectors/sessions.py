@@ -126,7 +126,7 @@ def list_sessions(
         plugin_name: Only sessions whose module_name matches a ModuleDefinition
                      that includes this plugin in its ``plugins`` list.
     """
-    sessions: list[Session] = []
+    session_rows: list[tuple[Session, int]] = []
     statuses = {s.strip() for s in status.split(",")} if status else None
 
     module_plugin_names: dict[str, set[str]] | None = None
@@ -159,9 +159,16 @@ def list_sessions(
             q = search.lower()
             if not _session_matches_search(s, q):
                 continue
-        sessions.append(s)
-    sessions.sort(key=lambda s: s.last_seen_at, reverse=True)
-    return sessions
+        try:
+            mtime_ns = f.stat().st_mtime_ns
+        except OSError:
+            mtime_ns = 0
+        session_rows.append((s, mtime_ns))
+    session_rows.sort(
+        key=lambda row: (row[0].last_seen_at, row[1], row[0].session_id),
+        reverse=True,
+    )
+    return [s for s, _ in session_rows]
 
 
 def update_session(

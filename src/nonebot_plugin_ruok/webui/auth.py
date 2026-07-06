@@ -6,6 +6,7 @@ Protects /ruok SSR pages; does NOT affect /ruok/api/* endpoints.
 from __future__ import annotations
 
 import hashlib
+import secrets
 
 from fastapi import Form, Request, APIRouter
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -14,10 +15,21 @@ from .jinja import render
 
 
 def verify_password(plain: str, stored_hash: str) -> bool:
-    """Compare a plaintext password against its SHA-256 hex digest."""
-    if not stored_hash:
+    """Compare a plaintext password against configured password data.
+
+    ``RUOK__WEBUI_PASSWORD`` is documented as a plaintext password.  Keep
+    accepting SHA-256 hex digests for users who followed the previous
+    implementation detail.
+    """
+    stored = stored_hash.strip()
+    if not stored:
         return True  # no password configured = allow all
-    return hashlib.sha256(plain.encode()).hexdigest() == stored_hash
+
+    if len(stored) == 64 and all(c in "0123456789abcdefABCDEF" for c in stored):
+        digest = hashlib.sha256(plain.encode()).hexdigest()
+        return secrets.compare_digest(digest, stored.lower())
+
+    return secrets.compare_digest(plain, stored)
 
 
 def hash_password(plain: str) -> str:

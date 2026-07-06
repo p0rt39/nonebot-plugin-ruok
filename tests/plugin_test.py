@@ -1,4 +1,5 @@
 """Tests for /ruok bot commands using nonebug + OneBot V11 fake events."""
+
 import pytest
 from fake import fake_group_message_event_v11
 from nonebug import App
@@ -73,4 +74,3 @@ async def test_ruok_status_builtin_module(app: App) -> None:
             bot=bot,
         )
         ctx.should_finished()
-

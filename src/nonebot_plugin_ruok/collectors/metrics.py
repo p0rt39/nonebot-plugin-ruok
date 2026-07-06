@@ -413,13 +413,12 @@ async def collect_all_statuses(
     # ── 2. Degraded ───────────────────────────────────
     if overall == "available":
         # 2a. Any module degraded or unavailable
+        cpu_pct: float | None = None
         bad_modules = [m for m in modules if m.status in ("degraded", "unavailable")]
         if bad_modules:
             overall = "degraded"
             for m in bad_modules:
-                reasons.append(
-                    f'模块 "{m.display_name or m.name}" 状态为 {m.status}'
-                )
+                reasons.append(f'模块 "{m.display_name or m.name}" 状态为 {m.status}')
 
         # 2b. CPU >= 90% (instant trigger)
         if overall == "available":
@@ -430,13 +429,10 @@ async def collect_all_statuses(
 
         # 2c. CPU >= 70% sustained for 10+ minutes
         if overall == "available" and cpu_pct is not None and cpu_pct >= 70.0:
-            if _threshold_exceeded_for(
-                data_dir, "cpu_percent", 70.0, minutes=10.0
-            ):
+            if _threshold_exceeded_for(data_dir, "cpu_percent", 70.0, minutes=10.0):
                 overall = "degraded"
                 reasons.append(
-                    f"CPU 使用率 ≥ 70% 已持续超过 10 分钟"
-                    f"（当前 {cpu_pct:.1f}%）"
+                    f"CPU 使用率 ≥ 70% 已持续超过 10 分钟（当前 {cpu_pct:.1f}%）"
                 )
 
         # 2d. RAM >= 90% sustained for 10+ minutes
@@ -448,8 +444,7 @@ async def collect_all_statuses(
                 ):
                     overall = "degraded"
                     reasons.append(
-                        f"内存使用率 ≥ 90% 已持续超过 10 分钟"
-                        f"（当前 {mem_pct:.1f}%）"
+                        f"内存使用率 ≥ 90% 已持续超过 10 分钟（当前 {mem_pct:.1f}%）"
                     )
 
     if overall == "available":
@@ -559,7 +554,7 @@ async def collect_fast_metrics() -> FastMetricsSnapshot:
     """Lightweight snapshot for real-time gauges (no disk/network/plugins)."""
     import os
 
-    def _get() -> dict[str, Any]:
+    def _get() -> FastMetricsSnapshot:
         import psutil
 
         cpu_overall = psutil.cpu_percent(interval=1.0)

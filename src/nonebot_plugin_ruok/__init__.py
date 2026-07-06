@@ -146,6 +146,10 @@ async def handle_ruok(
 
 async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
     """Handle /ruok no <module> <description>"""
+    if not plugin_config.session_enabled:
+        await ruok_cmd.finish("⚠️ Session 系统未启用，无法上报问题。")
+        return
+
     if not await _can_report(event):
         await ruok_cmd.finish(
             "❌ 你没有权限上报问题。需要：群管理员 / 白名单 / SUPERUSER"

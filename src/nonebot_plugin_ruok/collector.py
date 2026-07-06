@@ -151,13 +151,11 @@ class MetricsStore:
         metrics_dir = MetricsStore._metrics_dir(data_dir)
         points: list[MetricPoint] = []
 
-        # We only look at the last 2 days of files (today + yesterday)
-        today_str = datetime.now(timezone.utc).date().isoformat()
-        yesterday_str = (
-            datetime.now(timezone.utc).date() - timedelta(days=1)
-        ).isoformat()
+        today = datetime.now(timezone.utc).date()
+        days = max(1, int(hours // 24) + 2)
 
-        for date_str in (today_str, yesterday_str):
+        for offset in range(days):
+            date_str = (today - timedelta(days=offset)).isoformat()
             fpath = metrics_dir / f"{date_str}.json"
             if not fpath.exists():
                 continue

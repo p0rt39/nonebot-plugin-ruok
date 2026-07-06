@@ -3,7 +3,31 @@
 All imports from nonebot_plugin_ruok are inside test functions
 to avoid __init__.py's require() before NoneBot init.
 """
+
 import pytest
+
+
+class TestMetricsStore:
+    def test_query_loads_more_than_two_days(self, tmp_path) -> None:
+        import json
+        from datetime import datetime, timezone, timedelta
+
+        from nonebot_plugin_ruok.protocol import MetricPoint
+        from nonebot_plugin_ruok.collector import MetricsStore
+
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir()
+        old_ts = datetime.now(timezone.utc) - timedelta(days=3)
+        point = MetricPoint(ts=old_ts.isoformat(), cpu_percent=12.0)
+        (metrics_dir / f"{old_ts.date().isoformat()}.json").write_text(
+            json.dumps([point.model_dump(mode="json")]),
+            encoding="utf-8",
+        )
+
+        points = MetricsStore.query(tmp_path, hours=96)
+
+        assert len(points) == 1
+        assert points[0].cpu_percent == 12.0
 
 
 class TestCollectFastMetrics:

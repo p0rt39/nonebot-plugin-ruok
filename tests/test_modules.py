@@ -3,6 +3,7 @@
 All imports from nonebot_plugin_ruok are inside test functions
 to avoid __init__.py's require() before NoneBot init.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -62,7 +63,8 @@ class TestUpsertModule:
 
         config = ScopedConfig()
         definition = ModuleDefinition(
-            name="music", display_name="音乐",
+            name="music",
+            display_name="音乐",
             plugins=["nonebot_plugin_music"],
         )
         upsert_module(tmp_path, definition)
@@ -94,9 +96,13 @@ class TestDeleteModule:
         )
 
         config = ScopedConfig()
-        upsert_module(tmp_path, ModuleDefinition(
-            name="test-del", display_name="ToDelete",
-        ))
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(
+                name="test-del",
+                display_name="ToDelete",
+            ),
+        )
         assert delete_module(tmp_path, "test-del") is True
         modules = list_modules(tmp_path, config)
         assert not any(m.name == "test-del" for m in modules)
@@ -117,9 +123,13 @@ class TestGetModule:
         )
 
         config = ScopedConfig()
-        upsert_module(tmp_path, ModuleDefinition(
-            name="test-get", display_name="GetTest",
-        ))
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(
+                name="test-get",
+                display_name="GetTest",
+            ),
+        )
         mod = get_module(tmp_path, config, "test-get")
         assert mod is not None
         assert mod.name == "test-get"
@@ -191,9 +201,13 @@ class TestResolveModuleDisplay:
         )
 
         config = ScopedConfig()
-        upsert_module(tmp_path, ModuleDefinition(
-            name="weather", display_name="天气查询",
-        ))
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(
+                name="weather",
+                display_name="天气查询",
+            ),
+        )
         resolved = resolve_module_display("weather", tmp_path, config)
         assert resolved is not None
         assert resolved.name == "weather"
@@ -208,9 +222,13 @@ class TestResolveModuleDisplay:
         )
 
         config = ScopedConfig()
-        upsert_module(tmp_path, ModuleDefinition(
-            name="music", display_name="网易云音乐",
-        ))
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(
+                name="music",
+                display_name="网易云音乐",
+            ),
+        )
         resolved = resolve_module_display("网易云音乐", tmp_path, config)
         assert resolved is not None
         assert resolved.name == "music"
@@ -221,7 +239,5 @@ class TestResolveModuleDisplay:
             resolve_module_display,
         )
 
-        resolved = resolve_module_display(
-            "unknown", tmp_path, ScopedConfig()
-        )
+        resolved = resolve_module_display("unknown", tmp_path, ScopedConfig())
         assert resolved is None

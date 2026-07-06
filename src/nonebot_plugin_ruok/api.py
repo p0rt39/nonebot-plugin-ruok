@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import time
 import asyncio
+import secrets
 from typing import Any
 from pathlib import Path
 
-from fastapi import Query, Request, APIRouter, HTTPException
+from fastapi import Query, Header, Depends, Request, APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from .config import ScopedConfig
@@ -52,10 +53,26 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         _cache_time[key] = now
         return result
 
+    def _require_api_key(
+        x_ruok_api_key: str | None = Header(None),
+        authorization: str | None = Header(None),
+    ) -> None:
+        if not config.api_key:
+            return
+
+        token = x_ruok_api_key or ""
+        if authorization:
+            scheme, _, value = authorization.partition(" ")
+            if scheme.lower() == "bearer":
+                token = value
+
+        if not secrets.compare_digest(token, config.api_key):
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
     # ── Health ────────────────────
 
     @router.get("/status")
-    async def api_status() -> dict[str, Any]:
+    async def api_status(_: None = Depends(_require_api_key)) -> dict[str, Any]:
         """Aggregated bot health status."""
         data = _cached("status", lambda: None)
         if data is None:
@@ -65,7 +82,9 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return data.model_dump(mode="json")
 
     @router.get("/health", response_model=None)
-    async def api_health() -> dict[str, Any] | JSONResponse:
+    async def api_health(
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any] | JSONResponse:
         """Simple health check for K8s / Docker / Uptime."""
         data = _cached("status", lambda: None)
         if data is None:
@@ -83,7 +102,9 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return {"status": "healthy", "overall": data.overall}
 
     @router.get("/connections")
-    async def api_connections() -> list[dict[str, Any]]:
+    async def api_connections(
+        _: None = Depends(_require_api_key),
+    ) -> list[dict[str, Any]]:
         """WS connection status only (lightweight)."""
         # connections are always fresh, no caching
         status = await collect_all_statuses(config, data_dir)
@@ -93,6 +114,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.get("/sessions")
     async def api_list_sessions(
+        _: None = Depends(_require_api_key),
         status: str | None = Query(None),
         module: str | None = Query(None),
         reporter: str | None = Query(None),
@@ -123,8 +145,14 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return [s.model_dump(mode="json") for s in sessions]
 
     @router.post("/sessions")
-    async def api_create_session(request: Request) -> dict[str, Any]:
+    async def api_create_session(
+        request: Request,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Create a session via API (for WebUI)."""
+        if not config.session_enabled:
+            raise HTTPException(status_code=403, detail="Session system disabled")
+
         body = await request.json()
         module_name = body.get("module_name", "")
         description = body.get("description", "")
@@ -144,8 +172,17 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         _cache.pop("status", None)  # invalidate cache
         return session.model_dump(mode="json")
 
+    @router.get("/sessions/stats")
+    async def api_session_stats(_: None = Depends(_require_api_key)) -> dict[str, Any]:
+        """Return aggregate session statistics."""
+        stats = get_session_stats(data_dir)
+        return stats.model_dump(mode="json")
+
     @router.get("/sessions/{session_id}")
-    async def api_get_session(session_id: str) -> dict[str, Any]:
+    async def api_get_session(
+        session_id: str,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Get a single session with all occurrences."""
         session = get_session(data_dir, session_id)
         if session is None:
@@ -153,8 +190,15 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return session.model_dump(mode="json")
 
     @router.patch("/sessions/{session_id}")
-    async def api_update_session(session_id: str, request: Request) -> dict[str, Any]:
+    async def api_update_session(
+        session_id: str,
+        request: Request,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Update session status / notes."""
+        if not config.session_enabled:
+            raise HTTPException(status_code=403, detail="Session system disabled")
+
         body = await request.json()
         updates = {k: v for k, v in body.items() if k in ("status", "developer_notes")}
         session = update_session(data_dir, session_id, updates)
@@ -164,8 +208,15 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return session.model_dump(mode="json")
 
     @router.post("/sessions/{session_id}/link/{other_id}")
-    async def api_link_sessions(session_id: str, other_id: str) -> dict[str, Any]:
+    async def api_link_sessions(
+        session_id: str,
+        other_id: str,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Link two sessions into the same link_group."""
+        if not config.session_enabled:
+            raise HTTPException(status_code=403, detail="Session system disabled")
+
         ok = link_sessions(data_dir, session_id, other_id)
         if not ok:
             raise HTTPException(
@@ -175,8 +226,14 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return {"linked": True, "link_group": s.link_group if s else None}
 
     @router.delete("/sessions/{session_id}/link")
-    async def api_unlink_session(session_id: str) -> dict[str, Any]:
+    async def api_unlink_session(
+        session_id: str,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Remove a session from its link_group."""
+        if not config.session_enabled:
+            raise HTTPException(status_code=403, detail="Session system disabled")
+
         ok = unlink_session(data_dir, session_id)
         if not ok:
             raise HTTPException(
@@ -185,7 +242,10 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return {"unlinked": True}
 
     @router.get("/sessions/{session_id}/linked")
-    async def api_get_linked_sessions(session_id: str) -> dict[str, Any]:
+    async def api_get_linked_sessions(
+        session_id: str,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Get all sessions in the same link_group."""
         session = get_session(data_dir, session_id)
         if session is None:
@@ -199,12 +259,17 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     # ── Modules ───────────────────
 
     @router.get("/modules")
-    async def api_list_modules() -> list[dict[str, Any]]:
+    async def api_list_modules(
+        _: None = Depends(_require_api_key),
+    ) -> list[dict[str, Any]]:
         """List modules with real-time status."""
         return [m.model_dump(mode="json") for m in list_modules(data_dir, config)]
 
     @router.get("/modules/{name}")
-    async def api_get_module(name: str) -> dict[str, Any]:
+    async def api_get_module(
+        name: str,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Get one module."""
         mod = get_module(data_dir, config, name)
         if mod is None:
@@ -212,7 +277,11 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return mod.model_dump(mode="json")
 
     @router.put("/modules/{name}")
-    async def api_upsert_module(name: str, request: Request) -> dict[str, Any]:
+    async def api_upsert_module(
+        name: str,
+        request: Request,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Create or update a module definition."""
         body = await request.json()
         definition = ModuleDefinition(
@@ -227,7 +296,10 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return definition.model_dump(mode="json")
 
     @router.delete("/modules/{name}")
-    async def api_delete_module(name: str) -> dict[str, Any]:
+    async def api_delete_module(
+        name: str,
+        _: None = Depends(_require_api_key),
+    ) -> dict[str, Any]:
         """Delete a module definition."""
         ok = delete_module(data_dir, name)
         if not ok:
@@ -239,18 +311,11 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.get("/metrics/history")
     async def api_metrics_history(
+        _: None = Depends(_require_api_key),
         hours: float = Query(24.0, ge=0.5, le=168.0),
     ) -> list[dict[str, Any]]:
         """Return time-series metrics for the last *hours* hours."""
         points = MetricsStore.query(data_dir, hours=hours)
         return [p.model_dump(mode="json") for p in points]
-
-    # ── Session statistics ────────
-
-    @router.get("/sessions/stats")
-    async def api_session_stats() -> dict[str, Any]:
-        """Return aggregate session statistics."""
-        stats = get_session_stats(data_dir)
-        return stats.model_dump(mode="json")
 
     return router
