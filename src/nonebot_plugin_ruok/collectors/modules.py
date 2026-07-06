@@ -7,8 +7,8 @@ from typing import Any
 from pathlib import Path
 
 from ..config import ScopedConfig
-from .sessions import list_sessions
-from ..protocol import ModuleStatus, ModuleDefinition
+from .sessions import list_sessions, build_plugin_impacts, rebuild_plugin_impacts
+from ..protocol import Session, ModuleStatus, ModuleDefinition
 
 # ────────────────────────────────
 # 1. Storage helpers
@@ -69,8 +69,11 @@ def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]
                 _path_write_json(path, [mod.model_dump() for mod in modules])
                 break
 
+    rebuild_plugin_impacts(data_dir)
     for mod in modules:
-        mod.status = derive_module_status(data_dir, mod.name)
+        mod.status, mod.status_reasons = derive_module_status_with_reasons(
+            data_dir, mod.name
+        )
     return modules
 
 
@@ -123,13 +126,94 @@ def delete_module(data_dir: Path, name: str) -> bool:
 
 
 def derive_module_status(data_dir: Path, module_name: str) -> ModuleStatus:
-    """Real-time module status from its sessions."""
-    sessions = list_sessions(data_dir, module_name=module_name)
-    if any(s.status == "unsolved" for s in sessions):
-        return "unavailable"
-    if any(s.status == "pending" for s in sessions):
-        return "degraded"
-    return "available"
+    """Real-time module status from direct sessions and plugin impacts."""
+    status, _reasons = derive_module_status_with_reasons(data_dir, module_name)
+    return status
+
+
+def derive_module_status_with_reasons(
+    data_dir: Path,
+    module_name: str,
+) -> tuple[ModuleStatus, list[str]]:
+    """Return module status and human-readable derivation reasons."""
+    direct_sessions = list_sessions(data_dir, module_name=module_name)
+    reasons: list[str] = []
+    if any(session.status == "unsolved" for session in direct_sessions):
+        reasons.append("存在已确认未解决的本模块 Session")
+        return "unavailable", reasons
+
+    modules_by_name = _load_module_definitions(data_dir)
+    module = modules_by_name.get(module_name)
+    module_plugins = module.plugins if module else []
+    impacts = build_plugin_impacts(data_dir)
+    for plugin_name in module_plugins:
+        unsolved_ids = impacts.get(plugin_name, {}).get("unsolved", [])
+        if unsolved_ids:
+            reasons.append(
+                f"关联插件 {plugin_name} 存在已确认未解决 Session: "
+                + ", ".join(unsolved_ids)
+            )
+            return "unavailable", reasons
+
+    if any(session.status == "pending" for session in direct_sessions):
+        reasons.append("存在待确认的本模块 Session")
+        return "degraded", reasons
+
+    for plugin_name in module_plugins:
+        pending_ids = impacts.get(plugin_name, {}).get("pending", [])
+        if pending_ids:
+            reasons.append(
+                f"关联插件 {plugin_name} 存在待确认 Session: " + ", ".join(pending_ids)
+            )
+            return "degraded", reasons
+
+    return "available", reasons
+
+
+def list_module_related_sessions(data_dir: Path, module_name: str) -> list[Session]:
+    """Return direct and plugin-propagated sessions related to a module."""
+    sessions = list_sessions(data_dir)
+    modules_by_name = _load_module_definitions(data_dir)
+    module = modules_by_name.get(module_name)
+    module_plugins = set(module.plugins if module else [])
+    related: list[Session] = []
+    seen: set[str] = set()
+    for session in sessions:
+        if session.module_name == module_name:
+            related.append(session)
+            seen.add(session.session_id)
+            continue
+        if session.status == "pending":
+            source_module = modules_by_name.get(session.module_name)
+            source_plugins = set(source_module.plugins if source_module else [])
+            if module_plugins.intersection(source_plugins):
+                related.append(session)
+                seen.add(session.session_id)
+            continue
+        if session.status == "unsolved" and module_plugins.intersection(
+            session.affected_plugins
+        ):
+            if session.session_id not in seen:
+                related.append(session)
+                seen.add(session.session_id)
+    return related
+
+
+def _load_module_definitions(data_dir: Path) -> dict[str, ModuleDefinition]:
+    """Load persisted module definitions without status derivation."""
+    path = _modules_path(data_dir)
+    modules: list[ModuleDefinition] = []
+    if path.exists():
+        try:
+            modules = [
+                ModuleDefinition.model_validate(m)
+                for m in json.loads(path.read_text("utf-8"))
+            ]
+        except (json.JSONDecodeError, TypeError, OSError):
+            modules = []
+    if not any(module.name == "ruok" for module in modules):
+        modules.insert(0, _builtin_module())
+    return {module.name: module for module in modules}
 
 
 # ────────────────────────────────

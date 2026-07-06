@@ -165,3 +165,138 @@ def test_session_detail_renders_automatic_traceback_as_code_block(
     assert "Traceback" in response.text
     assert '<pre class="session-traceback"><code>Traceback line 1' in response.text
     assert "RuntimeError: boom" in response.text
+
+
+def test_webui_confirm_form_supports_multiple_affected_plugins(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import get_session, create_session
+
+    config = _webui_config()
+    upsert_module(
+        tmp_path,
+        ModuleDefinition(name="music", plugins=["plugin_a", "plugin_b"]),
+    )
+    session = create_session(
+        tmp_path,
+        "music",
+        "plugin issue",
+        ReporterInfo(type="user"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    page_response = client.get("/ruok/sessions")
+    action_response = client.post(
+        f"/ruok/_actions/confirm/{session.session_id}",
+        data={"affected_plugins": ["plugin_a", "plugin_b"]},
+    )
+    reloaded = get_session(tmp_path, session.session_id)
+
+    assert page_response.status_code == 200
+    assert 'name="affected_plugins" value="plugin_a"' in page_response.text
+    assert 'name="affected_plugins" value="plugin_b"' in page_response.text
+    assert action_response.status_code == 200
+    assert reloaded is not None
+    assert reloaded.status == "unsolved"
+    assert reloaded.affected_plugins == ["plugin_a", "plugin_b"]
+    assert "影响插件: plugin_a, plugin_b" in action_response.text
+
+
+def test_webui_confirm_without_plugins_does_not_propagate(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import get_module, upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import get_session, create_session
+
+    config = _webui_config()
+    upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+    upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+    session = create_session(
+        tmp_path,
+        "music",
+        "local issue",
+        ReporterInfo(type="user"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post(f"/ruok/_actions/confirm/{session.session_id}", data={})
+    reloaded = get_session(tmp_path, session.session_id)
+    lyrics = get_module(tmp_path, config, "lyrics")
+
+    assert response.status_code == 200
+    assert reloaded is not None
+    assert reloaded.status == "unsolved"
+    assert reloaded.affected_plugins == []
+    assert lyrics is not None
+    assert lyrics.status == "available"
+
+
+def test_module_detail_includes_plugin_propagated_sessions(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    config = _webui_config()
+    upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+    upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+    create_session(
+        tmp_path,
+        "music",
+        "propagated pending",
+        ReporterInfo(type="user"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules/lyrics")
+
+    assert response.status_code == 200
+    assert "propagated pending" in response.text
+
+
+def test_api_patch_session_accepts_affected_plugins(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    config = _webui_config(api_key="secret")
+    upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+    session = create_session(tmp_path, "music", "api issue", ReporterInfo(type="user"))
+    client = _client(config, tmp_path)
+
+    response = client.patch(
+        f"/ruok/api/sessions/{session.session_id}",
+        headers={"X-RuOK-API-Key": "secret"},
+        json={"status": "unsolved", "affected_plugins": ["plugin_a"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "unsolved"
+    assert response.json()["affected_plugins"] == ["plugin_a"]
+
+
+def test_api_patch_session_rejects_invalid_affected_plugin(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    config = _webui_config(api_key="secret")
+    upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+    session = create_session(tmp_path, "music", "api issue", ReporterInfo(type="user"))
+    client = _client(config, tmp_path)
+
+    response = client.patch(
+        f"/ruok/api/sessions/{session.session_id}",
+        headers={"X-RuOK-API-Key": "secret"},
+        json={"status": "unsolved", "affected_plugins": ["plugin_b"]},
+    )
+
+    assert response.status_code == 400
+    assert "插件不属于该 Session 原模块" in response.text

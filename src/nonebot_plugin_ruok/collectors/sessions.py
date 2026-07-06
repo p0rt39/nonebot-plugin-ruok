@@ -12,12 +12,18 @@ from datetime import datetime, timezone
 
 from nonebot import logger
 
+from ..config import ScopedConfig
 from ..protocol import (
     Session,
     ReporterInfo,
     SessionStats,
     SessionSource,
 )
+
+
+class SessionPluginValidationError(ValueError):
+    """Raised when requested affected plugins do not belong to the session module."""
+
 
 # ────────────────────────────────
 # 1. Low-level helpers
@@ -46,6 +52,10 @@ def _sessions_dir(data_dir: Path) -> Path:
 
 def _session_path(data_dir: Path, session_id: str) -> Path:
     return _sessions_dir(data_dir) / f"{session_id}.json"
+
+
+def _plugin_impacts_path(data_dir: Path) -> Path:
+    return data_dir / "plugin_impacts.json"
 
 
 def _save_session(data_dir: Path, session: Session) -> None:
@@ -88,6 +98,7 @@ def create_session(
     description: str,
     reporter: ReporterInfo,
     source: SessionSource = "manual",
+    affected_plugins: list[str] | None = None,
 ) -> Session:
     session = Session(
         session_id=_gen_session_id(),
@@ -96,8 +107,10 @@ def create_session(
         module_name=module_name,
         reporter=reporter,
         description=description,
+        affected_plugins=affected_plugins or [],
     )
     _save_session(data_dir, session)
+    rebuild_plugin_impacts(data_dir)
     _publish_session_event("created", session)
     return session
 
@@ -153,7 +166,9 @@ def list_sessions(
             continue
         if plugin_name and module_plugin_names:
             allowed_modules = module_plugin_names.get(plugin_name, set())
-            if s.module_name not in allowed_modules:
+            if s.module_name not in allowed_modules and plugin_name not in (
+                s.affected_plugins
+            ):
                 continue
         if search:
             q = search.lower()
@@ -178,7 +193,13 @@ def update_session(
     if session is None:
         return None
 
-    allowed = {"status", "developer_notes", "last_seen_at", "link_group"}
+    allowed = {
+        "status",
+        "developer_notes",
+        "last_seen_at",
+        "link_group",
+        "affected_plugins",
+    }
     old_status = session.status
     for k, v in updates.items():
         if k in allowed:
@@ -188,9 +209,64 @@ def update_session(
         session.resolved_at = datetime.now(timezone.utc)
 
     _save_session(data_dir, session)
+    if "status" in updates or "affected_plugins" in updates:
+        rebuild_plugin_impacts(data_dir)
     if "status" in updates and updates["status"] != old_status:
         _publish_session_event("updated", session, old_status=old_status)
     return session
+
+
+def confirm_session_plugins(
+    data_dir: Path,
+    config: ScopedConfig,
+    session_id: str,
+    plugins: list[str],
+) -> Session | None:
+    """Confirm a session and persist explicitly affected plugins.
+
+    Empty plugin lists are valid: the session becomes unsolved but only affects
+    its original module directly.
+    """
+    session = _load_session(data_dir, session_id)
+    if session is None:
+        return None
+
+    requested = _normalize_plugin_names(plugins)
+    allowed = _module_plugins(data_dir, config, session.module_name)
+    invalid = [plugin for plugin in requested if plugin not in allowed]
+    if invalid:
+        raise SessionPluginValidationError(
+            "插件不属于该 Session 原模块: " + ", ".join(invalid)
+        )
+
+    return update_session(
+        data_dir,
+        session_id,
+        {"status": "unsolved", "affected_plugins": requested},
+    )
+
+
+def _normalize_plugin_names(plugins: list[str]) -> list[str]:
+    """Trim, split comma-separated plugin names, and preserve order."""
+    parsed: list[str] = []
+    for item in plugins:
+        for raw_name in item.replace("\n", ",").split(","):
+            name = raw_name.strip()
+            if name and name not in parsed:
+                parsed.append(name)
+    return parsed
+
+
+def _module_plugins(
+    data_dir: Path,
+    config: ScopedConfig,
+    module_name: str,
+) -> list[str]:
+    """Return the current plugin list for a module name."""
+    from .modules import get_module
+
+    module = get_module(data_dir, config, module_name)
+    return module.plugins if module else []
 
 
 def _publish_session_event(
@@ -254,6 +330,7 @@ def _handle_ruok_error(
             )
             existing.developer_notes = tb_text
             _save_session(data_dir, existing)
+            rebuild_plugin_impacts(data_dir)
             _publish_session_event("updated", existing)
             return existing.session_id
 
@@ -274,6 +351,7 @@ def _handle_ruok_error(
             developer_notes=tb_text,
         )
         _save_session(data_dir, session)
+        rebuild_plugin_impacts(data_dir)
     except Exception:
         return "N/A"
 
@@ -396,6 +474,50 @@ def _build_module_plugin_map(data_dir: Path) -> dict[str, set[str]]:
     return mapping
 
 
+def build_plugin_impacts(data_dir: Path) -> dict[str, dict[str, list[str]]]:
+    """Build plugin impact index from active sessions.
+
+    This index is derived from Session JSON and is not the authoritative state.
+    """
+    module_plugin_names = _build_module_plugin_map(data_dir)
+    module_to_plugins: dict[str, set[str]] = {}
+    for plugin_name, module_names in module_plugin_names.items():
+        for module_name in module_names:
+            module_to_plugins.setdefault(module_name, set()).add(plugin_name)
+
+    impacts: dict[str, dict[str, list[str]]] = {}
+    for session in list_sessions(data_dir):
+        if session.status == "pending":
+            plugin_names = sorted(module_to_plugins.get(session.module_name, set()))
+            for plugin_name in plugin_names:
+                _append_plugin_impact(impacts, plugin_name, "pending", session)
+        elif session.status == "unsolved":
+            for plugin_name in session.affected_plugins:
+                _append_plugin_impact(impacts, plugin_name, "unsolved", session)
+    return impacts
+
+
+def rebuild_plugin_impacts(data_dir: Path) -> dict[str, dict[str, list[str]]]:
+    """Rebuild and persist plugin impact index from active sessions."""
+    impacts = build_plugin_impacts(data_dir)
+    _plugin_impacts_path(data_dir).write_text(
+        json.dumps(impacts, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return impacts
+
+
+def _append_plugin_impact(
+    impacts: dict[str, dict[str, list[str]]],
+    plugin_name: str,
+    status: str,
+    session: Session,
+) -> None:
+    bucket = impacts.setdefault(plugin_name, {"pending": [], "unsolved": []})
+    if session.session_id not in bucket[status]:
+        bucket[status].append(session.session_id)
+
+
 def _session_matches_search(s: Session, q: str) -> bool:
     """Check if *q* appears in any searchable field of *s*."""
     if q in s.session_id.lower():
@@ -407,6 +529,8 @@ def _session_matches_search(s: Session, q: str) -> bool:
     if s.reporter.user_id and q in s.reporter.user_id.lower():
         return True
     if s.error_signature and q in s.error_signature.lower():
+        return True
+    if any(q in plugin.lower() for plugin in s.affected_plugins):
         return True
     return False
 

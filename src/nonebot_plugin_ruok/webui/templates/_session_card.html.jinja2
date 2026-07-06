@@ -23,6 +23,9 @@
         </div>
         <div>
             <p>{{ s.description[:300] }}{% if s.description|length > 300 %}...{% endif %}</p>
+            {% if s.affected_plugins %}
+            <p><small>影响插件: {{ s.affected_plugins | join(', ') }}</small></p>
+            {% endif %}
         </div>
     </div>
 
@@ -37,12 +40,28 @@
                 📋 详情
             </a>
             {% if s.status == 'pending' %}
-            <button class="secondary outline"
-                    hx-post="/ruok/_actions/confirm/{{ s.session_id }}"
-                    hx-target="#session-{{ s.session_id }}"
-                    hx-swap="outerHTML">
-                ✅ 确认
-            </button>
+            <form hx-post="/ruok/_actions/confirm/{{ s.session_id }}"
+                  hx-target="#session-{{ s.session_id }}"
+                  hx-swap="outerHTML"
+                  style="margin:0;">
+                {% set plugin_options = session_plugin_options(s.module_name) if session_plugin_options is defined else [] %}
+                {% if plugin_options %}
+                <details class="confirm-plugin-picker">
+                    <summary class="secondary outline ruok-button">✅ 确认</summary>
+                    <div class="confirm-plugin-options">
+                        {% for plugin in plugin_options %}
+                        <label>
+                            <input type="checkbox" name="affected_plugins" value="{{ plugin }}">
+                            {{ plugin }}
+                        </label>
+                        {% endfor %}
+                        <button type="submit" class="secondary outline ruok-button">确认 Session</button>
+                    </div>
+                </details>
+                {% else %}
+                <button type="submit" class="secondary outline">✅ 确认</button>
+                {% endif %}
+            </form>
             {% endif %}
             <button class="secondary outline"
                     hx-post="/ruok/_actions/solve/{{ s.session_id }}"

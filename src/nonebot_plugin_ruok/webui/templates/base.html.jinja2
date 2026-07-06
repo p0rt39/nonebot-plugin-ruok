@@ -243,6 +243,34 @@
             margin-bottom: 0;
             text-align: center;
         }
+        .confirm-plugin-picker {
+            position: relative;
+            margin: 0;
+        }
+        .confirm-plugin-picker summary {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            list-style: none;
+            cursor: pointer;
+        }
+        .confirm-plugin-picker summary::-webkit-details-marker {
+            display: none;
+        }
+        .confirm-plugin-options {
+            display: grid;
+            gap: 0.45rem;
+            margin-top: 0.45rem;
+            padding: 0.65rem;
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            background: var(--card-bg);
+            box-shadow: var(--shadow-md);
+        }
+        .confirm-plugin-options label {
+            margin: 0;
+            overflow-wrap: anywhere;
+        }
 
         /* ── Form inputs ── */
         input, select, textarea {

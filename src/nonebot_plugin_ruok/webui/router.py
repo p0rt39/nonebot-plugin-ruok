@@ -36,6 +36,7 @@ from ..protocol import (
 )
 from ..collector import (
     MetricsStore,
+    SessionPluginValidationError,
     get_module,
     get_session,
     list_modules,
@@ -52,7 +53,9 @@ from ..collector import (
     get_linked_sessions,
     collect_all_statuses,
     collect_fast_metrics,
+    confirm_session_plugins,
     _collect_plugin_inventory,
+    list_module_related_sessions,
 )
 
 
@@ -125,6 +128,16 @@ def _account_reporter_id(user: CurrentWebUIUser) -> str | None:
 def _account_reporter_platform(user: CurrentWebUIUser) -> str:
     """Return the reporter platform marker used for WebUI manual reports."""
     return "webui"
+
+
+def _module_plugin_options(
+    data_dir: Path,
+    config: ScopedConfig,
+    module_name: str,
+) -> list[str]:
+    """Return plugin options for a module without failing unknown modules."""
+    module = get_module(data_dir, config, module_name)
+    return module.plugins if module else []
 
 
 def _reporter_identity(user_id: str, platform: str | None) -> str:
@@ -452,6 +465,9 @@ def create_webui_router(
                 current_after=after,
                 current_before=before,
                 reporter_display=_reporter_display_factory(auth.list_users()),
+                session_plugin_options=lambda module_name: _module_plugin_options(
+                    data_dir, config, module_name
+                ),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_sessions", data_dir)
@@ -484,6 +500,9 @@ def create_webui_router(
                 session_traceback=session_traceback,
                 linked_sessions=linked,
                 reporter_display=_reporter_display_factory(auth.list_users()),
+                session_plugin_options=lambda module_name: _module_plugin_options(
+                    data_dir, config, module_name
+                ),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"page_session_detail {session_id}", data_dir)
@@ -530,7 +549,7 @@ def create_webui_router(
             if mod is None:
                 return HTMLResponse("<p>Module not found</p>", status_code=404)
             # Sessions for this module
-            sessions = list_sessions(data_dir, module_name=name)
+            sessions = list_module_related_sessions(data_dir, name)
             # Plugin health for associated plugins
             all_plugins = _collect_plugin_inventory(skip_ruok=False)
             plugin_names = [plugin.name for plugin in all_plugins]
@@ -545,6 +564,9 @@ def create_webui_router(
                 all_plugins=plugin_names,
                 extra_plugins=_extra_module_plugins(mod, plugin_names),
                 reporter_display=_reporter_display_factory(auth.list_users()),
+                session_plugin_options=lambda module_name: _module_plugin_options(
+                    data_dir, config, module_name
+                ),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"page_module_detail {name}", data_dir)
@@ -671,6 +693,9 @@ def create_webui_router(
                 sessions=sessions,
                 stats=stats,
                 reporter_display=_reporter_display_factory(auth.list_users()),
+                session_plugin_options=lambda module_name: _module_plugin_options(
+                    data_dir, config, module_name
+                ),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "partial_sessions", data_dir)
@@ -750,6 +775,9 @@ def create_webui_router(
                 sessions=sessions,
                 stats=stats,
                 reporter_display=_reporter_display_factory(auth.list_users()),
+                session_plugin_options=lambda module_name: _module_plugin_options(
+                    data_dir, config, module_name
+                ),
                 headers={
                     "HX-Trigger": ('{"toast":"Session created","toastType":"success"}')
                 },
@@ -1036,15 +1064,18 @@ def create_webui_router(
     @router.post("/ruok/_actions/confirm/{session_id}")
     async def action_confirm(
         session_id: str,
+        affected_plugins: list[str] = Form(default_factory=list),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
         try:
-            update_session(data_dir, session_id, {"status": "unsolved"})
+            confirm_session_plugins(data_dir, config, session_id, affected_plugins)
             s = get_session(data_dir, session_id)
             if s is None:
                 raise ValueError("Session not found after update")
+        except SessionPluginValidationError as exc:
+            return _error_html(str(exc))
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_confirm {session_id}", data_dir)
             return HTMLResponse(
@@ -1056,6 +1087,9 @@ def create_webui_router(
             "_session_card.html.jinja2",
             s=s,
             reporter_display=_reporter_display_factory(auth.list_users()),
+            session_plugin_options=lambda module_name: _module_plugin_options(
+                data_dir, config, module_name
+            ),
             headers={
                 "HX-Trigger": ('{"toast":"Session confirmed","toastType":"success"}')
             },
@@ -1084,6 +1118,9 @@ def create_webui_router(
             "_session_card.html.jinja2",
             s=s,
             reporter_display=_reporter_display_factory(auth.list_users()),
+            session_plugin_options=lambda module_name: _module_plugin_options(
+                data_dir, config, module_name
+            ),
             headers={
                 "HX-Trigger": ('{"toast":"Session resolved","toastType":"success"}')
             },
@@ -1112,6 +1149,9 @@ def create_webui_router(
             "_session_card.html.jinja2",
             s=s,
             reporter_display=_reporter_display_factory(auth.list_users()),
+            session_plugin_options=lambda module_name: _module_plugin_options(
+                data_dir, config, module_name
+            ),
             headers={"HX-Trigger": ('{"toast":"Session ignored","toastType":"info"}')},
         )
 

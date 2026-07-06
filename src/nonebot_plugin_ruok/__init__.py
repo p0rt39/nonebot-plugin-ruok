@@ -16,12 +16,14 @@ from .config import Config
 from .protocol import ReporterInfo, BotConnectionStatus
 from .collector import (
     LogMonitor,
+    SessionPluginValidationError,
     get_session,
     list_sessions,
     create_session,
     update_session,
     _handle_ruok_error,
     _connection_history,
+    confirm_session_plugins,
 )
 from .webui.auth import (
     WebUIAuth,
@@ -134,7 +136,7 @@ async def handle_ruok(
             "/ruok status — 查看状态\n"
             "/ruok list — 查看所有 session\n"
             "/ruok lookup <id> — 查看详情\n"
-            "/ruok confirm <id> | solve <id> | ignore <id> — 管理"
+            "/ruok confirm <id> [插件...] | solve <id> | ignore <id> — 管理"
         )
         return
 
@@ -375,20 +377,54 @@ async def _cmd_admin(bot: Bot, event: Event, action: str, rest: str) -> None:
 
     sid = rest.strip()
     if not sid:
+        if action == "confirm":
+            await ruok_cmd.finish(f"用法: /ruok {action} <session_id> [插件...]")
+            return
         await ruok_cmd.finish(f"用法: /ruok {action} <session_id>")
         return
 
     status_map = {"confirm": "unsolved", "solve": "solved", "ignore": "ignored"}
     new_status = status_map[action]
 
-    session = update_session(data_dir, sid, {"status": new_status})
+    if action == "confirm":
+        session_id, plugins = _parse_confirm_args(rest)
+        try:
+            session = confirm_session_plugins(
+                data_dir,
+                plugin_config,
+                session_id,
+                plugins,
+            )
+        except SessionPluginValidationError as exc:
+            await ruok_cmd.finish(f"❌ {exc}")
+            return
+        sid = session_id
+    else:
+        session = update_session(data_dir, sid, {"status": new_status})
     if session is None:
         await ruok_cmd.finish(f"❌ Session `{sid}` 未找到。")
         return
 
     icon = {"unsolved": "🔴", "solved": "🟢", "ignored": "⚪"}[new_status]
     labels = {"unsolved": "已确认", "solved": "已解决", "ignored": "已忽略(误报)"}
-    await ruok_cmd.finish(f"{icon} Session {sid} → {labels[new_status]}")
+    plugin_text = (
+        f"\n影响插件: {', '.join(session.affected_plugins)}"
+        if action == "confirm" and session.affected_plugins
+        else ""
+    )
+    await ruok_cmd.finish(f"{icon} Session {sid} → {labels[new_status]}{plugin_text}")
+
+
+def _parse_confirm_args(rest: str) -> tuple[str, list[str]]:
+    """Parse /ruok confirm <session_id> [plugin ...]."""
+    session_id, _, raw_plugins = rest.strip().partition(" ")
+    plugins = [
+        item
+        for token in raw_plugins.split()
+        for item in token.split(",")
+        if item.strip()
+    ]
+    return session_id, plugins
 
 
 # ────────────────────────────────

@@ -265,6 +265,105 @@ class TestUpdateSession:
 
         assert update_session(tmp_path, "ruok-nope", {"status": "solved"}) is None
 
+    def test_old_session_json_defaults_affected_plugins(self, tmp_path: Path) -> None:
+        import json
+        from datetime import datetime, timezone
+
+        from nonebot_plugin_ruok.collectors.sessions import get_session
+
+        session_dir = tmp_path / "sessions"
+        session_dir.mkdir()
+        now = datetime.now(timezone.utc).isoformat()
+        (session_dir / "ruok-legacy.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "ruok-legacy",
+                    "source": "manual",
+                    "status": "pending",
+                    "module_name": "music",
+                    "reporter": {"type": "user"},
+                    "description": "legacy",
+                    "first_seen_at": now,
+                    "last_seen_at": now,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        session = get_session(tmp_path, "ruok-legacy")
+
+        assert session is not None
+        assert session.affected_plugins == []
+
+    def test_confirm_session_plugins_rejects_invalid_plugin(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        import pytest
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+        from nonebot_plugin_ruok.collectors.sessions import (
+            SessionPluginValidationError,
+            get_session,
+            create_session,
+            confirm_session_plugins,
+        )
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        session = create_session(tmp_path, "music", "issue", ReporterInfo(type="user"))
+
+        with pytest.raises(SessionPluginValidationError):
+            confirm_session_plugins(tmp_path, config, session.session_id, ["plugin_b"])
+
+        reloaded = get_session(tmp_path, session.session_id)
+        assert reloaded is not None
+        assert reloaded.status == "pending"
+        assert reloaded.affected_plugins == []
+
+    def test_plugin_impacts_rebuilds_from_active_sessions(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        import json
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            build_plugin_impacts,
+            rebuild_plugin_impacts,
+            confirm_session_plugins,
+        )
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        pending = create_session(
+            tmp_path,
+            "music",
+            "pending",
+            ReporterInfo(type="user"),
+        )
+        confirmed = create_session(
+            tmp_path,
+            "music",
+            "confirmed",
+            ReporterInfo(type="user"),
+        )
+        confirm_session_plugins(tmp_path, config, confirmed.session_id, ["plugin_a"])
+
+        impacts = build_plugin_impacts(tmp_path)
+        persisted = rebuild_plugin_impacts(tmp_path)
+        disk = json.loads((tmp_path / "plugin_impacts.json").read_text("utf-8"))
+
+        assert impacts["plugin_a"]["pending"] == [pending.session_id]
+        assert confirmed.session_id in impacts["plugin_a"]["unsolved"]
+        assert persisted == impacts
+        assert disk == impacts
+
 
 class TestLinkSessions:
     def test_link_two(self, tmp_path: Path) -> None:

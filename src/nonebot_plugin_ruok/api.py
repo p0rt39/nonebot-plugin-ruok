@@ -15,6 +15,7 @@ from .config import ScopedConfig
 from .protocol import ReporterInfo, ModuleDefinition
 from .collector import (
     MetricsStore,
+    SessionPluginValidationError,
     get_module,
     get_session,
     list_modules,
@@ -29,6 +30,7 @@ from .collector import (
     _handle_ruok_error,
     get_linked_sessions,
     collect_all_statuses,
+    confirm_session_plugins,
 )
 
 # ────────────────────────────────
@@ -200,8 +202,23 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             raise HTTPException(status_code=403, detail="Session system disabled")
 
         body = await request.json()
-        updates = {k: v for k, v in body.items() if k in ("status", "developer_notes")}
-        session = update_session(data_dir, session_id, updates)
+        if body.get("status") == "unsolved" and "affected_plugins" in body:
+            try:
+                session = confirm_session_plugins(
+                    data_dir,
+                    config,
+                    session_id,
+                    body.get("affected_plugins", []),
+                )
+            except SessionPluginValidationError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            updates = {
+                k: v
+                for k, v in body.items()
+                if k in ("status", "developer_notes", "affected_plugins")
+            }
+            session = update_session(data_dir, session_id, updates)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
         _cache.pop("status", None)

@@ -111,6 +111,7 @@ class Session(BaseModel):
 
     link_group: str | None = None  # "ruok-grp-{8 hex}" — group-based linking
     developer_notes: str | None = None
+    affected_plugins: list[str] = Field(default_factory=list)
 
 
 # ────────────────────────────────
@@ -126,6 +127,7 @@ class ModuleDefinition(BaseModel):
     plugins: list[str] = Field(default_factory=list)  # ["nonebot_plugin_ncm"]
     description: str | None = None
     status: ModuleStatus = "available"  # derived at query time
+    status_reasons: list[str] = Field(default_factory=list)
 
 
 # ────────────────────────────────

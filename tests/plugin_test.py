@@ -45,7 +45,7 @@ async def test_ruok_no_args_shows_usage(app: App) -> None:
             "/ruok status — 查看状态\n"
             "/ruok list — 查看所有 session\n"
             "/ruok lookup <id> — 查看详情\n"
-            "/ruok confirm <id> | solve <id> | ignore <id> — 管理",
+            "/ruok confirm <id> [插件...] | solve <id> | ignore <id> — 管理",
             result=None,
             bot=bot,
         )
@@ -237,3 +237,108 @@ async def test_ruok_status_builtin_module(app: App) -> None:
             bot=bot,
         )
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_ruok_confirm_accepts_affected_plugins(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok confirm <id> plugin... should persist affected plugins."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import get_session, create_session
+
+    config = ScopedConfig()
+    upsert_module(
+        tmp_path,
+        ModuleDefinition(name="music", plugins=["plugin_a", "plugin_b"]),
+    )
+    session = create_session(tmp_path, "music", "issue", ReporterInfo(type="user"))
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
+
+    event = fake_group_message_event_v11(
+        message=f"/ruok confirm {session.session_id} plugin_a plugin_b",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            f"🔴 Session {session.session_id} → 已确认\n影响插件: plugin_a, plugin_b",
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+    reloaded = get_session(tmp_path, session.session_id)
+    assert reloaded is not None
+    assert reloaded.status == "unsolved"
+    assert reloaded.affected_plugins == ["plugin_a", "plugin_b"]
+
+
+@pytest.mark.asyncio
+async def test_ruok_confirm_without_plugins_does_not_propagate(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok confirm <id> remains valid without plugin propagation."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import get_module, upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import get_session, create_session
+
+    config = ScopedConfig()
+    upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+    upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+    session = create_session(tmp_path, "music", "issue", ReporterInfo(type="user"))
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
+
+    event = fake_group_message_event_v11(
+        message=f"/ruok confirm {session.session_id}",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            f"🔴 Session {session.session_id} → 已确认",
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+    reloaded = get_session(tmp_path, session.session_id)
+    lyrics = get_module(tmp_path, config, "lyrics")
+    assert reloaded is not None
+    assert reloaded.status == "unsolved"
+    assert reloaded.affected_plugins == []
+    assert lyrics is not None
+    assert lyrics.status == "available"

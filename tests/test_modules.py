@@ -209,6 +209,143 @@ class TestDeriveModuleStatus:
         update_session(tmp_path, s.session_id, {"status": "ignored"})
         assert derive_module_status(tmp_path, "mod-z") == "available"
 
+    def test_pending_session_degrades_modules_sharing_plugins(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            get_module,
+            upsert_module,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import create_session
+
+        config = ScopedConfig()
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="music", plugins=["plugin_a", "plugin_b"]),
+        )
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="playlist", plugins=["plugin_b"]),
+        )
+        create_session(tmp_path, "music", "pending issue", ReporterInfo(type="user"))
+
+        related = get_module(tmp_path, config, "playlist")
+
+        assert related is not None
+        assert related.status == "degraded"
+        assert any("plugin_b" in reason for reason in related.status_reasons)
+
+    def test_confirm_selected_plugin_unavailable_only_shared_modules(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            get_module,
+            upsert_module,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            confirm_session_plugins,
+        )
+
+        config = ScopedConfig()
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="music", plugins=["plugin_a", "plugin_b"]),
+        )
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="lyrics", plugins=["plugin_a"]),
+        )
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="playlist", plugins=["plugin_b"]),
+        )
+        session = create_session(
+            tmp_path,
+            "music",
+            "confirmed issue",
+            ReporterInfo(type="user"),
+        )
+        confirm_session_plugins(tmp_path, config, session.session_id, ["plugin_a"])
+
+        lyrics = get_module(tmp_path, config, "lyrics")
+        playlist = get_module(tmp_path, config, "playlist")
+
+        assert lyrics is not None
+        assert playlist is not None
+        assert lyrics.status == "unavailable"
+        assert playlist.status == "available"
+
+    def test_confirm_without_plugin_does_not_propagate(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            get_module,
+            upsert_module,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            confirm_session_plugins,
+        )
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+        session = create_session(
+            tmp_path,
+            "music",
+            "local only",
+            ReporterInfo(type="user"),
+        )
+        confirm_session_plugins(tmp_path, config, session.session_id, [])
+
+        music = get_module(tmp_path, config, "music")
+        lyrics = get_module(tmp_path, config, "lyrics")
+
+        assert music is not None
+        assert lyrics is not None
+        assert music.status == "unavailable"
+        assert lyrics.status == "available"
+
+    def test_solving_one_session_keeps_other_plugin_impact(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            get_module,
+            upsert_module,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            update_session,
+            confirm_session_plugins,
+        )
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+        first = create_session(tmp_path, "music", "first", ReporterInfo(type="user"))
+        second = create_session(tmp_path, "music", "second", ReporterInfo(type="user"))
+        confirm_session_plugins(tmp_path, config, first.session_id, ["plugin_a"])
+        confirm_session_plugins(tmp_path, config, second.session_id, ["plugin_a"])
+
+        update_session(tmp_path, first.session_id, {"status": "solved"})
+        lyrics = get_module(tmp_path, config, "lyrics")
+
+        assert lyrics is not None
+        assert lyrics.status == "unavailable"
+
 
 class TestResolveModuleDisplay:
     def test_exact_name(self, tmp_path: Path) -> None:

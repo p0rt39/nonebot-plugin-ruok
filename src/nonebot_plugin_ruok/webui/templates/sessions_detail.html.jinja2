@@ -26,6 +26,7 @@
             <table>
                 <tr><td><strong>来源</strong></td><td>{{ session.source }}</td></tr>
                 <tr><td><strong>模块</strong></td><td>{{ session.module_name }}</td></tr>
+                <tr><td><strong>影响插件</strong></td><td>{{ session.affected_plugins | join(', ') if session.affected_plugins else '—' }}</td></tr>
                 <tr><td><strong>签名</strong></td><td><code>{{ session.error_signature or '—' }}</code></td></tr>
             </table>
         </div>
@@ -120,15 +121,29 @@
     <h4>⚡ 操作</h4>
     <div class="ruok-button-row--grid">
         {% if session.status == 'pending' %}
-        <button class="secondary outline"
-                hx-post="/ruok/_actions/confirm/{{ session.session_id }}"
-                hx-target="#session-detail-content"
-                hx-swap="outerHTML"
-                hx-get="/ruok/sessions/{{ session.session_id }}"
-                hx-trigger="click"
-                hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
-            ✅ 确认为未解决
-        </button>
+        <form hx-post="/ruok/_actions/confirm/{{ session.session_id }}"
+              hx-target="#session-detail-content"
+              hx-swap="outerHTML"
+              hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})"
+              style="margin:0;">
+            {% set plugin_options = session_plugin_options(session.module_name) if session_plugin_options is defined else [] %}
+            {% if plugin_options %}
+            <details class="confirm-plugin-picker">
+                <summary class="secondary outline ruok-button">✅ 确认为未解决</summary>
+                <div class="confirm-plugin-options">
+                    {% for plugin in plugin_options %}
+                    <label>
+                        <input type="checkbox" name="affected_plugins" value="{{ plugin }}">
+                        {{ plugin }}
+                    </label>
+                    {% endfor %}
+                    <button type="submit" class="secondary outline ruok-button">确认 Session</button>
+                </div>
+            </details>
+            {% else %}
+            <button type="submit" class="secondary outline">✅ 确认为未解决</button>
+            {% endif %}
+        </form>
         {% endif %}
         <button class="secondary outline"
                 hx-post="/ruok/_actions/solve/{{ session.session_id }}"

@@ -32,7 +32,12 @@
             </td>
             <td>{{ m.display_name }}</td>
             <td>{{ m.plugins | length }}</td>
-            <td>{{ m.description or '—' }}</td>
+            <td>
+                {{ m.description or '—' }}
+                {% if m.status_reasons %}
+                <br><small>{{ m.status_reasons[0] }}</small>
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
     </tbody>
