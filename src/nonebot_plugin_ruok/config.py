@@ -31,7 +31,7 @@ class ScopedConfig(BaseModel):
     # ── API / WebUI ──
     cors_origins: list[str] = ["*"]
     api_key: str = ""
-    webui_password: str = ""  # 空字符串 = 不启用 WebUI 登录认证
+    webui_admin_password: str = ""  # WebUI 内置 admin 账户密码
     webui_secret_key: str = ""  # SessionMiddleware 密钥（空=每次重启随机生成）
     sse_public: bool = False  # True 时 SSE 端点不需要登录
 

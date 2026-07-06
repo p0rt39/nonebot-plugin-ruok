@@ -540,11 +540,16 @@
             </ul>
             <ul id="nav-links">
                 <li><a href="/ruok" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>📊 总览</a></li>
+                {% if current_user and current_user.is_admin %}
                 <li><a href="/ruok/sessions" {% if active_page == 'sessions' %}aria-current="page"{% endif %}>📋 Sessions</a></li>
                 <li><a href="/ruok/modules" {% if active_page == 'modules' %}aria-current="page"{% endif %}>📦 模块</a></li>
                 <li><a href="/ruok/notifications" {% if active_page == 'notifications' %}aria-current="page"{% endif %}>🔔 通知</a></li>
+                {% endif %}
             </ul>
             <ul>
+                {% if current_user %}
+                <li><small>{{ current_user.username }}</small></li>
+                {% endif %}
                 <li>
                     <button id="theme-toggle" aria-label="切换暗色模式" title="切换暗色模式"
                             style="background:none;border:none;font-size:1.2em;padding:0.2rem 0.5rem;cursor:pointer;">

@@ -1,0 +1,32 @@
+<div id="my-sessions">
+    <div class="results-count">
+        共 {{ sessions | length }} 条我的上报
+    </div>
+    {% if sessions %}
+    <div class="card-grid">
+        {% for s in sessions %}
+        <article class="animate-in">
+            <header>
+                <span class="status-dot status-{{ s.status }}"></span>
+                <strong>{{ s.session_id }}</strong>
+                <small style="margin-left: auto;">
+                    {{ s.first_seen_at.astimezone().strftime('%m-%d %H:%M') }}
+                </small>
+            </header>
+            <p><strong>模块:</strong> {{ s.module_name }}</p>
+            <p>
+                <strong>状态:</strong>
+                <span class="badge badge-{% if s.status == 'solved' %}ok{% elif s.status in ('pending','unsolved') %}warn{% else %}error{% endif %}">
+                    {{ s.status }}
+                </span>
+            </p>
+            <p>{{ s.description[:260] }}{% if s.description|length > 260 %}...{% endif %}</p>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <article>
+        <p>暂无上报记录。</p>
+    </article>
+    {% endif %}
+</div>

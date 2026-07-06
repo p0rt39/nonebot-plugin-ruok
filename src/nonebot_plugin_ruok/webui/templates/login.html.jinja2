@@ -22,11 +22,17 @@
             box-shadow: 0 12px 32px rgba(0,0,0,0.1);
             padding: 2.5rem;
             width: 100%;
-            max-width: 400px;
+            max-width: 420px;
         }
         .login-card h2 {
             text-align: center;
             margin-bottom: 1.5rem;
+        }
+        .login-actions {
+            display: flex;
+            justify-content: center;
+            gap: 0.75rem;
+            margin-top: 1rem;
         }
     </style>
 </head>
@@ -37,13 +43,28 @@
             {% if error %}
             <p style="color: var(--pico-del-color); text-align: center;">{{ error }}</p>
             {% endif %}
+            {% if not admin_configured %}
+            <p style="color: var(--pico-del-color); text-align: center;">
+                未配置 <code>RUOK__WEBUI_ADMIN_PASSWORD</code>，WebUI 登录不可用。
+            </p>
+            {% endif %}
             <form method="post" action="/ruok/login">
                 <label>
-                    密码
-                    <input type="password" name="password" required autofocus placeholder="输入 WebUI 密码">
+                    用户名
+                    <input type="text" name="username" required autofocus
+                           value="{{ username or '' }}" autocomplete="username"
+                           placeholder="admin 或普通用户">
                 </label>
-                <button type="submit" style="width: 100%;">登录</button>
+                <label>
+                    密码
+                    <input type="password" name="password" required autocomplete="current-password"
+                           placeholder="输入账户密码">
+                </label>
+                <button type="submit" style="width: 100%;" {% if not admin_configured %}disabled{% endif %}>登录</button>
             </form>
+            <div class="login-actions">
+                <a href="/ruok/register">注册普通用户</a>
+            </div>
         </article>
     </main>
 </body>

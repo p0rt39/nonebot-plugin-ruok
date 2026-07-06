@@ -26,7 +26,7 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 - 🌐 **HTTP API + WebUI**：`/ruok/api/*` JSON 接口 + `/ruok` 可视化面板，同一端口
 - 📡 **SSE 实时推送**：Dashboard 实时状态更新 + Session 变更即时通知
 - 📊 **数据可视化**：CPU/内存趋势折线图 + Session 状态饼图（Chart.js）
-- 🔐 **WebUI 登录认证**：可选 session-based 登录，与 API Key 分离管理
+- 🔐 **WebUI 分级鉴权**：内置管理员 + 普通用户账号，支持 QQ 绑定上报
 - � **通知引擎**：多规则、冷却期、Bot 私聊 + Webhook 双通道
 
 ```mermaid
@@ -104,7 +104,7 @@ plugins = ["nonebot_plugin_ruok"]
 | :----- | :--: | :----: | :--- |
 | `RUOK__CORS_ORIGINS` | `list[str]` | `["*"]` | CORS 允许的源列表 |
 | `RUOK__API_KEY` | `str` | `""` | API 密钥（为空则不校验） |
-| `RUOK__WEBUI_PASSWORD` | `str` | `""` | WebUI 登录密码（为空则不启用认证） |
+| `RUOK__WEBUI_ADMIN_PASSWORD` | `str` | `""` | WebUI 内置管理员 `admin` 的登录密码（为空则 WebUI 无法登录） |
 | `RUOK__SSE_PUBLIC` | `bool` | `False` | True 时 SSE 端点无需登录 |
 
 ### 时间序列指标
@@ -138,7 +138,7 @@ RUOK__AUTO_SESSION_ENABLED=true
 RUOK__NOTIFY_SUPERUSERS=true
 RUOK__REPORT_WHITELIST_USERS=["123456789", "987654321"]
 RUOK__REPORT_WHITELIST_GROUPS=["1000000"]
-RUOK__WEBUI_PASSWORD=mysecret
+RUOK__WEBUI_ADMIN_PASSWORD=mysecret
 RUOK__METRICS_RETENTION_DAYS=7
 RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["pending","unsolved"],"on_module":[],"cooldown_minutes":60,"channels":["bot_dm"]}]'
 ```
@@ -151,7 +151,8 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 | :--- | :--- | :--- | :--- |
 | `/ruok` | 所有人 | 群聊/私聊 | 显示帮助信息 |
 | `/ruok status` | 所有人 | 群聊/私聊 | 查看所有模块实时状态（🟢🟡🔴） |
-| `/ruok no <模块> <描述>` | 白名单/群管/SUPERUSER | 群聊/私聊 | 手动上报问题，创建 Session |
+| `/ruok bind <auth_key>` | 普通 WebUI 用户 | 群聊/私聊 | 将 WebUI 账户绑定到当前 QQ |
+| `/ruok no <模块> <描述>` | 已绑定用户/白名单/群管/SUPERUSER | 群聊/私聊 | 手动上报问题，创建 Session |
 | `/ruok list` | 所有人 | 群聊/私聊 | 列出活跃 Session（最多 10 条） |
 | `/ruok lookup <id>` | 所有人 | 群聊/私聊 | 查看 Session 详情（含重复次数、关联） |
 | `/ruok confirm <id>` | SUPERUSER | 群聊/私聊 | 确认问题 → `pending→unsolved` |
@@ -207,7 +208,10 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 | 📝 详情 | `/ruok/sessions/{id}` | 完整信息 + 状态时间线 + 关联 Session + 开发者备注 |
 | 📦 模块 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件） |
 | 🔔 通知 | `/ruok/notifications` | 通知规则管理（触发条件、冷却、通道） |
-| 🔐 登录 | `/ruok/login` | 仅当 `RUOK__WEBUI_PASSWORD` 非空时启用 |
+| 🔐 登录 | `/ruok/login` | 管理员账号固定为 `admin`，密码来自 `RUOK__WEBUI_ADMIN_PASSWORD` |
+| 🧾 注册 | `/ruok/register` | 普通用户注册，生成 10 分钟有效的一次性 QQ 绑定码 |
+
+管理员可访问完整 WebUI。普通用户只能访问精简总览、模块健康状态、绑定提示、手动上报入口和自己的上报记录；普通用户必须先通过 `/ruok bind <auth_key>` 绑定 QQ 后才能使用 WebUI 上报。
 
 **技术架构**
 

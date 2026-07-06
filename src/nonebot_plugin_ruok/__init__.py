@@ -23,6 +23,12 @@ from .collector import (
     _handle_ruok_error,
     _connection_history,
 )
+from .webui.auth import (
+    WebUIAuth,
+    AuthKeyExpired,
+    AuthKeyInvalid,
+    AuthKeyAlreadyUsed,
+)
 from .webui.router import create_webui_router
 
 require("nonebot_plugin_localstore")
@@ -33,6 +39,7 @@ __plugin_meta__ = PluginMetadata(
     description="Bot health monitoring, session tracking, and WebUI",
     usage=(
         "/ruok no <module> <description> — report an issue\n"
+        "/ruok bind <auth_key> — bind WebUI account to current QQ\n"
         "/ruok status — check module health\n"
         "/ruok lookup <session_id> — view session details\n"
         "/ruok confirm <session_id> — confirm issue (pending→unsolved)\n"
@@ -58,6 +65,7 @@ data_dir = Path(store.get_plugin_data_dir())
 # ────────────────────────────────
 
 log_monitor = LogMonitor(plugin_config, data_dir)
+webui_auth = WebUIAuth(plugin_config, data_dir)
 
 # ────────────────────────────────
 # Permission checker for report
@@ -74,6 +82,10 @@ async def _can_report(event: Event) -> bool:
 
     # SUPERUSERS always allowed
     if user_id in get_driver().config.superusers:
+        return True
+
+    # WebUI users bound to this QQ can report from chat.
+    if webui_auth.is_qq_bound(user_id):
         return True
 
     # Whitelist users
@@ -111,6 +123,7 @@ async def handle_ruok(
         await ruok_cmd.finish(
             "RuOK — 用法:\n"
             "/ruok no <模块> <描述> — 上报问题\n"
+            "/ruok bind <auth_key> — 绑定 WebUI 账户\n"
             "/ruok status — 查看状态\n"
             "/ruok list — 查看所有 session\n"
             "/ruok lookup <id> — 查看详情\n"
@@ -124,6 +137,8 @@ async def handle_ruok(
 
     if subcmd == "no":
         await _cmd_no(bot, event, rest)
+    elif subcmd == "bind":
+        await _cmd_bind(event, rest)
     elif subcmd == "status":
         await _cmd_status()
     elif subcmd == "list":
@@ -135,7 +150,7 @@ async def handle_ruok(
     else:
         await ruok_cmd.finish(
             f"❓ 未知子命令: {subcmd}\n"
-            + "可用: no / status / lookup / confirm / solve / ignore"
+            + "可用: no / bind / status / lookup / confirm / solve / ignore"
         )
 
 
@@ -152,7 +167,8 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
 
     if not await _can_report(event):
         await ruok_cmd.finish(
-            "❌ 你没有权限上报问题。需要：群管理员 / 白名单 / SUPERUSER"
+            "❌ 你没有权限上报问题。需要："
+            "绑定 WebUI 账号 / 群管理员 / 白名单 / SUPERUSER"
         )
         return
 
@@ -193,6 +209,28 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
         f"📝 已记录 | Session: {session.session_id}\n"
         f"模块: {display}\n描述: {description}"
     )
+
+
+async def _cmd_bind(event: Event, rest: str) -> None:
+    """Handle /ruok bind <auth_key>."""
+    auth_key = rest.strip()
+    if not auth_key:
+        await ruok_cmd.finish("用法: /ruok bind <auth_key>")
+        return
+
+    try:
+        user = webui_auth.bind_auth_key(auth_key, event.get_user_id())
+    except AuthKeyExpired:
+        await ruok_cmd.finish("❌ auth_key 已过期，请在 WebUI 重新获取绑定码。")
+        return
+    except AuthKeyAlreadyUsed:
+        await ruok_cmd.finish("❌ auth_key 已被使用，请在 WebUI 重新获取绑定码。")
+        return
+    except AuthKeyInvalid:
+        await ruok_cmd.finish("❌ auth_key 无效，请检查后重试。")
+        return
+
+    await ruok_cmd.finish(f"✅ WebUI 用户 {user.username} 已绑定 QQ {user.bound_qq}")
 
 
 async def _cmd_status() -> None:
@@ -416,12 +454,9 @@ async def _startup() -> None:
     if isinstance(driver, ASGIMixin):
         app = driver.server_app
 
-        # Auth router (login/logout)
+        # Auth router (login/register/logout)
         try:
-            from .webui.auth import WebUIAuth
-
-            auth = WebUIAuth(plugin_config.webui_password)
-            auth_router = auth.create_router()
+            auth_router = webui_auth.create_router()
             app.include_router(auth_router)
             logger.info("RuOK Auth routes mounted")
         except (ImportError, RuntimeError) as exc:
@@ -439,7 +474,7 @@ async def _startup() -> None:
             _handle_ruok_error(exc, "API routes mount", data_dir)
 
         try:
-            webui_router = create_webui_router(plugin_config, data_dir)
+            webui_router = create_webui_router(plugin_config, data_dir, webui_auth)
             app.include_router(webui_router)
             logger.info("RuOK WebUI SSR mounted at /ruok")
         except (ImportError, RuntimeError) as exc:

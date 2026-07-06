@@ -17,7 +17,7 @@ from fastapi.responses import (
 )
 
 from .sse import event_bus, sse_event_generator
-from .auth import WebUIAuth
+from .auth import WebUIAuth, CurrentWebUIUser
 from .jinja import render
 from ..config import ScopedConfig
 from ..protocol import (
@@ -119,10 +119,13 @@ def _split_session_description(description: str) -> tuple[str, str]:
     return prose, code
 
 
-def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
+def create_webui_router(
+    config: ScopedConfig,
+    data_dir: Path,
+    auth: WebUIAuth,
+) -> APIRouter:
     """Build SSR router for the RuOK WebUI."""
     router = APIRouter(tags=["ruok-webui"])
-    auth = WebUIAuth(config.webui_password)
 
     # ── SSE endpoint ──
 
@@ -132,9 +135,12 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
         Respects WebUI auth unless config.sse_public is True.
         """
-        if auth.enabled and not config.sse_public:
-            if not await auth.require_login(request):
+        if not config.sse_public:
+            user = auth.current_user(request)
+            if user is None:
                 return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+            if not user.is_admin:
+                return JSONResponse({"detail": "Admin required"}, status_code=403)
 
         async def collect_fn() -> Any:
             return await collect_all_statuses(config, data_dir)
@@ -149,11 +155,12 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             },
         )
 
-    # ── Auth guard dependency ──
+    # ── Auth guard dependencies ──
 
-    async def _webui_guard(request: Request) -> None:
+    async def _login_guard(request: Request) -> CurrentWebUIUser:
         """FastAPI dependency: redirect to login if not authenticated."""
-        if auth.enabled and not await auth.require_login(request):
+        user = auth.current_user(request)
+        if user is None:
             accept = request.headers.get("accept", "")
             if "text/html" in accept and request.method == "GET":
                 raise HTTPException(
@@ -162,12 +169,31 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                     detail="Login required",
                 )
             raise HTTPException(status_code=401, detail="Login required")
+        return user
+
+    async def _admin_guard(
+        request: Request,
+        user: CurrentWebUIUser = Depends(_login_guard),
+    ) -> CurrentWebUIUser:
+        """FastAPI dependency: require the built-in WebUI admin account."""
+        if user.is_admin:
+            return user
+        accept = request.headers.get("accept", "")
+        if "text/html" in accept and request.method == "GET":
+            raise HTTPException(
+                status_code=302,
+                headers={"Location": "/ruok"},
+                detail="Admin required",
+            )
+        raise HTTPException(status_code=403, detail="Admin required")
 
     # ── Pages ─────────────────────
 
     @router.get("/ruok", response_class=HTMLResponse)
     async def page_dashboard(
-        request: Request, _partial: str = "", _guard_ok=Depends(_webui_guard)
+        request: Request,
+        _partial: str = "",
+        user: CurrentWebUIUser = Depends(_login_guard),
     ) -> HTMLResponse:
         try:
             status = await collect_all_statuses(config, data_dir)
@@ -186,6 +212,31 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         # Hero banner partial (SSE-driven refresh)
         if _partial == "dashboard-hero":
             return render("_dashboard_hero.html.jinja2", status=status)
+
+        if not user.is_admin:
+            if _partial:
+                raise HTTPException(status_code=403, detail="Admin required")
+            auth_key = None
+            auth_key_expires_at = user.auth_key_expires_at
+            if not user.bound_qq:
+                issued = auth.issue_auth_key(user.username)
+                auth_key = issued.auth_key
+                auth_key_expires_at = issued.user.auth_key_expires_at
+            return render(
+                "dashboard_user.html.jinja2",
+                request=request,
+                current_user=user,
+                status=status,
+                modules=modules,
+                sessions=(
+                    list_sessions(data_dir, reporter_user_id=user.bound_qq)
+                    if user.bound_qq
+                    else []
+                ),
+                all_modules=modules,
+                auth_key=auth_key,
+                auth_key_expires_at=auth_key_expires_at,
+            )
 
         # SSE/polling partial renders (other panels)
         if _partial == "dashboard-metrics":
@@ -216,6 +267,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return render(
             "dashboard.html.jinja2",
             request=request,
+            current_user=user,
             status=status,
             modules=modules,
             stats=stats,
@@ -234,7 +286,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         plugin: str = "",
         after: str = "",
         before: str = "",
-        _guard_ok=Depends(_webui_guard),
+        user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             first_seen_after = datetime.fromisoformat(after) if after else None
@@ -253,6 +305,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             return render(
                 "sessions.html.jinja2",
                 request=request,
+                current_user=user,
                 sessions=sessions,
                 stats=stats,
                 all_modules=all_modules,
@@ -273,7 +326,9 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.get("/ruok/sessions/{session_id}", response_class=HTMLResponse)
     async def page_session_detail(
-        request: Request, session_id: str, _guard_ok=Depends(_webui_guard)
+        request: Request,
+        session_id: str,
+        user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             session = get_session(data_dir, session_id)
@@ -286,6 +341,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             return render(
                 "sessions_detail.html.jinja2",
                 request=request,
+                current_user=user,
                 session=session,
                 session_description=session_description,
                 session_traceback=session_traceback,
@@ -301,7 +357,8 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.get("/ruok/modules", response_class=HTMLResponse)
     async def page_modules(
-        request: Request, _guard_ok=Depends(_webui_guard)
+        request: Request,
+        user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             modules = list_modules(data_dir, config)
@@ -310,6 +367,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             return render(
                 "modules.html.jinja2",
                 request=request,
+                current_user=user,
                 modules=modules,
                 all_plugins=plugin_names,
                 extra_plugins=[],
@@ -325,7 +383,9 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.get("/ruok/modules/{name:path}", response_class=HTMLResponse)
     async def page_module_detail(
-        request: Request, name: str, _guard_ok=Depends(_webui_guard)
+        request: Request,
+        name: str,
+        user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             mod = get_module(data_dir, config, name)
@@ -340,6 +400,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             return render(
                 "modules_detail.html.jinja2",
                 request=request,
+                current_user=user,
                 module=mod,
                 sessions=sessions,
                 linked_plugins=linked_plugins,
@@ -356,7 +417,8 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.get("/ruok/notifications", response_class=HTMLResponse)
     async def page_notifications(
-        request: Request, _guard_ok=Depends(_webui_guard)
+        request: Request,
+        user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             rules = _load_notification_rules()
@@ -364,6 +426,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             return render(
                 "notifications.html.jinja2",
                 request=request,
+                current_user=user,
                 rules=rules,
                 rule=None,
                 all_modules=modules,
@@ -381,7 +444,8 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
 
     @router.get("/ruok/_partials/modules", response_class=HTMLResponse)
     async def partial_modules(
-        request: Request, _guard_ok=Depends(_webui_guard)
+        request: Request,
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             modules = list_modules(data_dir, config)
@@ -399,7 +463,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.get("/ruok/_partials/dashboard-trends-data")
     async def partial_dashboard_trends_data(
         hours: float = Query(1.0, ge=0.5, le=168.0),
-        _guard_ok=Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> list[dict[str, Any]]:
         """JSON data for dashboard trend charts.
 
@@ -417,7 +481,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         plugin: str = "",
         after: str = "",
         before: str = "",
-        _guard_ok=Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             first_seen_after = datetime.fromisoformat(after) if after else None
@@ -453,7 +517,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         module_name: str = Form(""),
         module_name_custom: str = Form(""),
         description: str = Form(""),
-        _guard_ok=Depends(_webui_guard),
+        user: CurrentWebUIUser = Depends(_login_guard),
     ) -> HTMLResponse:
         """Create a session from the WebUI manual report form."""
         if not config.session_enabled:
@@ -469,8 +533,17 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 '<p style="color:var(--pico-del-color);">❌ 请选择或输入模块名</p>',
                 status_code=400,
             )
+        if not user.is_admin and not user.bound_qq:
+            return HTMLResponse(
+                '<p style="color:var(--pico-del-color);">'
+                "❌ 请先通过 /ruok bind <auth_key> 绑定 QQ 后再提交上报</p>",
+                status_code=403,
+            )
         try:
-            reporter = ReporterInfo(type="user", user_id="webui")
+            reporter = ReporterInfo(
+                type="user",
+                user_id="webui-admin" if user.is_admin else user.bound_qq,
+            )
             session = create_session(
                 data_dir,
                 module_name=name,
@@ -482,6 +555,16 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             from ..collectors.notifications import dispatch_notification
 
             await dispatch_notification(session, config, data_dir)
+            if not user.is_admin:
+                return render(
+                    "_user_sessions.html.jinja2",
+                    sessions=list_sessions(data_dir, reporter_user_id=user.bound_qq),
+                    headers={
+                        "HX-Trigger": (
+                            '{"toast":"Session created","toastType":"success"}'
+                        )
+                    },
+                )
             # Refresh session list
             sessions = list_sessions(data_dir)
             stats = get_session_stats(data_dir)
@@ -505,7 +588,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.post("/ruok/_actions/confirm/{session_id}")
     async def action_confirm(
         session_id: str,
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
@@ -532,7 +615,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.post("/ruok/_actions/solve/{session_id}")
     async def action_solve(
         session_id: str,
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
@@ -559,7 +642,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.post("/ruok/_actions/ignore/{session_id}")
     async def action_ignore(
         session_id: str,
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
@@ -585,7 +668,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def action_session_note(
         session_id: str,
         developer_notes: str = Form(""),
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
@@ -613,7 +696,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def action_link(
         session_id: str,
         other_id: str = Form(...),
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
@@ -633,7 +716,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.post("/ruok/_actions/unlink/{session_id}")
     async def action_unlink(
         session_id: str,
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
@@ -644,7 +727,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def action_unlink_other(
         session_id: str,
         other_id: str,
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
@@ -666,7 +749,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         plugins: str = Form(""),
         selected_plugins: list[str] = Form(default_factory=list),
         return_to_detail: bool = Form(False),
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse | JSONResponse:
         try:
             normalized_name = name.strip()
@@ -743,7 +826,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         request: Request,
         name: str = Form(...),
         redirect_to: str = Form("/ruok/modules"),
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse | JSONResponse:
         try:
             delete_module(data_dir, name.strip())
@@ -768,7 +851,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.get("/ruok/_actions/module-edit-form")
     async def action_module_edit_form(
         name: str = "",
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             plugin_names = _plugin_names()
@@ -822,7 +905,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         cooldown_minutes: float = Form(60.0),
         channels: str = Form("bot_dm"),
         webhook_url: str = Form(""),
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         """Create or update a notification rule."""
         try:
@@ -879,7 +962,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def action_notification_delete(
         request: Request,
         name: str = Form(...),
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         """Delete a notification rule by name."""
         try:
@@ -902,7 +985,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.get("/ruok/_actions/notification-edit-form")
     async def action_notification_edit_form(
         name: str = "",
-        _guard_ok: None = Depends(_webui_guard),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         """Return the notification form, optionally pre-filled for editing."""
         try:

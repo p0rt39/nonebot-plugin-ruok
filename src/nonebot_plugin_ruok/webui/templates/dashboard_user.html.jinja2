@@ -1,0 +1,61 @@
+{% extends "base.html.jinja2" %}
+{% set active_page = "dashboard" %}
+{% block title %}总览{% endblock %}
+
+{% block content %}
+
+<div id="dashboard-hero" hx-ext="morph"
+     hx-get="/ruok?_partial=dashboard-hero" hx-trigger="load" hx-swap="innerHTML">
+    {% include "_dashboard_hero.html.jinja2" %}
+</div>
+
+<h3>📦 模块状态</h3>
+{% set module_links = false %}
+{% include "_modules_table.html.jinja2" %}
+
+<h3>📝 手动上报</h3>
+{% if current_user.bound_qq %}
+<article>
+    <form hx-post="/ruok/_actions/session-create"
+          hx-target="#my-sessions" hx-swap="outerHTML">
+        <div class="grid">
+            <label>
+                模块名
+                <select name="module_name" required>
+                    <option value="">选择模块...</option>
+                    {% for m in all_modules %}
+                    <option value="{{ m.name }}">{{ m.display_name or m.name }}</option>
+                    {% endfor %}
+                    <option value="other">其他（手动输入）</option>
+                </select>
+            </label>
+            <label>
+                或输入自定义模块
+                <input type="text" name="module_name_custom" placeholder="自定义模块名">
+            </label>
+        </div>
+        <label>
+            问题描述
+            <textarea name="description" rows="3" required placeholder="详细描述你遇到的问题..."></textarea>
+        </label>
+        <button type="submit">提交上报</button>
+    </form>
+</article>
+{% else %}
+<article>
+    <p>当前账户尚未绑定 QQ，绑定后可使用 WebUI 上报。</p>
+    {% if auth_key %}
+    <p>一次性绑定码：</p>
+    <p style="overflow-wrap:anywhere;"><code>{{ auth_key }}</code></p>
+    <p>
+        在 QQ 中发送 <code>/ruok bind {{ auth_key }}</code> 完成绑定。
+        {% if auth_key_expires_at %}有效期至 {{ auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}。{% endif %}
+    </p>
+    {% endif %}
+</article>
+{% endif %}
+
+<h3>📋 我的上报</h3>
+{% include "_user_sessions.html.jinja2" %}
+
+{% endblock %}

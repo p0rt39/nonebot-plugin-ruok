@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+ADMIN_PASSWORD = "admin-secret"
 
 
 def _client(config, data_dir: Path) -> TestClient:
@@ -16,10 +20,39 @@ def _client(config, data_dir: Path) -> TestClient:
 
     app = FastAPI()
     app.add_middleware(SessionMiddleware, secret_key="test-secret")
-    app.include_router(WebUIAuth(config.webui_password).create_router())
+    auth = WebUIAuth(config, data_dir)
+    app.include_router(auth.create_router())
     app.include_router(create_ruok_router(config, data_dir))
-    app.include_router(create_webui_router(config, data_dir))
+    app.include_router(create_webui_router(config, data_dir, auth))
     return TestClient(app)
+
+
+def _webui_config(**kwargs):
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    return ScopedConfig(webui_admin_password=ADMIN_PASSWORD, **kwargs)
+
+
+def _login_admin(client: TestClient, password: str = ADMIN_PASSWORD) -> None:
+    response = client.post(
+        "/ruok/login",
+        data={"username": "admin", "password": password},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/ruok"
+
+
+def _login_user(client: TestClient, username: str, password: str) -> None:
+    response = client.post(
+        "/ruok/login",
+        data={"username": username, "password": password},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/ruok"
 
 
 def _save_notification_rules(config, data_dir: Path, rules) -> None:
@@ -74,14 +107,12 @@ def test_sessions_stats_route_is_not_shadowed(tmp_path: Path) -> None:
     assert response.json()["total"] == 0
 
 
-def test_webui_plaintext_password_login(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
-
-    client = _client(ScopedConfig(webui_password="mysecret"), tmp_path)
+def test_webui_admin_password_login(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
 
     response = client.post(
         "/ruok/login",
-        data={"password": "mysecret"},
+        data={"username": "admin", "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
 
@@ -89,10 +120,86 @@ def test_webui_plaintext_password_login(tmp_path: Path) -> None:
     assert response.headers["location"] == "/ruok"
 
 
-def test_webui_protected_action_requires_login(tmp_path: Path) -> None:
+def test_webui_without_admin_password_cannot_login(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.config import ScopedConfig
 
-    client = _client(ScopedConfig(webui_password="mysecret"), tmp_path)
+    client = _client(ScopedConfig(), tmp_path)
+
+    response = client.post(
+        "/ruok/login",
+        data={"username": "admin", "password": "anything"},
+    )
+
+    assert response.status_code == 200
+    assert "RUOK__WEBUI_ADMIN_PASSWORD" in response.text
+
+
+def test_webui_user_registers_with_auth_key(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+
+    response = client.post(
+        "/ruok/register",
+        data={
+            "username": "alice",
+            "password": "secret",
+            "password_confirm": "secret",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "/ruok bind" in response.text
+    users = json.loads((tmp_path / "webui_users.json").read_text("utf-8"))["users"]
+    assert users[0]["username"] == "alice"
+    assert users[0]["role"] == "user"
+    assert users[0]["auth_key_hash"]
+
+
+def test_webui_register_rejects_admin_and_duplicate_user(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth, UserRegistrationError
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+
+    with pytest.raises(UserRegistrationError):
+        auth.register_user("admin", "secret")
+
+    auth.register_user("alice", "secret")
+    with pytest.raises(UserRegistrationError):
+        auth.register_user("Alice", "secret")
+
+
+def test_webui_auth_key_binding_expires_and_cannot_be_reused(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import (
+        WebUIAuth,
+        AuthKeyExpired,
+        AuthKeyAlreadyUsed,
+    )
+
+    auth = WebUIAuth(_webui_config(), tmp_path)
+    expired = auth.register_user("expired", "secret")
+    users = json.loads((tmp_path / "webui_users.json").read_text("utf-8"))
+    users["users"][0]["auth_key_expires_at"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=1)
+    ).isoformat()
+    (tmp_path / "webui_users.json").write_text(
+        json.dumps(users, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AuthKeyExpired):
+        auth.bind_auth_key(expired.auth_key, "10001")
+
+    active = auth.register_user("active", "secret")
+    bound = auth.bind_auth_key(active.auth_key, "10002")
+
+    assert bound.bound_qq == "10002"
+    assert auth.is_qq_bound("10002")
+    with pytest.raises(AuthKeyAlreadyUsed):
+        auth.bind_auth_key(active.auth_key, "10003")
+
+
+def test_webui_protected_action_requires_login(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
     response = client.post(
         "/ruok/_actions/module-upsert",
         data={"name": "demo"},
@@ -101,8 +208,115 @@ def test_webui_protected_action_requires_login(tmp_path: Path) -> None:
     assert response.status_code == 401
 
 
+def test_webui_user_dashboard_hides_admin_surfaces(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    WebUIAuth(config, tmp_path).register_user("alice", "secret")
+    client = _client(config, tmp_path)
+    _login_user(client, "alice", "secret")
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    assert "/ruok/sessions" not in response.text
+    assert "/ruok/modules" not in response.text
+    assert "/ruok/notifications" not in response.text
+    assert "dashboard-trends" not in response.text
+    assert "dashboard-system" not in response.text
+    assert "/ruok bind" in response.text
+    assert "我的上报" in response.text
+
+
+def test_webui_user_cannot_access_admin_routes(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    WebUIAuth(config, tmp_path).register_user("alice", "secret")
+    client = _client(config, tmp_path)
+    _login_user(client, "alice", "secret")
+
+    assert client.get("/ruok/modules").status_code == 403
+    assert client.get("/ruok/notifications").status_code == 403
+    assert client.get("/ruok/sessions").status_code == 403
+    assert client.get("/ruok/_partials/dashboard-trends-data").status_code == 403
+    assert (
+        client.post(
+            "/ruok/_actions/module-upsert",
+            data={"name": "demo"},
+        ).status_code
+        == 403
+    )
+
+
+def test_webui_user_must_bind_before_manual_report(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    WebUIAuth(config, tmp_path).register_user("alice", "secret")
+    client = _client(config, tmp_path)
+    _login_user(client, "alice", "secret")
+
+    response = client.post(
+        "/ruok/_actions/session-create",
+        data={"module_name": "music", "description": "boom"},
+    )
+
+    assert response.status_code == 403
+    assert "绑定 QQ" in response.text
+
+
+def test_webui_bound_user_report_uses_bound_qq_and_sees_own_sessions(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions, create_session
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+    result = auth.register_user("alice", "secret")
+    auth.bind_auth_key(result.auth_key, "10001")
+    create_session(
+        tmp_path,
+        "music",
+        "other user issue",
+        ReporterInfo(type="user", user_id="20002"),
+    )
+    client = _client(config, tmp_path)
+    _login_user(client, "alice", "secret")
+
+    response = client.post(
+        "/ruok/_actions/session-create",
+        data={"module_name": "music", "description": "mine"},
+    )
+
+    sessions = list_sessions(tmp_path)
+    mine = [session for session in sessions if session.description == "mine"]
+    assert response.status_code == 200
+    assert len(mine) == 1
+    assert mine[0].reporter.user_id == "10001"
+    assert "mine" in response.text
+    assert "other user issue" not in response.text
+
+
+def test_webui_admin_manual_report_uses_admin_identity(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/session-create",
+        data={"module_name": "ruok", "description": "admin report"},
+    )
+
+    sessions = list_sessions(tmp_path)
+    assert response.status_code == 200
+    assert sessions[0].reporter.user_id == "webui-admin"
+
+
 def test_dashboard_trends_partial_uses_webui_metrics_context(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import MetricPoint
     from nonebot_plugin_ruok.collector import MetricsStore
 
@@ -114,7 +328,8 @@ def test_dashboard_trends_partial_uses_webui_metrics_context(tmp_path: Path) -> 
             memory_percent=34.5,
         ),
     )
-    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+    client = _client(_webui_config(api_key="secret"), tmp_path)
+    _login_admin(client)
 
     response = client.get("/ruok?_partial=dashboard-trends")
 
@@ -126,7 +341,6 @@ def test_dashboard_trends_partial_uses_webui_metrics_context(tmp_path: Path) -> 
 
 
 def test_dashboard_trends_data_uses_webui_auth_not_api_key(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import MetricPoint
     from nonebot_plugin_ruok.collector import MetricsStore
 
@@ -138,7 +352,8 @@ def test_dashboard_trends_data_uses_webui_auth_not_api_key(tmp_path: Path) -> No
             memory_percent=44.5,
         ),
     )
-    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+    client = _client(_webui_config(api_key="secret"), tmp_path)
+    _login_admin(client)
 
     response = client.get("/ruok/_partials/dashboard-trends-data?hours=1")
 
@@ -147,9 +362,8 @@ def test_dashboard_trends_data_uses_webui_auth_not_api_key(tmp_path: Path) -> No
 
 
 def test_dashboard_trends_do_not_replace_canvas_with_htmx(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
-
-    client = _client(ScopedConfig(), tmp_path)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
 
     response = client.get("/ruok")
 
@@ -161,7 +375,6 @@ def test_dashboard_trends_do_not_replace_canvas_with_htmx(tmp_path: Path) -> Non
 def test_session_detail_renders_manual_description_separately(
     tmp_path: Path,
 ) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ReporterInfo
     from nonebot_plugin_ruok.collectors.sessions import create_session
 
@@ -172,7 +385,8 @@ def test_session_detail_renders_manual_description_separately(
         ReporterInfo(type="user", user_id="u1"),
         source="manual",
     )
-    client = _client(ScopedConfig(), tmp_path)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
 
     response = client.get(f"/ruok/sessions/{session.session_id}")
 
@@ -186,7 +400,6 @@ def test_session_detail_renders_manual_description_separately(
 def test_session_detail_renders_automatic_traceback_as_code_block(
     tmp_path: Path,
 ) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ReporterInfo
     from nonebot_plugin_ruok.collectors.sessions import create_session
 
@@ -197,7 +410,8 @@ def test_session_detail_renders_automatic_traceback_as_code_block(
         ReporterInfo(type="automatic"),
         source="automatic",
     )
-    client = _client(ScopedConfig(), tmp_path)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
 
     response = client.get(f"/ruok/sessions/{session.session_id}")
 
@@ -209,9 +423,8 @@ def test_session_detail_renders_automatic_traceback_as_code_block(
 
 
 def test_notifications_page_uses_form_panel_and_card_actions(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
-
-    client = _client(ScopedConfig(), tmp_path)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
 
     response = client.get("/ruok/notifications")
 
@@ -226,13 +439,13 @@ def test_notifications_page_uses_form_panel_and_card_actions(tmp_path: Path) -> 
 def test_notification_form_supports_multiple_module_selection(
     tmp_path: Path,
 ) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ModuleDefinition
 
-    config = ScopedConfig()
+    config = _webui_config()
     _upsert_module(tmp_path, ModuleDefinition(name="module_a", display_name="A"))
     _upsert_module(tmp_path, ModuleDefinition(name="module_b", display_name="B"))
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.post(
         "/ruok/_actions/notification-upsert",
@@ -254,10 +467,9 @@ def test_notification_form_supports_multiple_module_selection(
 
 
 def test_notification_edit_form_loads_special_character_name(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import NotificationRule
 
-    config = ScopedConfig()
+    config = _webui_config()
     rule_name = "紧急 通知/a"
     _save_notification_rules(
         config,
@@ -265,6 +477,7 @@ def test_notification_edit_form_loads_special_character_name(tmp_path: Path) -> 
         [NotificationRule(name=rule_name, channels=["webhook"])],
     )
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.get(
         "/ruok/_actions/notification-edit-form",
@@ -277,10 +490,9 @@ def test_notification_edit_form_loads_special_character_name(tmp_path: Path) -> 
 
 
 def test_notification_edit_form_checks_configured_modules(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ModuleDefinition, NotificationRule
 
-    config = ScopedConfig()
+    config = _webui_config()
     _upsert_module(tmp_path, ModuleDefinition(name="module_a", display_name="A"))
     _upsert_module(tmp_path, ModuleDefinition(name="module_b", display_name="B"))
     _save_notification_rules(
@@ -294,6 +506,7 @@ def test_notification_edit_form_checks_configured_modules(tmp_path: Path) -> Non
         ],
     )
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.get(
         "/ruok/_actions/notification-edit-form",
@@ -307,16 +520,16 @@ def test_notification_edit_form_checks_configured_modules(tmp_path: Path) -> Non
 
 
 def test_notification_edit_renames_without_duplicate(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import NotificationRule
 
-    config = ScopedConfig()
+    config = _webui_config()
     _save_notification_rules(
         config,
         tmp_path,
         [NotificationRule(name="old/name")],
     )
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.post(
         "/ruok/_actions/notification-upsert",
@@ -340,16 +553,16 @@ def test_notification_edit_renames_without_duplicate(tmp_path: Path) -> None:
 
 
 def test_notification_rename_conflict_returns_400(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import NotificationRule
 
-    config = ScopedConfig()
+    config = _webui_config()
     _save_notification_rules(
         config,
         tmp_path,
         [NotificationRule(name="first"), NotificationRule(name="second")],
     )
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.post(
         "/ruok/_actions/notification-upsert",
@@ -366,10 +579,9 @@ def test_notification_rename_conflict_returns_400(tmp_path: Path) -> None:
 
 
 def test_notification_delete_accepts_special_character_name(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import NotificationRule
 
-    config = ScopedConfig()
+    config = _webui_config()
     rule_name = "紧急 通知/a"
     _save_notification_rules(
         config,
@@ -377,6 +589,7 @@ def test_notification_delete_accepts_special_character_name(tmp_path: Path) -> N
         [NotificationRule(name=rule_name), NotificationRule(name="keep")],
     )
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.post(
         "/ruok/_actions/notification-delete",
@@ -389,9 +602,8 @@ def test_notification_delete_accepts_special_character_name(tmp_path: Path) -> N
 
 
 def test_modules_page_links_to_details_without_inline_actions(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
-
-    client = _client(ScopedConfig(), tmp_path)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
 
     response = client.get("/ruok/modules")
 
@@ -404,10 +616,9 @@ def test_modules_page_links_to_details_without_inline_actions(tmp_path: Path) ->
 
 
 def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ModuleDefinition
 
-    config = ScopedConfig()
+    config = _webui_config()
     _upsert_module(
         tmp_path,
         ModuleDefinition(
@@ -417,6 +628,7 @@ def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
         ),
     )
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.get("/ruok/modules/demo")
 
@@ -431,10 +643,9 @@ def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
 
 
 def test_module_edit_form_loads_special_character_name(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ModuleDefinition
 
-    config = ScopedConfig()
+    config = _webui_config()
     module_name = "mod with/slash"
     _upsert_module(
         tmp_path,
@@ -446,6 +657,7 @@ def test_module_edit_form_loads_special_character_name(tmp_path: Path) -> None:
         ),
     )
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.get(
         "/ruok/_actions/module-edit-form",
@@ -459,12 +671,12 @@ def test_module_edit_form_loads_special_character_name(tmp_path: Path) -> None:
 
 
 def test_module_edit_renames_without_duplicate(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ModuleDefinition
 
-    config = ScopedConfig()
+    config = _webui_config()
     _upsert_module(tmp_path, ModuleDefinition(name="old/name", display_name="Old"))
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.post(
         "/ruok/_actions/module-upsert",
@@ -487,12 +699,12 @@ def test_module_edit_renames_without_duplicate(tmp_path: Path) -> None:
 def test_module_detail_edit_redirects_and_accepts_multiple_plugins(
     tmp_path: Path,
 ) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ModuleDefinition
 
-    config = ScopedConfig()
+    config = _webui_config()
     _upsert_module(tmp_path, ModuleDefinition(name="old/name", display_name="Old"))
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.post(
         "/ruok/_actions/module-upsert",
@@ -517,13 +729,13 @@ def test_module_detail_edit_redirects_and_accepts_multiple_plugins(
 
 
 def test_module_rename_conflict_returns_400(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ModuleDefinition
 
-    config = ScopedConfig()
+    config = _webui_config()
     _upsert_module(tmp_path, ModuleDefinition(name="first", display_name="First"))
     _upsert_module(tmp_path, ModuleDefinition(name="second", display_name="Second"))
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.post(
         "/ruok/_actions/module-upsert",
@@ -541,14 +753,14 @@ def test_module_rename_conflict_returns_400(tmp_path: Path) -> None:
 
 
 def test_module_delete_accepts_special_character_name(tmp_path: Path) -> None:
-    from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ModuleDefinition
 
-    config = ScopedConfig()
+    config = _webui_config()
     module_name = "mod with/slash"
     _upsert_module(tmp_path, ModuleDefinition(name=module_name))
     _upsert_module(tmp_path, ModuleDefinition(name="keep"))
     client = _client(config, tmp_path)
+    _login_admin(client)
 
     response = client.post(
         "/ruok/_actions/module-delete",

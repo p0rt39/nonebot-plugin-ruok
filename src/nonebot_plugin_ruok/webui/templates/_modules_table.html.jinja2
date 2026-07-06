@@ -21,7 +21,15 @@
                 {% else %}⚪{% endif %}
                 {{ m.status }}
             </td>
-            <td><strong><a href="/ruok/modules/{{ m.name | urlencode }}">{{ m.display_name or m.name }}</a></strong></td>
+            <td>
+                <strong>
+                    {% if module_links is defined and not module_links %}
+                    {{ m.display_name or m.name }}
+                    {% else %}
+                    <a href="/ruok/modules/{{ m.name | urlencode }}">{{ m.display_name or m.name }}</a>
+                    {% endif %}
+                </strong>
+            </td>
             <td>{{ m.display_name }}</td>
             <td>{{ m.plugins | length }}</td>
             <td>{{ m.description or '—' }}</td>
