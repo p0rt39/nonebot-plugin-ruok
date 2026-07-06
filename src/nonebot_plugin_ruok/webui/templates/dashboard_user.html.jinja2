@@ -55,6 +55,11 @@
         在当前聊天平台中发送 <code>/ruok bind {{ auth_key }}</code> 完成绑定。
         {% if auth_key_expires_at %}有效期至 {{ auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}。{% endif %}
     </p>
+    {% elif auth_key_expired %}
+    <p class="status-warn">
+        当前绑定码已过期，请进入用户页重新生成绑定码。
+    </p>
+    <a href="/ruok/users" role="button" class="secondary outline">前往用户页</a>
     {% endif %}
 </article>
 {% endif %}

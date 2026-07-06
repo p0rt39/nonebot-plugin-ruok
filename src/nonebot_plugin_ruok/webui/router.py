@@ -258,12 +258,17 @@ def create_webui_router(
         if not user.is_admin:
             if _partial:
                 raise HTTPException(status_code=403, detail="Admin required")
-            auth_key = None
-            auth_key_expires_at = user.auth_key_expires_at
+            stored_user = auth.get_user(user.username)
+            auth_key = auth.active_auth_key(stored_user)
+            auth_key_expired = auth.auth_key_expired(stored_user)
+            auth_key_expires_at = (
+                stored_user.auth_key_expires_at if stored_user else None
+            )
             if not user.bound_user_id:
-                issued = auth.issue_auth_key(user.username)
-                auth_key = issued.auth_key
-                auth_key_expires_at = issued.user.auth_key_expires_at
+                if auth_key is None and not auth_key_expired:
+                    issued = auth.issue_auth_key(user.username)
+                    auth_key = issued.auth_key
+                    auth_key_expires_at = issued.user.auth_key_expires_at
             return render(
                 "dashboard_user.html.jinja2",
                 request=request,
@@ -277,6 +282,7 @@ def create_webui_router(
                 ),
                 all_modules=modules,
                 auth_key=auth_key,
+                auth_key_expired=auth_key_expired,
                 auth_key_expires_at=auth_key_expires_at,
             )
 
@@ -894,6 +900,40 @@ def create_webui_router(
             request=request,
             current_user=refreshed,
             users=auth.list_users() if refreshed.is_admin else [],
+            stored_user=auth.get_user(refreshed.username),
+            auth=auth,
+            issued_auth_key=result.auth_key,
+            issued_auth_key_user=result.user.username,
+            issued_auth_key_expires_at=result.user.auth_key_expires_at,
+            headers={"HX-Trigger": '{"toast":"Auth key issued","toastType":"success"}'},
+        )
+
+    @router.post("/ruok/_actions/account-auth-key")
+    async def action_account_auth_key(
+        request: Request,
+        user: CurrentWebUIUser = Depends(_login_guard),
+    ) -> HTMLResponse:
+        if user.username == "admin":
+            return _error_html("内置 admin 账户不支持平台绑定")
+        if user.bound_user_id:
+            return _error_html("已绑定账号请使用换绑流程")
+        try:
+            result = auth.issue_auth_key(user.username, allow_bound=False)
+        except UserRegistrationError as exc:
+            return _error_html(str(exc))
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, "action_account_auth_key", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f"❌ 生成失败 [{type(exc).__name__}] → Session: {sid}</p>",
+                status_code=500,
+            )
+        refreshed = auth.current_user(request) or user
+        return render(
+            "_users_panel.html.jinja2",
+            request=request,
+            current_user=refreshed,
+            users=[],
             stored_user=auth.get_user(refreshed.username),
             auth=auth,
             issued_auth_key=result.auth_key,

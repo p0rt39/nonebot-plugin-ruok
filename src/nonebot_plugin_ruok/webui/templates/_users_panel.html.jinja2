@@ -101,8 +101,12 @@
                     <div>
                         <dt>绑定码</dt>
                         <dd>
-                            {% if user.auth_key_expires_at %}
-                            有效至 {{ user.auth_key_expires_at.astimezone().strftime('%m-%d %H:%M') }}
+                            {% set active_key = auth.active_auth_key(user) %}
+                            {% if active_key %}
+                            <code style="overflow-wrap:anywhere;">{{ active_key }}</code><br>
+                            <small>有效至 {{ user.auth_key_expires_at.astimezone().strftime('%m-%d %H:%M') }}</small>
+                            {% elif auth.auth_key_expired(user) %}
+                            <span class="badge badge-warn">已过期</span>
                             {% else %}
                             —
                             {% endif %}
@@ -187,8 +191,14 @@
         <div>
             <dt>待用绑定码</dt>
             <dd>
-                {% if stored_user and stored_user.auth_key_expires_at %}
-                有效至 {{ stored_user.auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
+                {% set active_key = auth.active_auth_key(stored_user) %}
+                {% if active_key %}
+                <code style="overflow-wrap:anywhere;">{{ active_key }}</code><br>
+                <small>
+                    有效至 {{ stored_user.auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
+                </small>
+                {% elif auth.auth_key_expired(stored_user) %}
+                <span class="badge badge-warn">已过期</span>
                 {% else %}
                 —
                 {% endif %}
@@ -220,6 +230,7 @@
 
     <article>
         <h4>换绑平台账号</h4>
+        {% if current_user.bound_user_id %}
         <p>生成新的一次性绑定码。旧绑定会保留，直到你在聊天平台完成新的 <code>/ruok bind</code>。</p>
         <form hx-post="/ruok/_actions/account-rebind-key"
               hx-target="#users-panel" hx-swap="outerHTML">
@@ -229,6 +240,13 @@
             </label>
             <button type="submit" class="secondary outline">生成换绑码</button>
         </form>
+        {% else %}
+        <p>生成或刷新一次性绑定码，然后在聊天平台发送 <code>/ruok bind &lt;auth_key&gt;</code>。</p>
+        <form hx-post="/ruok/_actions/account-auth-key"
+              hx-target="#users-panel" hx-swap="outerHTML">
+            <button type="submit" class="secondary outline">生成绑定码</button>
+        </form>
+        {% endif %}
     </article>
 
     <article>

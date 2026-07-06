@@ -91,6 +91,7 @@ class StoredWebUIUser(BaseModel):
     bound_user_id: str | None = None
     bound_platform: str | None = None
     auth_key_hash: str | None = None
+    auth_key_value: str | None = None
     auth_key_expires_at: datetime | None = None
     used_auth_key_hashes: list[str] = Field(default_factory=list)
     password_reset_key_hash: str | None = None
@@ -308,6 +309,21 @@ class WebUIAuth:
         self._save_remember_tokens(tokens)
         return token_value
 
+    def active_auth_key(self, user: StoredWebUIUser | None) -> str | None:
+        """Return the still-displayable one-time auth key for a stored user."""
+        if user is None or not user.auth_key_value or not user.auth_key_hash:
+            return None
+        expires_at = user.auth_key_expires_at
+        if expires_at is None or _aware_utc(expires_at) < _utc_now():
+            return None
+        return user.auth_key_value
+
+    def auth_key_expired(self, user: StoredWebUIUser | None) -> bool:
+        """Return True when a pending auth key exists but is already expired."""
+        if user is None or not user.auth_key_hash or user.auth_key_expires_at is None:
+            return False
+        return _aware_utc(user.auth_key_expires_at) < _utc_now()
+
     def revoke_remember_token_value(self, token_value: str | None) -> None:
         """Revoke a single remember token by cookie value."""
         token_id, _secret = self._split_remember_token(token_value)
@@ -350,6 +366,7 @@ class WebUIAuth:
             username=normalized,
             password_hash=hash_password(password),
             auth_key_hash=_hash_auth_key(auth_key),
+            auth_key_value=auth_key,
             auth_key_expires_at=_utc_now() + AUTH_KEY_TTL,
         )
         users[key] = user
@@ -372,6 +389,7 @@ class WebUIAuth:
 
         auth_key = secrets.token_urlsafe(24)
         user.auth_key_hash = _hash_auth_key(auth_key)
+        user.auth_key_value = auth_key
         user.auth_key_expires_at = _utc_now() + AUTH_KEY_TTL
         users[self._user_key(user.username)] = user
         self._save_users(users)
@@ -418,6 +436,7 @@ class WebUIAuth:
             user.bound_user_id = normalized_user_id
             user.bound_platform = normalized_platform
             user.auth_key_hash = None
+            user.auth_key_value = None
             user.auth_key_expires_at = None
             user.used_auth_key_hashes.append(key_hash)
             users[self._user_key(user.username)] = user
@@ -425,6 +444,11 @@ class WebUIAuth:
             return user
 
         if matched_expired is not None:
+            matched_expired.auth_key_hash = None
+            matched_expired.auth_key_value = None
+            matched_expired.auth_key_expires_at = None
+            users[self._user_key(matched_expired.username)] = matched_expired
+            self._save_users(users)
             raise AuthKeyExpired("auth_key 已过期")
         if matched_used:
             raise AuthKeyAlreadyUsed("auth_key 已使用")
