@@ -236,6 +236,61 @@ def test_webui_confirm_without_plugins_does_not_propagate(
     assert lyrics.status == "available"
 
 
+def test_webui_unsolved_session_can_update_affected_plugins(
+    tmp_path: Path,
+) -> None:
+    import re
+
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import get_module, upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import (
+        get_session,
+        create_session,
+        confirm_session_plugins,
+    )
+
+    config = _webui_config()
+    upsert_module(
+        tmp_path,
+        ModuleDefinition(name="music", plugins=["plugin_a", "plugin_b"]),
+    )
+    upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+    upsert_module(tmp_path, ModuleDefinition(name="playlist", plugins=["plugin_b"]))
+    session = create_session(
+        tmp_path,
+        "music",
+        "plugin impact changed",
+        ReporterInfo(type="user"),
+    )
+    confirm_session_plugins(tmp_path, config, session.session_id, ["plugin_a"])
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    page_response = client.get("/ruok/sessions")
+    action_response = client.post(
+        f"/ruok/_actions/confirm/{session.session_id}",
+        data={"affected_plugins": ["plugin_b"]},
+    )
+    reloaded = get_session(tmp_path, session.session_id)
+    lyrics = get_module(tmp_path, config, "lyrics")
+    playlist = get_module(tmp_path, config, "playlist")
+
+    assert page_response.status_code == 200
+    assert "🧩 修改插件" in page_response.text
+    assert re.search(
+        r'name="affected_plugins" value="plugin_a"\s+checked',
+        page_response.text,
+    )
+    assert action_response.status_code == 200
+    assert "影响插件: plugin_b" in action_response.text
+    assert reloaded is not None
+    assert reloaded.affected_plugins == ["plugin_b"]
+    assert lyrics is not None
+    assert lyrics.status == "available"
+    assert playlist is not None
+    assert playlist.status == "unavailable"
+
+
 def test_module_detail_includes_plugin_propagated_sessions(
     tmp_path: Path,
 ) -> None:

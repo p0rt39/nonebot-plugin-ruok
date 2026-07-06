@@ -120,26 +120,33 @@
 <article>
     <h4>⚡ 操作</h4>
     <div class="ruok-button-row--grid">
-        {% if session.status == 'pending' %}
+        {% set plugin_options = session_plugin_options(session.module_name) if session_plugin_options is defined else [] %}
+        {% if session.status == 'pending' or plugin_options or session.affected_plugins %}
         <form hx-post="/ruok/_actions/confirm/{{ session.session_id }}"
               hx-target="#session-detail-content"
               hx-swap="outerHTML"
               hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})"
               style="margin:0;">
-            {% set plugin_options = session_plugin_options(session.module_name) if session_plugin_options is defined else [] %}
             {% if plugin_options %}
             <details class="confirm-plugin-picker">
-                <summary class="secondary outline ruok-button">✅ 确认为未解决</summary>
+                <summary class="secondary outline ruok-button">
+                    {% if session.status == 'pending' %}✅ 确认为未解决{% else %}🧩 修改影响插件{% endif %}
+                </summary>
                 <div class="confirm-plugin-options">
                     {% for plugin in plugin_options %}
                     <label>
-                        <input type="checkbox" name="affected_plugins" value="{{ plugin }}">
+                        <input type="checkbox" name="affected_plugins" value="{{ plugin }}"
+                               {% if plugin in session.affected_plugins %}checked{% endif %}>
                         {{ plugin }}
                     </label>
                     {% endfor %}
-                    <button type="submit" class="secondary outline ruok-button">确认 Session</button>
+                    <button type="submit" class="secondary outline ruok-button">
+                        {% if session.status == 'pending' %}确认 Session{% else %}保存插件关联{% endif %}
+                    </button>
                 </div>
             </details>
+            {% elif session.status == 'unsolved' and session.affected_plugins %}
+            <button type="submit" class="secondary outline">🧹 清空插件关联</button>
             {% else %}
             <button type="submit" class="secondary outline">✅ 确认为未解决</button>
             {% endif %}

@@ -316,6 +316,52 @@ class TestDeriveModuleStatus:
         assert music.status == "unavailable"
         assert lyrics.status == "available"
 
+    def test_confirm_can_replace_existing_plugin_impact(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            get_module,
+            upsert_module,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            create_session,
+            confirm_session_plugins,
+        )
+
+        config = ScopedConfig()
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="music", plugins=["plugin_a", "plugin_b"]),
+        )
+        upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="playlist", plugins=["plugin_b"]),
+        )
+        session = create_session(
+            tmp_path,
+            "music",
+            "plugin impact changed",
+            ReporterInfo(type="user"),
+        )
+        confirm_session_plugins(tmp_path, config, session.session_id, ["plugin_a"])
+
+        confirm_session_plugins(tmp_path, config, session.session_id, ["plugin_b"])
+
+        reloaded = get_session(tmp_path, session.session_id)
+        lyrics = get_module(tmp_path, config, "lyrics")
+        playlist = get_module(tmp_path, config, "playlist")
+        assert reloaded is not None
+        assert reloaded.affected_plugins == ["plugin_b"]
+        assert lyrics is not None
+        assert lyrics.status == "available"
+        assert playlist is not None
+        assert playlist.status == "unavailable"
+
     def test_solving_one_session_keeps_other_plugin_impact(
         self,
         tmp_path: Path,

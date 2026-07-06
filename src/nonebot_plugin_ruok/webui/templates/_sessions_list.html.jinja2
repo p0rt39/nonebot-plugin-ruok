@@ -41,25 +41,32 @@
             <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline ruok-button">
                 📋 详情
             </a>
-            {% if s.status == 'pending' %}
+            {% set plugin_options = session_plugin_options(s.module_name) if session_plugin_options is defined else [] %}
+            {% if s.status == 'pending' or plugin_options or s.affected_plugins %}
             <form hx-post="/ruok/_actions/confirm/{{ s.session_id }}"
                   hx-target="#session-{{ s.session_id }}"
                   hx-swap="outerHTML"
                   style="margin:0;">
-                {% set plugin_options = session_plugin_options(s.module_name) if session_plugin_options is defined else [] %}
                 {% if plugin_options %}
                 <details class="confirm-plugin-picker">
-                    <summary class="secondary outline ruok-button">✅ 确认</summary>
+                    <summary class="secondary outline ruok-button">
+                        {% if s.status == 'pending' %}✅ 确认{% else %}🧩 修改插件{% endif %}
+                    </summary>
                     <div class="confirm-plugin-options">
                         {% for plugin in plugin_options %}
                         <label>
-                            <input type="checkbox" name="affected_plugins" value="{{ plugin }}">
+                            <input type="checkbox" name="affected_plugins" value="{{ plugin }}"
+                                   {% if plugin in s.affected_plugins %}checked{% endif %}>
                             {{ plugin }}
                         </label>
                         {% endfor %}
-                        <button type="submit" class="secondary outline ruok-button">确认 Session</button>
+                        <button type="submit" class="secondary outline ruok-button">
+                            {% if s.status == 'pending' %}确认 Session{% else %}保存插件关联{% endif %}
+                        </button>
                     </div>
                 </details>
+                {% elif s.status == 'unsolved' and s.affected_plugins %}
+                <button type="submit" class="secondary outline">🧹 清空插件关联</button>
                 {% else %}
                 <button type="submit" class="secondary outline">✅ 确认</button>
                 {% endif %}
