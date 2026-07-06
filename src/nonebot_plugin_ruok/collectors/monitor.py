@@ -18,6 +18,8 @@ from .sessions import (
     _gen_session_id,
     _make_signature,
     _find_existing_session,
+    _publish_session_event,
+    rebuild_plugin_impacts,
 )
 from ..protocol import Session, ReporterInfo
 
@@ -117,7 +119,7 @@ class _StdlibLogHandler(logging.Handler):
             existing = _find_existing_session(self._data_dir, signature)
             if existing is not None:
                 existing.last_seen_at = datetime.now(timezone.utc)
-                _save_session(self._data_dir, existing)
+                _persist_automatic_session_update(self._data_dir, existing)
                 return
 
             session = Session(
@@ -129,8 +131,14 @@ class _StdlibLogHandler(logging.Handler):
                 reporter=ReporterInfo(type="automatic"),
                 description=(f"```\n{msg_text}\n{exc_text}\n```"),
             )
-            _save_session(self._data_dir, session)
+            _persist_automatic_session_update(self._data_dir, session, created=True)
             logger.warning(f"RUOK: new session {session.session_id} for {plugin_id}")
+            _schedule_session_notification(
+                session,
+                self._config,
+                self._data_dir,
+                self._loop,
+            )
         except Exception:
             # logging handler must never raise — try best-effort logging
             try:
@@ -174,7 +182,7 @@ def _make_log_sink(
         existing = _find_existing_session(data_dir, signature)
         if existing:
             existing.last_seen_at = datetime.now(timezone.utc)
-            _save_session(data_dir, existing)
+            _persist_automatic_session_update(data_dir, existing)
             return
 
         session = Session(
@@ -186,14 +194,40 @@ def _make_log_sink(
             reporter=ReporterInfo(type="automatic"),
             description=f"```\n{msg_text}\n{exception_str}\n```",
         )
-        _save_session(data_dir, session)
+        _persist_automatic_session_update(data_dir, session, created=True)
         logger.warning(f"RUOK: new session {session.session_id} for {plugin_id}")
-        if config.notify_superusers:
-            # Late import to avoid circular dependency
-            from ..collector import _notify_new_session
-
-            asyncio.run_coroutine_threadsafe(
-                _notify_new_session(session, config, data_dir), loop
-            )
+        _schedule_session_notification(session, config, data_dir, loop)
 
     return _sink
+
+
+def _persist_automatic_session_update(
+    data_dir: Path,
+    session: Session,
+    *,
+    created: bool = False,
+) -> None:
+    """Persist an automatic session and run the normal best-effort side effects."""
+    _save_session(data_dir, session)
+    rebuild_plugin_impacts(data_dir)
+    _publish_session_event("created" if created else "updated", session)
+
+
+def _schedule_session_notification(
+    session: Session,
+    config: ScopedConfig,
+    data_dir: Path,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """Schedule notification dispatch for a newly created automatic session."""
+    if not config.notify_superusers:
+        return
+    try:
+        from ..collector import _notify_new_session
+
+        asyncio.run_coroutine_threadsafe(
+            _notify_new_session(session, config, data_dir),
+            loop,
+        )
+    except RuntimeError as exc:
+        logger.warning(f"RUOK: automatic session notification scheduling failed: {exc}")

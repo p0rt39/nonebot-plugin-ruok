@@ -181,6 +181,9 @@ def test_webui_login_ui_is_modern_auth_shell(tmp_path: Path) -> None:
     assert 'class="auth-panel auth-card"' in response.text
     assert 'class="auth-form"' in response.text
     assert 'class="auth-input-wrap"' in response.text
+    assert "cdn.jsdelivr.net" not in response.text
+    assert "unpkg.com" not in response.text
+    assert "/ruok/static/vendor/pico/pico.min.css" in response.text
     assert 'data-password-toggle="login-password"' in response.text
     assert 'aria-pressed="false"' in response.text
     assert 'autocomplete="username"' in response.text
@@ -188,6 +191,15 @@ def test_webui_login_ui_is_modern_auth_shell(tmp_path: Path) -> None:
     assert 'name="remember_login"' in response.text
     assert "/ruok/reset-password" in response.text
     assert ">显示<" not in response.text
+
+
+def test_webui_serves_vendored_static_assets(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+
+    response = client.get("/ruok/static/vendor/htmx/htmx.min.js")
+
+    assert response.status_code == 200
+    assert "htmx" in response.text
 
 
 def test_webui_register_password_toggle_is_icon_only(tmp_path: Path) -> None:

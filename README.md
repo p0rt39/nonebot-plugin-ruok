@@ -413,6 +413,20 @@ RUOK 使用 `nonebot-plugin-localstore` 的插件数据目录。
 
 `plugin_impacts.json` 是缓存，不是权威状态。缺失、损坏或过期时会从 Session 文件重建。
 
+## 前端静态资产与许可证
+
+WebUI 使用随包分发的本地静态资产，不依赖运行时 CDN：
+
+| 资产 | 版本 | 许可证 | 包内路径 |
+| :--- | :--- | :--- | :--- |
+| Pico CSS | `2.1.1` | MIT | `webui/static/vendor/pico/` |
+| htmx | `2.0.8` | 0BSD | `webui/static/vendor/htmx/` |
+| Idiomorph | `0.7.4` | 0BSD | `webui/static/vendor/idiomorph/` |
+| Chart.js | `4.5.1` | MIT | `webui/static/vendor/chartjs/` |
+
+这些文件通过 `/ruok/static/vendor/...` 提供给浏览器，安装包内已保留对应
+`LICENSE` / `LICENSE.md` 文件。
+
 ## 项目结构
 
 ```text
@@ -434,6 +448,7 @@ src/nonebot_plugin_ruok/
     ├── router.py        # SSR 页面、HTMX partial/action、SSE
     ├── sse.py           # EventBus 和 SSE 生成器
     ├── jinja.py         # Jinja 环境和过滤器
+    ├── static/          # WebUI 本地静态资产及第三方许可证
     └── templates/       # Jinja2 页面与 partial
 ```
 

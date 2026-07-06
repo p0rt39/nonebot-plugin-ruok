@@ -205,5 +205,8 @@ def test_dashboard_trends_do_not_replace_canvas_with_htmx(tmp_path: Path) -> Non
     response = client.get("/ruok")
 
     assert response.status_code == 200
+    assert "cdn.jsdelivr.net" not in response.text
+    assert "unpkg.com" not in response.text
+    assert "/ruok/static/vendor/chartjs/chart.umd.min.js" in response.text
     assert '<div id="dashboard-trends">' in response.text
     assert "ruok:metrics" in response.text

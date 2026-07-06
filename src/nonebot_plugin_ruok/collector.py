@@ -22,6 +22,7 @@ from .collectors import (
     DiskRateTracker,
     NetworkRateTracker,
     SessionPluginValidationError,
+    SessionUpdateValidationError,
     get_module,
     get_session,
     # modules
@@ -62,6 +63,7 @@ __all__ = [
     "MetricsStore",
     "NetworkRateTracker",
     "SessionPluginValidationError",
+    "SessionUpdateValidationError",
     "_collect_plugin_inventory",
     "_connection_history",
     "_disk_tracker",

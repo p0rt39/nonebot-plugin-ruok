@@ -296,6 +296,29 @@ class TestUpdateSession:
 
         assert update_session(tmp_path, "ruok-nope", {"status": "solved"}) is None
 
+    def test_update_rejects_invalid_status_without_corrupting_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        import pytest
+
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            SessionUpdateValidationError,
+            get_session,
+            create_session,
+            update_session,
+        )
+
+        session = create_session(tmp_path, "music", "issue", ReporterInfo(type="user"))
+
+        with pytest.raises(SessionUpdateValidationError):
+            update_session(tmp_path, session.session_id, {"status": "invalid"})
+
+        reloaded = get_session(tmp_path, session.session_id)
+        assert reloaded is not None
+        assert reloaded.status == "pending"
+
     def test_old_session_json_defaults_affected_plugins(self, tmp_path: Path) -> None:
         import json
         from datetime import datetime, timezone

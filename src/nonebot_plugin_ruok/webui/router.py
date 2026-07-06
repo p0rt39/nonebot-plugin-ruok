@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 from fastapi import Form, Query, Depends, Request, APIRouter, HTTPException
 from fastapi.responses import (
+    FileResponse,
     HTMLResponse,
     JSONResponse,
     StreamingResponse,
@@ -57,6 +58,8 @@ from ..collector import (
     _collect_plugin_inventory,
     list_module_related_sessions,
 )
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _query_metrics_history(data_dir: Path, hours: float = 1.0) -> list[dict[str, Any]]:
@@ -235,6 +238,19 @@ def create_webui_router(
 ) -> APIRouter:
     """Build SSR router for the RUOK WebUI."""
     router = APIRouter(tags=["ruok-webui"])
+
+    @router.get("/ruok/static/{asset_path:path}", response_model=None)
+    async def static_asset(asset_path: str) -> FileResponse:
+        """Serve vendored WebUI static assets."""
+        root = STATIC_DIR.resolve()
+        target = (root / asset_path).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Asset not found") from exc
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="Asset not found")
+        return FileResponse(target)
 
     # ── SSE endpoint ──
 

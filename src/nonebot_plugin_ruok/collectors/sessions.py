@@ -25,6 +25,10 @@ class SessionPluginValidationError(ValueError):
     """Raised when requested affected plugins do not belong to the session module."""
 
 
+class SessionUpdateValidationError(ValueError):
+    """Raised when requested session updates would make persisted data invalid."""
+
+
 # ────────────────────────────────
 # 1. Low-level helpers
 # ────────────────────────────────
@@ -201,12 +205,18 @@ def update_session(
         "affected_plugins",
     }
     old_status = session.status
+    data = session.model_dump()
     for k, v in updates.items():
         if k in allowed:
-            setattr(session, k, v)
+            data[k] = v
 
     if "status" in updates and updates["status"] in ("solved", "ignored"):
-        session.resolved_at = datetime.now(timezone.utc)
+        data["resolved_at"] = datetime.now(timezone.utc)
+
+    try:
+        session = Session.model_validate(data)
+    except ValueError as exc:
+        raise SessionUpdateValidationError(str(exc)) from exc
 
     _save_session(data_dir, session)
     if "status" in updates or "affected_plugins" in updates:

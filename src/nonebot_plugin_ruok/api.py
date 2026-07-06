@@ -16,6 +16,7 @@ from .protocol import ReporterInfo, ModuleDefinition
 from .collector import (
     MetricsStore,
     SessionPluginValidationError,
+    SessionUpdateValidationError,
     get_module,
     get_session,
     list_modules,
@@ -223,7 +224,10 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             updates = {
                 k: v for k, v in body.items() if k in ("status", "developer_notes")
             }
-            session = update_session(data_dir, session_id, updates)
+            try:
+                session = update_session(data_dir, session_id, updates)
+            except SessionUpdateValidationError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
         _cache.pop("status", None)

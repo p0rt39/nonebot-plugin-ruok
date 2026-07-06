@@ -124,3 +124,69 @@ class TestDiskRateTracker:
         for name, rate in per_disk.items():
             assert isinstance(name, str)
             assert isinstance(rate, DiskIORate)
+
+
+class TestLogMonitor:
+    def test_stdlib_log_session_rebuilds_impacts_and_notifies(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        import asyncio
+        import logging
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+        from nonebot_plugin_ruok.collectors.monitor import _StdlibLogHandler
+        from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+        class _DoneFuture:
+            pass
+
+        calls = []
+
+        async def _fake_notify(session, config, data_dir):
+            return None
+
+        def _fake_run_coroutine_threadsafe(coro, loop):
+            coro.close()
+            calls.append((coro, loop))
+            return _DoneFuture()
+
+        monkeypatch.setattr(
+            "nonebot_plugin_ruok.collector._notify_new_session",
+            _fake_notify,
+        )
+        monkeypatch.setattr(
+            "asyncio.run_coroutine_threadsafe",
+            _fake_run_coroutine_threadsafe,
+        )
+
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="uvicorn.error", plugins=["uvicorn_plugin"]),
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _StdlibLogHandler(ScopedConfig(), tmp_path, loop=loop)
+            record = logging.LogRecord(
+                name="uvicorn.error",
+                level=logging.ERROR,
+                pathname=__file__,
+                lineno=1,
+                msg="framework boom",
+                args=(),
+                exc_info=None,
+            )
+
+            handler.emit(record)
+        finally:
+            loop.close()
+
+        sessions = list_sessions(tmp_path, module_name="uvicorn.error")
+        impacts = (tmp_path / "plugin_impacts.json").read_text("utf-8")
+        assert len(sessions) == 1
+        assert sessions[0].source == "automatic"
+        assert sessions[0].session_id in impacts
+        assert calls

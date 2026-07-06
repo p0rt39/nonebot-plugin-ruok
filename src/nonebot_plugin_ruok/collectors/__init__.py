@@ -27,6 +27,7 @@ from .monitor import (
 )
 from .sessions import (
     SessionPluginValidationError,
+    SessionUpdateValidationError,
     get_session,
     _load_session,
     _save_session,
@@ -62,6 +63,7 @@ __all__ = [
     "LogMonitor",
     "NetworkRateTracker",
     "SessionPluginValidationError",
+    "SessionUpdateValidationError",
     "_collect_bot_info",
     "_collect_connection_status",
     "_collect_plugin_inventory",
