@@ -174,6 +174,52 @@
         input:focus, select:focus, textarea:focus {
             box-shadow: 0 0 0 3px rgba(102,126,234,0.2);
         }
+        .ruok-picker-controls {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .ruok-picker-controls input {
+            flex: 1 1 260px;
+            min-width: 0;
+            margin-bottom: 0;
+        }
+        .ruok-picker-controls button {
+            flex: 0 0 auto;
+            width: 2.75rem;
+            margin-bottom: 0;
+        }
+        .ruok-picker-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            min-height: 2.5rem;
+            margin-top: 0.6rem;
+            padding: 0.55rem;
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: var(--radius-sm);
+        }
+        .ruok-picker-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            max-width: 100%;
+            padding: 0.2rem 0.55rem;
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            background: rgba(102,126,234,0.12);
+        }
+        .ruok-picker-chip span {
+            overflow-wrap: anywhere;
+        }
+        .ruok-picker-remove {
+            width: 1.35rem;
+            height: 1.35rem;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
+        }
 
         /* ── Layout ── */
         .card-grid {
@@ -532,6 +578,78 @@
     });
     // Initialize button state
     setTheme(document.documentElement.getAttribute('data-theme') || 'light');
+})();
+</script>
+
+<script>
+// ── Searchable form pickers ──
+(function() {
+    function addPickerValue(picker) {
+        var input = picker.querySelector('[data-picker-input]');
+        var list = picker.querySelector('[data-picker-list]');
+        if (!input || !list) return;
+        var value = input.value.trim();
+        if (!value) return;
+        var existing = list.querySelectorAll('[data-picker-value]');
+        for (var i = 0; i < existing.length; i++) {
+            if (existing[i].getAttribute('data-picker-value') === value) {
+                input.value = '';
+                return;
+            }
+        }
+        var fieldName = picker.getAttribute('data-field-name');
+        if (!fieldName) return;
+
+        var chip = document.createElement('span');
+        chip.className = 'ruok-picker-chip';
+        chip.setAttribute('data-picker-value', value);
+
+        var label = document.createElement('span');
+        label.textContent = value;
+
+        var hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = fieldName;
+        hidden.value = value;
+
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'outline secondary ruok-picker-remove';
+        remove.title = '移除 ' + value;
+        remove.setAttribute('aria-label', '移除 ' + value);
+        remove.setAttribute('data-picker-remove', '');
+        remove.innerHTML = '&times;';
+
+        chip.appendChild(label);
+        chip.appendChild(hidden);
+        chip.appendChild(remove);
+        list.appendChild(chip);
+        input.value = '';
+    }
+
+    document.body.addEventListener('click', function(e) {
+        var add = e.target.closest('[data-picker-add]');
+        if (add) {
+            var picker = add.closest('.ruok-picker');
+            if (picker) addPickerValue(picker);
+            return;
+        }
+        var remove = e.target.closest('[data-picker-remove]');
+        if (remove) {
+            var chip = remove.closest('[data-picker-value]');
+            if (chip) chip.remove();
+        }
+    });
+
+    document.body.addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter') return;
+        var input = e.target.closest('[data-picker-input]');
+        if (!input) return;
+        var picker = input.closest('.ruok-picker');
+        if (!picker) return;
+        e.preventDefault();
+        addPickerValue(picker);
+    });
 })();
 </script>
 

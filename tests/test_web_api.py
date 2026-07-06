@@ -358,7 +358,14 @@ def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.protocol import ModuleDefinition
 
     config = ScopedConfig()
-    _upsert_module(tmp_path, ModuleDefinition(name="demo", display_name="Demo"))
+    _upsert_module(
+        tmp_path,
+        ModuleDefinition(
+            name="demo",
+            display_name="Demo",
+            plugins=["nonebot_plugin_ruok"],
+        ),
+    )
     client = _client(config, tmp_path)
 
     response = client.get("/ruok/modules/demo")
@@ -367,7 +374,9 @@ def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
     assert 'name="original_name"' in response.text
     assert 'name="return_to_detail"' in response.text
     assert 'hx-post="/ruok/_actions/module-delete"' in response.text
-    assert 'type="checkbox" name="selected_plugins"' in response.text
+    assert 'class="ruok-picker"' in response.text
+    assert 'data-field-name="selected_plugins"' in response.text
+    assert 'name="selected_plugins" value="nonebot_plugin_ruok"' in response.text
     assert 'name="enabled"' not in response.text
 
 

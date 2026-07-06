@@ -31,14 +31,38 @@
         <fieldset>
             <legend>已加载插件</legend>
             {% if all_plugins %}
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.35rem 0.75rem;max-height:240px;overflow:auto;padding:0.65rem;border:1px solid var(--pico-muted-border-color);border-radius:var(--radius-sm);">
+            <datalist id="module-plugin-options">
                 {% for p in all_plugins %}
-                <label style="display:flex;align-items:center;gap:0.45rem;margin:0;min-width:0;">
-                    <input type="checkbox" name="selected_plugins" value="{{ p }}"
-                           {% if current_module and p in current_module.plugins %}checked{% endif %}>
-                    <span style="overflow-wrap:anywhere;">{{ p }}</span>
-                </label>
+                <option value="{{ p }}"></option>
                 {% endfor %}
+            </datalist>
+            <div class="ruok-picker" data-field-name="selected_plugins">
+                <div class="ruok-picker-controls">
+                    <input type="search"
+                           placeholder="搜索插件名"
+                           list="module-plugin-options"
+                           data-picker-input>
+                    <button type="button"
+                            class="outline secondary"
+                            title="添加插件"
+                            aria-label="添加插件"
+                            data-picker-add>+</button>
+                </div>
+                <div class="ruok-picker-list" data-picker-list>
+                    {% if current_module %}
+                    {% for p in current_module.plugins if p in all_plugins %}
+                    <span class="ruok-picker-chip" data-picker-value="{{ p }}">
+                        <span>{{ p }}</span>
+                        <input type="hidden" name="selected_plugins" value="{{ p }}">
+                        <button type="button"
+                                class="outline secondary ruok-picker-remove"
+                                title="移除 {{ p }}"
+                                aria-label="移除 {{ p }}"
+                                data-picker-remove>&times;</button>
+                    </span>
+                    {% endfor %}
+                    {% endif %}
+                </div>
             </div>
             {% else %}
             <input type="text" disabled value="暂无已加载插件">
