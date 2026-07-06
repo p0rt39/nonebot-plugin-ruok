@@ -7,7 +7,6 @@ import asyncio
 from typing import Any
 from pathlib import Path
 from datetime import datetime
-from urllib.parse import quote
 
 from fastapi import Form, Query, Depends, Request, APIRouter, HTTPException
 from fastapi.responses import (
@@ -59,6 +58,8 @@ def _query_metrics_history(data_dir: Path, hours: float = 1.0) -> list[dict[str,
 
 def _render_module_edit_row(mod: ModuleDefinition) -> str:
     """Render an inline edit form row for a module."""
+    from urllib.parse import quote
+
     plugins_str = html.escape(", ".join(mod.plugins), quote=True)
     desc = html.escape(mod.description or "", quote=True)
     dname = html.escape(mod.display_name or mod.name, quote=True)
@@ -94,58 +95,6 @@ def _render_module_edit_row(mod: ModuleDefinition) -> str:
         f"Cancel</button>"
         f"</td>"
         f"</tr>"
-    )
-
-
-def _render_notification_form(rule: NotificationRule) -> str:
-    """Render the add/edit form pre-filled with an existing rule."""
-    rule_name = html.escape(rule.name, quote=True)
-    on_status = html.escape(", ".join(rule.on_status), quote=True)
-    on_module = html.escape(", ".join(rule.on_module), quote=True)
-    channels = html.escape(", ".join(rule.channels), quote=True)
-    webhook = html.escape(rule.webhook_url or "", quote=True)
-    enabled_checked = "checked" if rule.enabled else ""
-    return (
-        f'<details open style="margin-bottom:1.5rem">'
-        f"<summary>✏️ 编辑规则: {rule_name}</summary>"
-        f'<form hx-post="/ruok/_actions/notification-upsert"'
-        f' hx-target="#notifications-container" hx-swap="outerHTML"'
-        f' style="margin-top:1rem">'
-        f'<div class="grid">'
-        f"<label>规则名称"
-        f'<input type="text" name="name" value="{rule_name}" required>'
-        f"</label>"
-        f"<label>冷却时间 (分钟)"
-        f'<input type="number" name="cooldown_minutes"'
-        f' value="{rule.cooldown_minutes}" min="1" step="1">'
-        f"</label>"
-        f"</div>"
-        f'<div class="grid">'
-        f"<label>触发状态 (逗号分隔)"
-        f'<input type="text" name="on_status" value="{on_status}"'
-        f' placeholder="pending, unsolved">'
-        f"</label>"
-        f"<label>适用模块 (逗号分隔，留空=全部)"
-        f'<input type="text" name="on_module" value="{on_module}"'
-        f' placeholder="weather, music">'
-        f"</label>"
-        f"</div>"
-        f'<div class="grid">'
-        f"<label>通知通道 (逗号分隔)"
-        f'<input type="text" name="channels" value="{channels}"'
-        f' placeholder="bot_dm, webhook">'
-        f"</label>"
-        f"<label>Webhook URL (可选)"
-        f'<input type="url" name="webhook_url" value="{webhook}"'
-        f' placeholder="https://hooks.example.com/...">'
-        f"</label>"
-        f"</div>"
-        f"<label>"
-        f'<input type="checkbox" name="enabled" {enabled_checked}> 启用'
-        f"</label>"
-        f'<button type="submit">💾 保存规则</button>'
-        f"</form>"
-        f"</details>"
     )
 
 
@@ -385,6 +334,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 "notifications.html.jinja2",
                 request=request,
                 rules=rules,
+                rule=None,
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_notifications", data_dir)
@@ -822,6 +772,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     async def action_notification_upsert(
         request: Request,
         name: str = Form(...),
+        original_name: str = Form(""),
         enabled: bool = Form(True),
         on_status: str = Form("pending,unsolved"),
         on_module: str = Form(""),
@@ -831,12 +782,24 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         _guard_ok: None = Depends(_webui_guard),
     ) -> HTMLResponse:
         """Create or update a notification rule."""
-        from ..protocol import NotificationRule
-
         try:
             rules = _load_notification_rules()
+            normalized_name = name.strip()
+            normalized_original = original_name.strip()
+            if not normalized_name:
+                return HTMLResponse(
+                    '<p style="color:var(--pico-del-color);">❌ 规则名称不能为空</p>',
+                    status_code=400,
+                )
+            if normalized_original and normalized_original != normalized_name:
+                if any(r.name == normalized_name for r in rules):
+                    return HTMLResponse(
+                        f'<p style="color:var(--pico-del-color);">'
+                        f'❌ 规则 "{normalized_name}" 已存在</p>',
+                        status_code=400,
+                    )
             rule = NotificationRule(
-                name=name,
+                name=normalized_name,
                 enabled=enabled,
                 on_status=[s.strip() for s in on_status.split(",") if s.strip()],
                 on_module=[m.strip() for m in on_module.split(",") if m.strip()],
@@ -844,10 +807,10 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 channels=[c.strip() for c in channels.split(",") if c.strip()],
                 webhook_url=webhook_url or None,
             )
-            # Upsert: replace if exists
-            existing = [r for r in rules if r.name == name]
-            if existing:
-                rules = [r for r in rules if r.name != name]
+            replace_name = normalized_original or normalized_name
+            rules = [r for r in rules if r.name != replace_name]
+            if replace_name != normalized_name:
+                rules = [r for r in rules if r.name != normalized_name]
             rules.append(rule)
             _save_notification_rules(rules)
         except Exception as exc:
@@ -860,18 +823,25 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return render(
             "_notifications_list.html.jinja2",
             rules=rules,
-            headers={"HX-Trigger": '{"toast":"Rule saved","toastType":"success"}'},
+            headers={
+                "HX-Trigger": (
+                    '{"toast":"Rule saved","toastType":"success",'
+                    '"refresh":"#notification-form-panel",'
+                    '"refreshUrl":"/ruok/_actions/notification-edit-form"}'
+                )
+            },
         )
 
-    @router.post("/ruok/_actions/notification-delete/{name}")
+    @router.post("/ruok/_actions/notification-delete")
     async def action_notification_delete(
         request: Request,
-        name: str,
+        name: str = Form(...),
         _guard_ok: None = Depends(_webui_guard),
     ) -> HTMLResponse:
         """Delete a notification rule by name."""
         try:
-            rules = [r for r in _load_notification_rules() if r.name != name]
+            delete_name = name.strip()
+            rules = [r for r in _load_notification_rules() if r.name != delete_name]
             _save_notification_rules(rules)
         except Exception as exc:
             sid = _handle_ruok_error(exc, "action_notification_delete", data_dir)
@@ -886,18 +856,20 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             headers={"HX-Trigger": '{"toast":"Rule deleted","toastType":"info"}'},
         )
 
-    @router.get("/ruok/_actions/notification-edit-form/{name}")
+    @router.get("/ruok/_actions/notification-edit-form")
     async def action_notification_edit_form(
-        name: str,
+        name: str = "",
         _guard_ok: None = Depends(_webui_guard),
     ) -> HTMLResponse:
-        """Return the add/edit form pre-filled with an existing rule."""
+        """Return the notification form, optionally pre-filled for editing."""
         try:
+            if not name:
+                return render("_notification_form.html.jinja2", rule=None)
             rules = _load_notification_rules()
             rule = next((r for r in rules if r.name == name), None)
             if rule is None:
                 return HTMLResponse("Rule not found", status_code=404)
-            return HTMLResponse(_render_notification_form(rule))
+            return render("_notification_form.html.jinja2", rule=rule)
         except Exception as exc:
             sid = _handle_ruok_error(
                 exc, f"action_notification_edit_form {name}", data_dir

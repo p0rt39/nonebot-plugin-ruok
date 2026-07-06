@@ -1,0 +1,70 @@
+{% set current_rule = rule | default(none) %}
+<details open style="margin-bottom:1.5rem;">
+    <summary>{% if current_rule %}✏️ 编辑规则{% else %}➕ 添加规则{% endif %}</summary>
+    <form hx-post="/ruok/_actions/notification-upsert"
+          hx-target="#notifications-container"
+          hx-swap="outerHTML"
+          style="margin-top:1rem;">
+        {% if current_rule %}
+        <input type="hidden" name="original_name" value="{{ current_rule.name }}">
+        {% endif %}
+        <div class="grid">
+            <label>
+                规则名称
+                <input type="text" name="name" required
+                       value="{{ current_rule.name if current_rule else '' }}"
+                       placeholder="e.g. 紧急通知">
+            </label>
+            <label>
+                冷却时间 (分钟)
+                <input type="number" name="cooldown_minutes"
+                       value="{{ current_rule.cooldown_minutes if current_rule else 60 }}"
+                       min="1" step="1">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                触发状态 (逗号分隔)
+                <input type="text" name="on_status"
+                       value="{{ current_rule.on_status | join(',') if current_rule else 'pending,unsolved' }}"
+                       placeholder="pending, unsolved">
+            </label>
+            <label>
+                适用模块 (逗号分隔，留空=全部)
+                <input type="text" name="on_module"
+                       value="{{ current_rule.on_module | join(',') if current_rule else '' }}"
+                       placeholder="weather, music">
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                通知通道 (逗号分隔)
+                <input type="text" name="channels"
+                       value="{{ current_rule.channels | join(',') if current_rule else 'bot_dm' }}"
+                       placeholder="bot_dm, webhook">
+            </label>
+            <label>
+                Webhook URL (可选)
+                <input type="url" name="webhook_url"
+                       value="{{ current_rule.webhook_url or '' if current_rule else '' }}"
+                       placeholder="https://hooks.example.com/...">
+            </label>
+        </div>
+        <label>
+            <input type="checkbox" name="enabled"
+                   {% if current_rule is none or current_rule.enabled %}checked{% endif %}>
+            启用
+        </label>
+        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+            <button type="submit">💾 保存规则</button>
+            {% if current_rule %}
+            <button type="button" class="outline secondary"
+                    hx-get="/ruok/_actions/notification-edit-form"
+                    hx-target="#notification-form-panel"
+                    hx-swap="innerHTML">
+                取消
+            </button>
+            {% endif %}
+        </div>
+    </form>
+</details>

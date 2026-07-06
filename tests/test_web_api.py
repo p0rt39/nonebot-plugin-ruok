@@ -22,6 +22,18 @@ def _client(config, data_dir: Path) -> TestClient:
     return TestClient(app)
 
 
+def _save_notification_rules(config, data_dir: Path, rules) -> None:
+    from nonebot_plugin_ruok.collectors.notifications import _save_rules
+
+    _save_rules(data_dir, rules)
+
+
+def _load_notification_rules(config, data_dir: Path):
+    from nonebot_plugin_ruok.collectors.notifications import _load_rules
+
+    return _load_rules(data_dir, config)
+
+
 def test_api_key_required_when_configured(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.config import ScopedConfig
 
@@ -132,3 +144,123 @@ def test_dashboard_trends_do_not_replace_canvas_with_htmx(tmp_path: Path) -> Non
     assert response.status_code == 200
     assert '<div id="dashboard-trends">' in response.text
     assert "ruok:metrics" in response.text
+
+
+def test_notifications_page_uses_form_panel_and_card_actions(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    client = _client(ScopedConfig(), tmp_path)
+
+    response = client.get("/ruok/notifications")
+
+    assert response.status_code == 200
+    assert 'id="notification-form-panel"' in response.text
+    assert 'id="notifications-container"' in response.text
+    assert 'hx-target="closest details"' not in response.text
+    assert "notification-edit-form?" in response.text
+    assert 'hx-post="/ruok/_actions/notification-delete"' in response.text
+
+
+def test_notification_edit_form_loads_special_character_name(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = ScopedConfig()
+    rule_name = "紧急 通知/a"
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [NotificationRule(name=rule_name, channels=["webhook"])],
+    )
+    client = _client(config, tmp_path)
+
+    response = client.get(
+        "/ruok/_actions/notification-edit-form",
+        params={"name": rule_name},
+    )
+
+    assert response.status_code == 200
+    assert 'name="original_name"' in response.text
+    assert f'value="{rule_name}"' in response.text
+
+
+def test_notification_edit_renames_without_duplicate(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = ScopedConfig()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [NotificationRule(name="old/name")],
+    )
+    client = _client(config, tmp_path)
+
+    response = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={
+            "original_name": "old/name",
+            "name": "new name",
+            "enabled": "on",
+            "on_status": "pending",
+            "on_module": "",
+            "cooldown_minutes": "15",
+            "channels": "bot_dm,webhook",
+            "webhook_url": "https://example.com/hook",
+        },
+    )
+
+    rules = _load_notification_rules(config, tmp_path)
+    assert response.status_code == 200
+    assert [rule.name for rule in rules] == ["new name"]
+    assert rules[0].channels == ["bot_dm", "webhook"]
+    assert response.headers["HX-Trigger"]
+
+
+def test_notification_rename_conflict_returns_400(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = ScopedConfig()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [NotificationRule(name="first"), NotificationRule(name="second")],
+    )
+    client = _client(config, tmp_path)
+
+    response = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={
+            "original_name": "first",
+            "name": "second",
+            "enabled": "on",
+        },
+    )
+
+    rules = _load_notification_rules(config, tmp_path)
+    assert response.status_code == 400
+    assert [rule.name for rule in rules] == ["first", "second"]
+
+
+def test_notification_delete_accepts_special_character_name(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = ScopedConfig()
+    rule_name = "紧急 通知/a"
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [NotificationRule(name=rule_name), NotificationRule(name="keep")],
+    )
+    client = _client(config, tmp_path)
+
+    response = client.post(
+        "/ruok/_actions/notification-delete",
+        data={"name": rule_name},
+    )
+
+    rules = _load_notification_rules(config, tmp_path)
+    assert response.status_code == 200
+    assert [rule.name for rule in rules] == ["keep"]
