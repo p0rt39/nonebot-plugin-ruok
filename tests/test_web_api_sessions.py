@@ -300,3 +300,29 @@ def test_api_patch_session_rejects_invalid_affected_plugin(tmp_path: Path) -> No
 
     assert response.status_code == 400
     assert "插件不属于该 Session 原模块" in response.text
+
+
+def test_api_patch_session_rejects_affected_plugins_without_confirm_status(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+    from nonebot_plugin_ruok.collectors.modules import upsert_module
+    from nonebot_plugin_ruok.collectors.sessions import get_session, create_session
+
+    config = _webui_config(api_key="secret")
+    upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+    session = create_session(tmp_path, "music", "api issue", ReporterInfo(type="user"))
+    client = _client(config, tmp_path)
+
+    response = client.patch(
+        f"/ruok/api/sessions/{session.session_id}",
+        headers={"X-RuOK-API-Key": "secret"},
+        json={"developer_notes": "note", "affected_plugins": ["plugin_a"]},
+    )
+    reloaded = get_session(tmp_path, session.session_id)
+
+    assert response.status_code == 400
+    assert "affected_plugins can only be set when confirming a session" in response.text
+    assert reloaded is not None
+    assert reloaded.status == "pending"
+    assert reloaded.affected_plugins == []

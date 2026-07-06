@@ -346,6 +346,89 @@ class TestDeriveModuleStatus:
         assert lyrics is not None
         assert lyrics.status == "unavailable"
 
+    def test_direct_unsolved_takes_priority_over_plugin_pending(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            upsert_module,
+            derive_module_status_with_reasons,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            update_session,
+        )
+
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+        create_session(tmp_path, "music", "pending shared", ReporterInfo(type="user"))
+        direct = create_session(
+            tmp_path,
+            "lyrics",
+            "direct confirmed",
+            ReporterInfo(type="user"),
+        )
+        update_session(tmp_path, direct.session_id, {"status": "unsolved"})
+
+        status, reasons = derive_module_status_with_reasons(tmp_path, "lyrics")
+
+        assert status == "unavailable"
+        assert reasons == ["存在已确认未解决的本模块 Session"]
+
+    def test_status_derivation_ignores_stale_plugin_impacts_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        import json
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import get_module, upsert_module
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        (tmp_path / "plugin_impacts.json").write_text(
+            json.dumps(
+                {
+                    "plugin_a": {
+                        "pending": ["ruok-stale"],
+                        "unsolved": ["ruok-stale"],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        module = get_module(tmp_path, config, "music")
+
+        assert module is not None
+        assert module.status == "available"
+        assert module.status_reasons == []
+
+    def test_module_related_sessions_are_deduplicated_when_direct_and_propagated(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            upsert_module,
+            list_module_related_sessions,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import create_session
+
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        session = create_session(
+            tmp_path,
+            "music",
+            "direct and plugin-related",
+            ReporterInfo(type="user"),
+        )
+
+        related = list_module_related_sessions(tmp_path, "music")
+
+        assert [s.session_id for s in related] == [session.session_id]
+
 
 class TestResolveModuleDisplay:
     def test_exact_name(self, tmp_path: Path) -> None:

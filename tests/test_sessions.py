@@ -197,6 +197,37 @@ class TestListSessions:
         assert len(result) == 1
         assert result[0].module_name == "weather"
 
+    def test_search_and_plugin_filter_include_persisted_affected_plugins(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+            confirm_session_plugins,
+        )
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        upsert_module(tmp_path, ModuleDefinition(name="other", plugins=["plugin_b"]))
+        session = create_session(
+            tmp_path,
+            "music",
+            "confirmed plugin issue",
+            ReporterInfo(type="user"),
+        )
+        confirm_session_plugins(tmp_path, config, session.session_id, ["plugin_a"])
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=[]))
+
+        by_plugin = list_sessions(tmp_path, plugin_name="plugin_a")
+        by_search = list_sessions(tmp_path, search="plugin_a")
+
+        assert [s.session_id for s in by_plugin] == [session.session_id]
+        assert [s.session_id for s in by_search] == [session.session_id]
+
     def test_time_range(self, tmp_path: Path) -> None:
         from nonebot_plugin_ruok.protocol import ReporterInfo
         from nonebot_plugin_ruok.collectors.sessions import (
@@ -322,6 +353,38 @@ class TestUpdateSession:
         assert reloaded is not None
         assert reloaded.status == "pending"
         assert reloaded.affected_plugins == []
+
+    def test_confirm_session_plugins_normalizes_names(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            create_session,
+            confirm_session_plugins,
+        )
+
+        config = ScopedConfig()
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="music", plugins=["plugin_a", "plugin_b"]),
+        )
+        session = create_session(tmp_path, "music", "issue", ReporterInfo(type="user"))
+
+        confirm_session_plugins(
+            tmp_path,
+            config,
+            session.session_id,
+            [" plugin_a, plugin_b ", "plugin_a", "\nplugin_b\n", ""],
+        )
+
+        reloaded = get_session(tmp_path, session.session_id)
+        assert reloaded is not None
+        assert reloaded.status == "unsolved"
+        assert reloaded.affected_plugins == ["plugin_a", "plugin_b"]
 
     def test_plugin_impacts_rebuilds_from_active_sessions(
         self,

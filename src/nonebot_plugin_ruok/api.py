@@ -213,10 +213,15 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             except SessionPluginValidationError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         else:
+            if "affected_plugins" in body:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "affected_plugins can only be set when confirming a session"
+                    ),
+                )
             updates = {
-                k: v
-                for k, v in body.items()
-                if k in ("status", "developer_notes", "affected_plugins")
+                k: v for k, v in body.items() if k in ("status", "developer_notes")
             }
             session = update_session(data_dir, session_id, updates)
         if session is None:
