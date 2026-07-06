@@ -364,11 +364,20 @@ src/nonebot_plugin_ruok/
 
 测试位于 `tests/`：
 
-- `plugin_test.py`：NoneBot 命令与 OneBot V11 交互。
-- `test_sessions.py`：Session 存储、筛选、关联、影响索引。
-- `test_modules.py`：模块 CRUD 和状态推导。
-- `test_collector.py`：指标、进程、网络/磁盘速率。
-- `test_web_api_*.py`：API、WebUI、鉴权、Dashboard、Sessions、模块、通知、用户管理。
+- `conftest.py`：测试环境初始化，注册 OneBot V11 适配器并从 `pyproject.toml` 加载插件。
+- `fake.py`：构造 OneBot V11 群聊/私聊假事件。
+- `webui_test_utils.py`：FastAPI `TestClient`、WebUI 登录、模块/通知测试辅助函数。
+- `plugin_test.py`：NoneBot `/ruok` 命令、绑定、重设密码、状态查询、确认/解决等交互测试。
+- `test_collector.py`：指标采集、进程快照、网络/磁盘速率追踪。
+- `test_sessions.py`：Session CRUD、筛选、搜索、关联、统计、插件影响索引。
+- `test_modules.py`：模块 CRUD、直接/插件传播状态推导、相关 Session 查询。
+- `test_web_api.py`：API key 与路由优先级回归测试。
+- `test_web_api_auth.py`：登录、注册、绑定、记住登录、密码重设、鉴权边界。
+- `test_web_api_dashboard.py`：管理员/普通用户 Dashboard、趋势图和趋势数据端点。
+- `test_web_api_sessions.py`：Session WebUI、Session API、影响插件编辑。
+- `test_web_api_modules.py`：模块 WebUI 列表、详情、编辑、删除。
+- `test_web_api_notifications.py`：通知规则 WebUI 列表、详情、编辑、删除。
+- `test_web_api_users.py`：用户管理与普通用户自助账号操作。
 
 ## 开发
 
