@@ -146,7 +146,7 @@ class TestLogMonitor:
 
         calls = []
 
-        async def _fake_notify(session, config, data_dir):
+        async def _fake_dispatch(session, config, data_dir):
             return None
 
         def _fake_run_coroutine_threadsafe(coro, loop):
@@ -155,8 +155,8 @@ class TestLogMonitor:
             return _DoneFuture()
 
         monkeypatch.setattr(
-            "nonebot_plugin_ruok.collector._notify_new_session",
-            _fake_notify,
+            "nonebot_plugin_ruok.collectors.notifications.dispatch_notification",
+            _fake_dispatch,
         )
         monkeypatch.setattr(
             "asyncio.run_coroutine_threadsafe",

@@ -224,7 +224,7 @@ async def dispatch_notification(
 
     Must be called from an async context.
     """
-    if not config.auto_session_enabled:
+    if not config.notification_enabled:
         return
 
     rules = _load_rules(data_dir, config)

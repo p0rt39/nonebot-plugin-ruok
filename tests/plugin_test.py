@@ -240,6 +240,58 @@ async def test_ruok_status_builtin_module(app: App) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ruok_no_dispatches_rule_notification(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok no should create a session and use the rule notification engine."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    calls = []
+
+    async def fake_dispatch(session, config, data_dir):
+        calls.append(session.session_id)
+
+    config = ScopedConfig(crisis_mode=True)
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(
+        "nonebot_plugin_ruok.collectors.notifications.dispatch_notification",
+        fake_dispatch,
+    )
+    monkeypatch.setattr(
+        "nonebot_plugin_ruok.collectors.sessions._gen_session_id",
+        lambda: "ruok-test0001",
+    )
+    event = fake_group_message_event_v11(
+        message="/ruok no music playback failed",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            "📝 已记录 | Session: ruok-test0001\n模块: music\n描述: playback failed",
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+    assert calls == ["ruok-test0001"]
+
+
+@pytest.mark.asyncio
 async def test_ruok_confirm_accepts_affected_plugins(
     app: App,
     tmp_path: Path,

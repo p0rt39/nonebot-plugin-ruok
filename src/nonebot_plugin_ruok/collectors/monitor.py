@@ -220,13 +220,11 @@ def _schedule_session_notification(
     loop: asyncio.AbstractEventLoop,
 ) -> None:
     """Schedule notification dispatch for a newly created automatic session."""
-    if not config.notify_superusers:
-        return
     try:
-        from ..collector import _notify_new_session
+        from .notifications import dispatch_notification
 
         asyncio.run_coroutine_threadsafe(
-            _notify_new_session(session, config, data_dir),
+            dispatch_notification(session, config, data_dir),
             loop,
         )
     except RuntimeError as exc:

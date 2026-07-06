@@ -293,3 +293,73 @@ def test_notification_detail_delete_redirects_to_list(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.headers["HX-Redirect"] == "/ruok/notifications"
     assert [rule.name for rule in rules] == ["keep"]
+
+
+async def test_dispatch_notification_is_independent_from_auto_session_enabled(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import Session, ReporterInfo, NotificationRule
+    from nonebot_plugin_ruok.collectors.notifications import dispatch_notification
+
+    calls = []
+
+    async def fake_send_bot_dm(session):
+        calls.append(session.session_id)
+
+    monkeypatch.setattr(
+        "nonebot_plugin_ruok.collectors.notifications._send_bot_dm",
+        fake_send_bot_dm,
+    )
+    config = ScopedConfig(
+        auto_session_enabled=False,
+        notification_rules=[
+            NotificationRule(name="test", channels=["bot_dm"], cooldown_minutes=0)
+        ],
+    )
+    session = Session(
+        session_id="ruok-1234abcd",
+        source="manual",
+        module_name="music",
+        reporter=ReporterInfo(type="user"),
+    )
+
+    await dispatch_notification(session, config, tmp_path)
+
+    assert calls == ["ruok-1234abcd"]
+
+
+async def test_dispatch_notification_respects_notification_enabled(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import Session, ReporterInfo, NotificationRule
+    from nonebot_plugin_ruok.collectors.notifications import dispatch_notification
+
+    calls = []
+
+    async def fake_send_bot_dm(session):
+        calls.append(session.session_id)
+
+    monkeypatch.setattr(
+        "nonebot_plugin_ruok.collectors.notifications._send_bot_dm",
+        fake_send_bot_dm,
+    )
+    config = ScopedConfig(
+        notification_enabled=False,
+        notification_rules=[
+            NotificationRule(name="test", channels=["bot_dm"], cooldown_minutes=0)
+        ],
+    )
+    session = Session(
+        session_id="ruok-1234abcd",
+        source="manual",
+        module_name="music",
+        reporter=ReporterInfo(type="user"),
+    )
+
+    await dispatch_notification(session, config, tmp_path)
+
+    assert calls == []

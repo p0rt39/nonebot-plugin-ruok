@@ -31,6 +31,7 @@ from .collector import (
     _handle_ruok_error,
     get_linked_sessions,
     collect_all_statuses,
+    dispatch_notification,
     confirm_session_plugins,
 )
 
@@ -172,6 +173,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             reporter=reporter,
             source=body.get("source", "manual"),
         )
+        await dispatch_notification(session, config, data_dir)
         _cache.pop("status", None)  # invalidate cache
         return session.model_dump(mode="json")
 

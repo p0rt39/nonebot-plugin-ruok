@@ -211,10 +211,9 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
         reporter=reporter,
         source="manual",
     )
-    if plugin_config.notify_superusers:
-        from .collector import _notify_new_session
+    from .collectors.notifications import dispatch_notification
 
-        await _notify_new_session(session, plugin_config, data_dir)
+    await dispatch_notification(session, plugin_config, data_dir)
     display = resolved.display_name if resolved is not None else user_input
     await ruok_cmd.finish(
         f"📝 已记录 | Session: {session.session_id}\n"

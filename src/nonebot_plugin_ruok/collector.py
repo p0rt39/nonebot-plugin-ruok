@@ -11,8 +11,7 @@ from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-from .config import ScopedConfig
-from .protocol import Session, MetricPoint
+from .protocol import MetricPoint
 
 # ── Re-export everything from the collectors subpackage ──
 from .collectors import (
@@ -68,7 +67,6 @@ __all__ = [
     "_connection_history",
     "_disk_tracker",
     "_network_tracker",
-    "_notify_new_session",
     "_startup_time",
     "build_plugin_impacts",
     "collect_all_statuses",
@@ -94,18 +92,6 @@ __all__ = [
     "update_session",
     "upsert_module",
 ]
-
-# ────────────────────────────────
-# 10. Notification
-# ────────────────────────────────
-
-
-async def _notify_new_session(
-    session: Session, config: ScopedConfig, data_dir: Path
-) -> None:
-    """Send notifications for a new session via the rule engine."""
-    await dispatch_notification(session, config, data_dir)
-
 
 # ────────────────────────────────
 # 11. Time-series Metrics Store

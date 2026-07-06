@@ -31,3 +31,30 @@ def test_sessions_stats_route_is_not_shadowed(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json()["total"] == 0
+
+
+def test_api_create_session_dispatches_rule_notification(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    calls = []
+
+    async def fake_dispatch(session, config, data_dir):
+        calls.append(session.session_id)
+
+    monkeypatch.setattr(
+        "nonebot_plugin_ruok.api.dispatch_notification",
+        fake_dispatch,
+    )
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+
+    response = client.post(
+        "/ruok/api/sessions",
+        headers={"X-RUOK-API-Key": "secret"},
+        json={"module_name": "music", "description": "api issue"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [response.json()["session_id"]]

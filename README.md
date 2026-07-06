@@ -114,8 +114,6 @@ password: RUOK__WEBUI_ADMIN_PASSWORD
 | `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 允许上报的用户 ID |
 | `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 允许上报的群 ID |
 | `RUOK__CRISIS_MODE` | `bool` | `false` | 跳过上报权限检查，适合测试或紧急场景 |
-| `RUOK__NOTIFY_SUPERUSERS` | `bool` | `true` | 新 Session 是否通知 SUPERUSER |
-| `RUOK__NOTIFY_INTERVAL_HOURS` | `float` | `4.0` | 同一 Session 再次通知的最小间隔 |
 | `RUOK__SUMMARY_INTERVAL_HOURS` | `float` | `4.0` | 未解决 Session 汇总通知间隔 |
 
 上报权限顺序：
@@ -152,7 +150,17 @@ Authorization: Bearer your-token
 
 ### 通知规则
 
-`RUOK__NOTIFICATION_RULES` 是 JSON 数组，也可在 WebUI 通知页面管理。
+新 Session 即时通知由通知规则系统统一处理，覆盖聊天上报、WebUI 上报、API 创建
+和自动日志捕获。`RUOK__NOTIFICATION_ENABLED=false` 会关闭全部即时通知；定时汇总仍
+由 `RUOK__SUMMARY_INTERVAL_HOURS` 单独控制。
+
+`RUOK__NOTIFICATION_RULES` 是 JSON 数组，也可在 WebUI 通知页面管理。未配置任何规则
+时，RUOK 会自动创建一条 `superusers` 默认规则，通过 Bot 私聊通知 NoneBot
+`SUPERUSERS`。
+
+| 配置项 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `RUOK__NOTIFICATION_ENABLED` | `bool` | `true` | 是否启用新 Session 即时通知规则 |
 
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |

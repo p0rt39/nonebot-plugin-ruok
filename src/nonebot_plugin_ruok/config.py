@@ -24,8 +24,6 @@ class ScopedConfig(BaseModel):
     report_whitelist_users: list[str] = []
     report_whitelist_groups: list[str] = []
     crisis_mode: bool = False  # 开启后跳过所有上报权限检查（测试/紧急用）
-    notify_superusers: bool = True
-    notify_interval_hours: float = 4.0
     summary_interval_hours: float = 4.0
 
     # ── API / WebUI ──
@@ -39,6 +37,7 @@ class ScopedConfig(BaseModel):
     metrics_retention_days: int = 7
 
     # ── Notification rules ──
+    notification_enabled: bool = True
     notification_rules: list[NotificationRule] = []
 
 
