@@ -28,6 +28,7 @@ from ..protocol import (
     FastMetricsSnapshot,
 )
 from ..collector import (
+    MetricsStore,
     get_module,
     get_session,
     list_modules,
@@ -46,6 +47,14 @@ from ..collector import (
     collect_fast_metrics,
     _collect_plugin_inventory,
 )
+
+
+def _query_metrics_history(data_dir: Path, hours: float = 1.0) -> list[dict[str, Any]]:
+    """Return serialized historical metrics for WebUI chart rendering."""
+    return [
+        point.model_dump(mode="json")
+        for point in MetricsStore.query(data_dir, hours=hours)
+    ]
 
 
 def _render_module_edit_row(mod: ModuleDefinition) -> str:
@@ -218,7 +227,10 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         if _partial == "dashboard-stats":
             return render("_dashboard_stats.html.jinja2", stats=stats)
         if _partial == "dashboard-trends":
-            return render("_dashboard_trends.html.jinja2")
+            return render(
+                "_dashboard_trends.html.jinja2",
+                metrics_history=_query_metrics_history(data_dir),
+            )
 
         # Initial data for full page render
         try:
@@ -238,6 +250,7 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             modules=modules,
             stats=stats,
             metrics=metrics_snap,
+            metrics_history=_query_metrics_history(data_dir),
             net_up=net_rate.bytes_sent_per_sec,
             net_down=net_rate.bytes_recv_per_sec,
         )

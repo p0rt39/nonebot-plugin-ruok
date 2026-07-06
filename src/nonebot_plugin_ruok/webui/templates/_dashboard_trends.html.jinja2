@@ -16,82 +16,80 @@
     var cpuCtx = document.getElementById('chart-cpu');
     var memCtx = document.getElementById('chart-memory');
     if (!cpuCtx && !memCtx) return;
+    if (typeof Chart === 'undefined') return;
 
-    fetch('/ruok/api/metrics/history?hours=1')
-        .then(function(r) { return r.json(); })
-        .then(function(metrics) {
-            if (!metrics.length) return;
-            var labels = metrics.map(function(m) {
-                return new Date(m.ts).toLocaleTimeString('zh-CN',
-                    {hour:'2-digit', minute:'2-digit'});
+    var metrics = {{ metrics_history | default([]) | tojson }};
+    if (!metrics.length) return;
+
+    var labels = metrics.map(function(m) {
+        return new Date(m.ts).toLocaleTimeString('zh-CN',
+            {hour:'2-digit', minute:'2-digit'});
+    });
+    var cpuData = metrics.map(function(m) { return m.cpu_percent; });
+    var memData = metrics.map(function(m) { return m.memory_percent; });
+
+    // ── CPU chart: update if exists, create if new ──
+    if (cpuCtx) {
+        var cpuChart = Chart.getChart(cpuCtx);
+        if (cpuChart) {
+            cpuChart.data.labels = labels;
+            cpuChart.data.datasets[0].data = cpuData;
+            cpuChart.update('none');
+        } else if (cpuData.length) {
+            new Chart(cpuCtx, {
+                type: 'line',
+                data: {
+                    labels: labels, datasets: [{
+                        label: 'CPU %', data: cpuData,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102,126,234,0.1)',
+                        fill: true, tension: 0.3, pointRadius: 0,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { min: 0, max: 100,
+                             ticks: { callback: function(v) { return v + '%'; } } },
+                        x: { ticks: { maxTicksLimit: 8 } }
+                    },
+                    animation: { duration: 300 },
+                }
             });
-            var cpuData = metrics.map(function(m) { return m.cpu_percent; });
-            var memData = metrics.map(function(m) { return m.memory_percent; });
+        }
+    }
 
-            // ── CPU chart: update if exists, create if new ──
-            if (cpuCtx) {
-                var cpuChart = Chart.getChart(cpuCtx);
-                if (cpuChart) {
-                    cpuChart.data.labels = labels;
-                    cpuChart.data.datasets[0].data = cpuData;
-                    cpuChart.update('none');
-                } else if (cpuData.length) {
-                    new Chart(cpuCtx, {
-                        type: 'line',
-                        data: {
-                            labels: labels, datasets: [{
-                                label: 'CPU %', data: cpuData,
-                                borderColor: '#667eea',
-                                backgroundColor: 'rgba(102,126,234,0.1)',
-                                fill: true, tension: 0.3, pointRadius: 0,
-                            }]
-                        },
-                        options: {
-                            responsive: true, maintainAspectRatio: false,
-                            plugins: { legend: { display: false } },
-                            scales: {
-                                y: { min: 0, max: 100,
-                                     ticks: { callback: function(v) { return v + '%'; } } },
-                                x: { ticks: { maxTicksLimit: 8 } }
-                            },
-                            animation: { duration: 300 },
-                        }
-                    });
+    // ── Memory chart: update if exists, create if new ──
+    if (memCtx) {
+        var memChart = Chart.getChart(memCtx);
+        if (memChart) {
+            memChart.data.labels = labels;
+            memChart.data.datasets[0].data = memData;
+            memChart.update('none');
+        } else if (memData.length) {
+            new Chart(memCtx, {
+                type: 'line',
+                data: {
+                    labels: labels, datasets: [{
+                        label: 'Memory %', data: memData,
+                        borderColor: '#11998e',
+                        backgroundColor: 'rgba(17,153,142,0.1)',
+                        fill: true, tension: 0.3, pointRadius: 0,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { min: 0, max: 100,
+                             ticks: { callback: function(v) { return v + '%'; } } },
+                        x: { ticks: { maxTicksLimit: 8 } }
+                    },
+                    animation: { duration: 300 },
                 }
-            }
-
-            // ── Memory chart: update if exists, create if new ──
-            if (memCtx) {
-                var memChart = Chart.getChart(memCtx);
-                if (memChart) {
-                    memChart.data.labels = labels;
-                    memChart.data.datasets[0].data = memData;
-                    memChart.update('none');
-                } else if (memData.length) {
-                    new Chart(memCtx, {
-                        type: 'line',
-                        data: {
-                            labels: labels, datasets: [{
-                                label: 'Memory %', data: memData,
-                                borderColor: '#11998e',
-                                backgroundColor: 'rgba(17,153,142,0.1)',
-                                fill: true, tension: 0.3, pointRadius: 0,
-                            }]
-                        },
-                        options: {
-                            responsive: true, maintainAspectRatio: false,
-                            plugins: { legend: { display: false } },
-                            scales: {
-                                y: { min: 0, max: 100,
-                                     ticks: { callback: function(v) { return v + '%'; } } },
-                                x: { ticks: { maxTicksLimit: 8 } }
-                            },
-                            animation: { duration: 300 },
-                        }
-                    });
-                }
-            }
-        })
-        .catch(function() { /* chart refresh is best-effort */ });
+            });
+        }
+    }
 })();
 </script>

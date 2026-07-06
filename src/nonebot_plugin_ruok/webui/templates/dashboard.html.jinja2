@@ -357,7 +357,7 @@
 <div id="dashboard-trends"
      hx-get="/ruok?_partial=dashboard-trends"
      hx-trigger="load, every 30s"
-     hx-swap="outerHTML">
+     hx-swap="innerHTML">
     {% include "_dashboard_trends.html.jinja2" %}
 </div>
 
