@@ -151,7 +151,10 @@ def test_session_detail_renders_automatic_traceback_as_code_block(
     session = create_session(
         tmp_path,
         "ruok",
-        "**异常类型**: RuntimeError\n\n```\nTraceback line 1\nRuntimeError: boom\n```",
+        "**上下文**: manual /ruok raise\n"
+        "**异常类型**: RuntimeError\n"
+        "**异常信息**: boom\n\n"
+        "```\nTraceback line 1\nRuntimeError: boom\n```",
         ReporterInfo(type="automatic"),
         source="automatic",
     )
@@ -162,9 +165,17 @@ def test_session_detail_renders_automatic_traceback_as_code_block(
 
     assert response.status_code == 200
     assert "异常摘要" in response.text
+    assert 'class="session-summary-grid"' in response.text
+    assert "<span>上下文</span>" in response.text
+    assert "<strong>manual /ruok raise</strong>" in response.text
+    assert "<span>异常类型</span>" in response.text
+    assert "<strong>RuntimeError</strong>" in response.text
+    assert "<span>异常信息</span>" in response.text
+    assert "<strong>boom</strong>" in response.text
     assert "Traceback" in response.text
     assert '<pre class="session-traceback"><code>Traceback line 1' in response.text
     assert "RuntimeError: boom" in response.text
+    assert '<pre class="session-description-block">' not in response.text
 
 
 def test_webui_confirm_form_supports_multiple_affected_plugins(

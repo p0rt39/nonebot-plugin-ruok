@@ -231,6 +231,23 @@ def _split_session_description(description: str) -> tuple[str, str]:
     return prose, code
 
 
+def _parse_session_summary(description: str) -> dict[str, str]:
+    """Parse RUOK automatic summary markdown into display fields."""
+    summary: dict[str, str] = {}
+    for line in description.splitlines():
+        stripped = line.strip()
+        if not stripped or not stripped.startswith("**"):
+            continue
+        label_end = stripped.find("**", 2)
+        if label_end == -1:
+            continue
+        label = stripped[2:label_end].strip()
+        value = stripped[label_end + 2 :].lstrip(":：").strip()
+        if label and value:
+            summary[label] = value
+    return summary
+
+
 def create_webui_router(
     config: ScopedConfig,
     data_dir: Path,
@@ -507,12 +524,18 @@ def create_webui_router(
             session_description, session_traceback = _split_session_description(
                 session.description
             )
+            session_summary_fields = (
+                _parse_session_summary(session_description)
+                if session.source == "automatic"
+                else {}
+            )
             return render(
                 "sessions_detail.html.jinja2",
                 request=request,
                 current_user=user,
                 session=session,
                 session_description=session_description,
+                session_summary_fields=session_summary_fields,
                 session_traceback=session_traceback,
                 linked_sessions=linked,
                 reporter_display=_reporter_display_factory(auth.list_users()),

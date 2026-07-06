@@ -46,7 +46,16 @@
 <!-- Submitted Description / Automatic Error Summary -->
 <article>
     <h4>{% if session.source == 'manual' %}🧾 用户提交说明{% else %}🧾 异常摘要{% endif %}</h4>
-    {% if session_description %}
+    {% if session.source == 'automatic' and session_summary_fields %}
+    <div class="session-summary-grid">
+        {% for label, value in session_summary_fields.items() %}
+        <div class="session-summary-item">
+            <span>{{ label }}</span>
+            <strong>{{ value }}</strong>
+        </div>
+        {% endfor %}
+    </div>
+    {% elif session_description %}
     <pre class="session-description-block">{{ session_description }}</pre>
     {% else %}
     <p style="opacity:0.6;">暂无说明</p>
@@ -183,6 +192,26 @@
         gap: 0.5rem;
         padding: 0.5rem 0;
         border-bottom: 1px solid rgba(0,0,0,0.06);
+    }
+    .session-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.75rem;
+    }
+    .session-summary-item {
+        padding: 0.8rem;
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: var(--radius-sm);
+        background: rgba(0,0,0,0.025);
+    }
+    .session-summary-item span {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 0.85em;
+        opacity: 0.65;
+    }
+    .session-summary-item strong {
+        overflow-wrap: anywhere;
     }
     .session-description-block,
     .session-traceback {
