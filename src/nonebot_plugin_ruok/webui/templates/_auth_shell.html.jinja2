@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}RuOK{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        :root {
+            --auth-border: rgba(25, 36, 54, 0.12);
+            --auth-panel: rgba(255, 255, 255, 0.86);
+            --auth-muted: #667085;
+            --auth-accent: #2f6fed;
+            --auth-accent-soft: rgba(47, 111, 237, 0.1);
+        }
+        body {
+            min-height: 100vh;
+            margin: 0;
+            background:
+                radial-gradient(circle at top left, rgba(47, 111, 237, 0.16), transparent 34rem),
+                linear-gradient(135deg, #f7f9fc 0%, #eef3f8 100%);
+        }
+        .auth-shell {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 2rem 1rem;
+        }
+        .auth-panel {
+            width: min(100%, 460px);
+            background: var(--auth-panel);
+            border: 1px solid var(--auth-border);
+            border-radius: 18px;
+            box-shadow: 0 24px 70px rgba(25, 36, 54, 0.12);
+            padding: 2rem;
+        }
+        .auth-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        .auth-mark {
+            display: grid;
+            width: 2.6rem;
+            height: 2.6rem;
+            place-items: center;
+            border-radius: 12px;
+            background: var(--auth-accent);
+            color: #fff;
+            font-weight: 700;
+        }
+        .auth-title {
+            margin: 0;
+            font-size: 1.3rem;
+            line-height: 1.2;
+        }
+        .auth-subtitle {
+            margin: 0.2rem 0 0;
+            color: var(--auth-muted);
+            font-size: 0.92rem;
+        }
+        .auth-alert {
+            padding: 0.75rem 0.9rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            background: rgba(217, 45, 32, 0.08);
+            color: #b42318;
+            border: 1px solid rgba(217, 45, 32, 0.16);
+        }
+        .auth-success {
+            padding: 0.75rem 0.9rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            background: rgba(18, 183, 106, 0.08);
+            color: #027a48;
+            border: 1px solid rgba(18, 183, 106, 0.16);
+        }
+        .auth-key {
+            overflow-wrap: anywhere;
+            font-size: 0.96rem;
+            padding: 0.75rem;
+            border-radius: 12px;
+            background: var(--auth-accent-soft);
+            border: 1px solid rgba(47, 111, 237, 0.16);
+        }
+        .password-field {
+            position: relative;
+        }
+        .password-field input {
+            padding-right: 4.6rem;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 0.55rem;
+            top: 2.15rem;
+            width: auto;
+            padding: 0.28rem 0.55rem;
+            margin: 0;
+            border-radius: 8px;
+            font-size: 0.82rem;
+        }
+        .auth-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        .auth-actions a {
+            white-space: nowrap;
+        }
+        .full-width {
+            width: 100%;
+        }
+        @media (max-width: 520px) {
+            .auth-panel {
+                padding: 1.35rem;
+                border-radius: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="auth-shell">
+        <section class="auth-panel">
+            <div class="auth-brand">
+                <div class="auth-mark">R</div>
+                <div>
+                    <h1 class="auth-title">RuOK WebUI</h1>
+                    <p class="auth-subtitle">{% block subtitle %}NoneBot 健康监控面板{% endblock %}</p>
+                </div>
+            </div>
+            {% block content %}{% endblock %}
+        </section>
+    </main>
+    <script>
+    (function() {
+        document.addEventListener('click', function(event) {
+            var button = event.target.closest('[data-password-toggle]');
+            if (!button) return;
+            var field = document.getElementById(button.getAttribute('data-password-toggle'));
+            if (!field) return;
+            var visible = field.type === 'text';
+            field.type = visible ? 'password' : 'text';
+            button.textContent = visible ? '显示' : '隐藏';
+            button.setAttribute('aria-label', visible ? '显示密码' : '隐藏密码');
+        });
+    })();
+    </script>
+</body>
+</html>

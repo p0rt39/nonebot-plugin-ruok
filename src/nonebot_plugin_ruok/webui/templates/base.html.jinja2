@@ -221,6 +221,72 @@
             line-height: 1;
         }
 
+        /* ── User management ── */
+        .user-admin-grid {
+            display: grid;
+            grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.5fr);
+            gap: 1rem;
+            align-items: start;
+        }
+        .user-card-list {
+            display: grid;
+            gap: 0.85rem;
+        }
+        .user-card {
+            display: grid;
+            gap: 0.8rem;
+        }
+        .user-card__header,
+        .account-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .user-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 0.6rem;
+            margin: 0;
+        }
+        .user-meta div {
+            min-width: 0;
+        }
+        .user-meta dd {
+            margin: 0;
+            overflow-wrap: anywhere;
+        }
+        .user-meta dt {
+            color: var(--pico-muted-color);
+            font-size: 0.78em;
+        }
+        .user-card__actions {
+            display: grid;
+            gap: 0.6rem;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }
+        .user-card__actions form,
+        .account-actions form {
+            margin: 0;
+        }
+        .auth-key-result {
+            padding: 0.8rem 1rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(46,204,64,0.24);
+            background: rgba(46,204,64,0.08);
+            margin-bottom: 1rem;
+        }
+        .auth-key-result code {
+            overflow-wrap: anywhere;
+            white-space: normal;
+        }
+        .account-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
+        }
+
         /* ── Layout ── */
         .card-grid {
             display: grid;
@@ -506,6 +572,7 @@
             .card-grid { grid-template-columns: 1fr; }
             .gauge-card { min-width: 100px !important; }
             .gauge-card svg { width: 90px !important; height: 90px !important; }
+            .user-admin-grid { grid-template-columns: 1fr; }
         }
 
         /* ── Toast notifications ── */
@@ -545,10 +612,18 @@
                 <li><a href="/ruok/modules" {% if active_page == 'modules' %}aria-current="page"{% endif %}>📦 模块</a></li>
                 <li><a href="/ruok/notifications" {% if active_page == 'notifications' %}aria-current="page"{% endif %}>🔔 通知</a></li>
                 {% endif %}
+                {% if current_user %}
+                <li><a href="/ruok/users" {% if active_page == 'users' %}aria-current="page"{% endif %}>👤 账号</a></li>
+                {% endif %}
             </ul>
             <ul>
                 {% if current_user %}
-                <li><small>{{ current_user.username }}</small></li>
+                <li>
+                    <small>
+                        {{ current_user.username }}
+                        {% if current_user.admin_source == 'superuser' %} · SUPERUSER{% endif %}
+                    </small>
+                </li>
                 {% endif %}
                 <li>
                     <button id="theme-toggle" aria-label="切换暗色模式" title="切换暗色模式"

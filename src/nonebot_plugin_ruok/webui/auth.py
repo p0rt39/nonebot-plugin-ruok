@@ -12,6 +12,7 @@ from typing import Literal
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
+from collections.abc import Callable, Iterable
 
 from fastapi import Form, Request, APIRouter
 from pydantic import Field, BaseModel
@@ -21,6 +22,7 @@ from .jinja import render
 from ..config import ScopedConfig
 
 UserRole = Literal["admin", "user"]
+AdminSource = Literal["builtin", "superuser"]
 
 ADMIN_USERNAME = "admin"
 AUTH_KEY_TTL = timedelta(minutes=10)
@@ -99,6 +101,7 @@ class CurrentWebUIUser:
     bound_user_id: str | None = None
     bound_platform: str | None = None
     auth_key_expires_at: datetime | None = None
+    admin_source: AdminSource | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -133,18 +136,32 @@ class AuthKeyAlreadyUsed(AuthKeyError):
     """Raised when an auth_key has already been consumed."""
 
 
+class AuthUserAlreadyBound(AuthKeyError):
+    """Raised when a platform user is already bound to another account."""
+
+
 class UserRegistrationError(ValueError):
     """Raised when a WebUI registration request is invalid."""
+
+
+class UserManagementError(ValueError):
+    """Raised when a WebUI user management request is invalid."""
 
 
 class WebUIAuth:
     """Encapsulates WebUI login, registration, and platform binding logic."""
 
-    def __init__(self, config: ScopedConfig, data_dir: Path) -> None:
+    def __init__(
+        self,
+        config: ScopedConfig,
+        data_dir: Path,
+        superuser_provider: Callable[[], Iterable[str]] | None = None,
+    ) -> None:
         self._config = config
         self._users_path = data_dir / "webui_users.json"
         self._session_username_key = "ruok_username"
         self._session_role_key = "ruok_role"
+        self._superuser_provider = superuser_provider or (lambda: ())
 
     @property
     def enabled(self) -> bool:
@@ -171,23 +188,21 @@ class WebUIAuth:
         if not isinstance(username, str) or role not in ("admin", "user"):
             return None
 
-        if role == "admin":
-            if username != ADMIN_USERNAME or not self.admin_configured:
+        if username.casefold() == ADMIN_USERNAME:
+            if role != "admin" or not self.admin_configured:
                 request.session.clear()
                 return None
-            return CurrentWebUIUser(username=ADMIN_USERNAME, role="admin")
+            return CurrentWebUIUser(
+                username=ADMIN_USERNAME,
+                role="admin",
+                admin_source="builtin",
+            )
 
         user = self.get_user(username)
         if user is None:
             request.session.clear()
             return None
-        return CurrentWebUIUser(
-            username=user.username,
-            role="user",
-            bound_user_id=user.bound_user_id,
-            bound_platform=user.bound_platform,
-            auth_key_expires_at=user.auth_key_expires_at,
-        )
+        return self._current_from_stored(user)
 
     async def require_login(self, request: Request) -> bool:
         """Compatibility helper for older guard code."""
@@ -214,6 +229,10 @@ class WebUIAuth:
         users = self._load_users()
         return sorted(users.values(), key=lambda user: user.username.casefold())
 
+    def is_superuser_account(self, user: StoredWebUIUser) -> bool:
+        """Return True when a stored user is bound to a NoneBot SUPERUSER id."""
+        return bool(user.bound_user_id and user.bound_user_id in self._superusers())
+
     def authenticate(
         self,
         username: str,
@@ -226,19 +245,17 @@ class WebUIAuth:
 
         if normalized.casefold() == ADMIN_USERNAME:
             if secrets.compare_digest(password, self._config.webui_admin_password):
-                return CurrentWebUIUser(username=ADMIN_USERNAME, role="admin")
+                return CurrentWebUIUser(
+                    username=ADMIN_USERNAME,
+                    role="admin",
+                    admin_source="builtin",
+                )
             return None
 
         user = self.get_user(normalized)
         if user is None or not verify_password(password, user.password_hash):
             return None
-        return CurrentWebUIUser(
-            username=user.username,
-            role="user",
-            bound_user_id=user.bound_user_id,
-            bound_platform=user.bound_platform,
-            auth_key_expires_at=user.auth_key_expires_at,
-        )
+        return self._current_from_stored(user)
 
     def login_session(self, request: Request, user: CurrentWebUIUser) -> None:
         """Persist a successful WebUI login in the Starlette session."""
@@ -274,13 +291,18 @@ class WebUIAuth:
         self._save_users(users)
         return RegistrationResult(user=user, auth_key=auth_key)
 
-    def issue_auth_key(self, username: str) -> RegistrationResult:
-        """Generate a fresh one-time auth_key for an unbound normal user."""
+    def issue_auth_key(
+        self,
+        username: str,
+        *,
+        allow_bound: bool = False,
+    ) -> RegistrationResult:
+        """Generate a fresh one-time auth_key for a normal user."""
         users = self._load_users()
         user = users.get(self._user_key(username))
         if user is None:
             raise UserRegistrationError("用户不存在")
-        if user.bound_user_id:
+        if user.bound_user_id and not allow_bound:
             raise UserRegistrationError("用户已绑定平台账号")
 
         auth_key = secrets.token_urlsafe(24)
@@ -318,6 +340,16 @@ class WebUIAuth:
             if expires_at is None or _aware_utc(expires_at) < _utc_now():
                 matched_expired = user
                 continue
+            conflict = self._binding_conflict(
+                users,
+                normalized_user_id,
+                normalized_platform,
+                exclude_username=user.username,
+            )
+            if conflict is not None:
+                raise AuthUserAlreadyBound(
+                    f"平台账号已绑定 WebUI 用户 {conflict.username}"
+                )
             user.bound_user_id = normalized_user_id
             user.bound_platform = normalized_platform
             user.auth_key_hash = None
@@ -348,6 +380,78 @@ class WebUIAuth:
             )
             for user in self._load_users().values()
         )
+
+    def verify_user_password(self, username: str, password: str) -> bool:
+        """Verify the password for a stored normal user."""
+        user = self.get_user(username)
+        return user is not None and verify_password(password, user.password_hash)
+
+    def update_user(
+        self,
+        username: str,
+        *,
+        new_username: str | None = None,
+        new_password: str | None = None,
+    ) -> StoredWebUIUser:
+        """Rename and/or reset the password for a stored normal user."""
+        users = self._load_users()
+        old_key = self._user_key(username)
+        user = users.get(old_key)
+        if user is None:
+            raise UserManagementError("用户不存在")
+
+        normalized_name = (new_username or user.username).strip()
+        if not normalized_name:
+            raise UserManagementError("用户名不能为空")
+        if normalized_name.casefold() == ADMIN_USERNAME:
+            raise UserManagementError("admin 是内置管理员账户，不能作为普通用户名")
+
+        new_key = self._user_key(normalized_name)
+        if new_key != old_key and new_key in users:
+            raise UserManagementError("用户名已存在")
+
+        users.pop(old_key)
+        user.username = normalized_name
+        if new_password is not None:
+            if not new_password:
+                raise UserManagementError("密码不能为空")
+            user.password_hash = hash_password(new_password)
+        users[new_key] = user
+        self._save_users(users)
+        return user
+
+    def change_user_password(
+        self,
+        username: str,
+        current_password: str,
+        new_password: str,
+    ) -> StoredWebUIUser:
+        """Change a stored user's password after verifying the current password."""
+        if not self.verify_user_password(username, current_password):
+            raise UserManagementError("当前密码错误")
+        return self.update_user(username, new_password=new_password)
+
+    def clear_binding(self, username: str) -> StoredWebUIUser:
+        """Remove a stored user's platform binding."""
+        users = self._load_users()
+        key = self._user_key(username)
+        user = users.get(key)
+        if user is None:
+            raise UserManagementError("用户不存在")
+        user.bound_user_id = None
+        user.bound_platform = None
+        users[key] = user
+        self._save_users(users)
+        return user
+
+    def delete_user(self, username: str) -> None:
+        """Delete a stored normal user."""
+        users = self._load_users()
+        key = self._user_key(username)
+        if key not in users:
+            raise UserManagementError("用户不存在")
+        users.pop(key)
+        self._save_users(users)
 
     def create_router(self) -> APIRouter:
         """Build login, registration, and logout routes."""
@@ -449,6 +553,43 @@ class WebUIAuth:
     @staticmethod
     def _user_key(username: str) -> str:
         return username.strip().casefold()
+
+    def _superusers(self) -> set[str]:
+        try:
+            return {str(user_id) for user_id in self._superuser_provider()}
+        except Exception:
+            return set()
+
+    def _current_from_stored(self, user: StoredWebUIUser) -> CurrentWebUIUser:
+        admin_source: AdminSource | None = (
+            "superuser" if self.is_superuser_account(user) else None
+        )
+        return CurrentWebUIUser(
+            username=user.username,
+            role="admin" if admin_source else "user",
+            bound_user_id=user.bound_user_id,
+            bound_platform=user.bound_platform,
+            auth_key_expires_at=user.auth_key_expires_at,
+            admin_source=admin_source,
+        )
+
+    def _binding_conflict(
+        self,
+        users: dict[str, StoredWebUIUser],
+        user_id: str,
+        platform: str | None,
+        *,
+        exclude_username: str,
+    ) -> StoredWebUIUser | None:
+        exclude_key = self._user_key(exclude_username)
+        for key, user in users.items():
+            if key == exclude_key or user.bound_user_id != user_id:
+                continue
+            if platform is None or user.bound_platform is None:
+                return user
+            if user.bound_platform == platform:
+                return user
+        return None
 
     def _load_users(self) -> dict[str, StoredWebUIUser]:
         if not self._users_path.exists():

@@ -17,7 +17,12 @@ from fastapi.responses import (
 )
 
 from .sse import event_bus, sse_event_generator
-from .auth import WebUIAuth, CurrentWebUIUser
+from .auth import (
+    WebUIAuth,
+    CurrentWebUIUser,
+    UserManagementError,
+    UserRegistrationError,
+)
 from .jinja import render
 from ..config import ScopedConfig
 from ..protocol import (
@@ -101,6 +106,21 @@ def _extra_notification_modules(
 def _module_detail_url(name: str) -> str:
     """Build a WebUI module detail URL for arbitrary module names."""
     return f"/ruok/modules/{quote(name, safe='')}"
+
+
+def _account_reporter_id(user: CurrentWebUIUser) -> str | None:
+    """Return the reporter user id used for the current WebUI account."""
+    if user.admin_source == "builtin":
+        return "webui-admin"
+    return user.bound_user_id
+
+
+def _error_html(message: str, status_code: int = 400) -> HTMLResponse:
+    """Return a compact Pico-styled error fragment for HTMX actions."""
+    return HTMLResponse(
+        f'<p style="color:var(--pico-del-color);">❌ {html.escape(message)}</p>',
+        status_code=status_code,
+    )
 
 
 def _split_session_description(description: str) -> tuple[str, str]:
@@ -276,6 +296,31 @@ def create_webui_router(
             net_up=net_rate.bytes_sent_per_sec,
             net_down=net_rate.bytes_recv_per_sec,
         )
+
+    @router.get("/ruok/users", response_class=HTMLResponse)
+    async def page_users(
+        request: Request,
+        user: CurrentWebUIUser = Depends(_login_guard),
+    ) -> HTMLResponse:
+        try:
+            stored_user = (
+                None if user.username == "admin" else auth.get_user(user.username)
+            )
+            return render(
+                "users.html.jinja2",
+                request=request,
+                current_user=user,
+                users=auth.list_users() if user.is_admin else [],
+                stored_user=stored_user,
+                auth=auth,
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, "page_users", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
+                status_code=500,
+            )
 
     @router.get("/ruok/sessions", response_class=HTMLResponse)
     async def page_sessions(
@@ -540,10 +585,7 @@ def create_webui_router(
                 status_code=403,
             )
         try:
-            reporter = ReporterInfo(
-                type="user",
-                user_id="webui-admin" if user.is_admin else user.bound_user_id,
-            )
+            reporter = ReporterInfo(type="user", user_id=_account_reporter_id(user))
             session = create_session(
                 data_dir,
                 module_name=name,
@@ -587,6 +629,201 @@ def create_webui_router(
                 f"❌ 创建失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+
+    def _render_users_panel(request: Request, user: CurrentWebUIUser) -> HTMLResponse:
+        stored_user = None if user.username == "admin" else auth.get_user(user.username)
+        return render(
+            "_users_panel.html.jinja2",
+            request=request,
+            current_user=user,
+            users=auth.list_users() if user.is_admin else [],
+            stored_user=stored_user,
+            auth=auth,
+        )
+
+    @router.post("/ruok/_actions/user-create")
+    async def action_user_create(
+        request: Request,
+        username: str = Form(...),
+        password: str = Form(...),
+        user: CurrentWebUIUser = Depends(_admin_guard),
+    ) -> HTMLResponse:
+        try:
+            result = auth.register_user(username, password)
+        except UserManagementError as exc:
+            return _error_html(str(exc))
+        except UserRegistrationError as exc:
+            return _error_html(str(exc))
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, "action_user_create", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f"❌ 创建失败 [{type(exc).__name__}] → Session: {sid}</p>",
+                status_code=500,
+            )
+        return render(
+            "_users_panel.html.jinja2",
+            request=request,
+            current_user=user,
+            users=auth.list_users(),
+            stored_user=None,
+            auth=auth,
+            issued_auth_key=result.auth_key,
+            issued_auth_key_user=result.user.username,
+            issued_auth_key_expires_at=result.user.auth_key_expires_at,
+            headers={"HX-Trigger": '{"toast":"User created","toastType":"success"}'},
+        )
+
+    @router.post("/ruok/_actions/user-update")
+    async def action_user_update(
+        request: Request,
+        username: str = Form(...),
+        new_username: str = Form(""),
+        new_password: str = Form(""),
+        user: CurrentWebUIUser = Depends(_admin_guard),
+    ) -> HTMLResponse:
+        try:
+            auth.update_user(
+                username,
+                new_username=new_username or None,
+                new_password=new_password or None,
+            )
+            return _render_users_panel(request, user)
+        except UserManagementError as exc:
+            return _error_html(str(exc))
+
+    @router.post("/ruok/_actions/user-auth-key")
+    async def action_user_auth_key(
+        request: Request,
+        username: str = Form(...),
+        user: CurrentWebUIUser = Depends(_admin_guard),
+    ) -> HTMLResponse:
+        try:
+            result = auth.issue_auth_key(username, allow_bound=True)
+        except UserManagementError as exc:
+            return _error_html(str(exc))
+        except UserRegistrationError as exc:
+            return _error_html(str(exc))
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, "action_user_auth_key", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f"❌ 生成失败 [{type(exc).__name__}] → Session: {sid}</p>",
+                status_code=500,
+            )
+        return render(
+            "_users_panel.html.jinja2",
+            request=request,
+            current_user=user,
+            users=auth.list_users(),
+            stored_user=None,
+            auth=auth,
+            issued_auth_key=result.auth_key,
+            issued_auth_key_user=result.user.username,
+            issued_auth_key_expires_at=result.user.auth_key_expires_at,
+            headers={"HX-Trigger": '{"toast":"Auth key issued","toastType":"success"}'},
+        )
+
+    @router.post("/ruok/_actions/user-clear-binding")
+    async def action_user_clear_binding(
+        request: Request,
+        username: str = Form(...),
+        user: CurrentWebUIUser = Depends(_admin_guard),
+    ) -> HTMLResponse:
+        try:
+            auth.clear_binding(username)
+            return _render_users_panel(request, user)
+        except UserManagementError as exc:
+            return _error_html(str(exc))
+
+    @router.post("/ruok/_actions/user-delete")
+    async def action_user_delete(
+        request: Request,
+        username: str = Form(...),
+        user: CurrentWebUIUser = Depends(_admin_guard),
+    ) -> HTMLResponse:
+        try:
+            auth.delete_user(username)
+            return _render_users_panel(request, user)
+        except UserManagementError as exc:
+            return _error_html(str(exc))
+
+    @router.post("/ruok/_actions/account-password")
+    async def action_account_password(
+        request: Request,
+        current_password: str = Form(...),
+        new_password: str = Form(...),
+        new_password_confirm: str = Form(""),
+        user: CurrentWebUIUser = Depends(_login_guard),
+    ) -> HTMLResponse:
+        if user.username == "admin":
+            return _error_html("内置 admin 密码请通过 .env 修改")
+        if new_password_confirm and new_password != new_password_confirm:
+            return _error_html("两次输入的密码不一致")
+        try:
+            auth.change_user_password(user.username, current_password, new_password)
+            return _render_users_panel(request, auth.current_user(request) or user)
+        except UserManagementError as exc:
+            return _error_html(str(exc))
+
+    @router.post("/ruok/_actions/account-rebind-key")
+    async def action_account_rebind_key(
+        request: Request,
+        current_password: str = Form(...),
+        user: CurrentWebUIUser = Depends(_login_guard),
+    ) -> HTMLResponse:
+        if user.username == "admin":
+            return _error_html("内置 admin 账户不支持平台绑定")
+        if not auth.verify_user_password(user.username, current_password):
+            return _error_html("当前密码错误")
+        try:
+            result = auth.issue_auth_key(user.username, allow_bound=True)
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, "action_account_rebind_key", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f"❌ 生成失败 [{type(exc).__name__}] → Session: {sid}</p>",
+                status_code=500,
+            )
+        refreshed = auth.current_user(request) or user
+        return render(
+            "_users_panel.html.jinja2",
+            request=request,
+            current_user=refreshed,
+            users=auth.list_users() if refreshed.is_admin else [],
+            stored_user=auth.get_user(refreshed.username),
+            auth=auth,
+            issued_auth_key=result.auth_key,
+            issued_auth_key_user=result.user.username,
+            issued_auth_key_expires_at=result.user.auth_key_expires_at,
+            headers={"HX-Trigger": '{"toast":"Auth key issued","toastType":"success"}'},
+        )
+
+    @router.post("/ruok/_actions/account-delete", response_model=None)
+    async def action_account_delete(
+        request: Request,
+        current_password: str = Form(...),
+        confirm_username: str = Form(...),
+        user: CurrentWebUIUser = Depends(_login_guard),
+    ) -> HTMLResponse | JSONResponse:
+        if user.username == "admin":
+            return _error_html("内置 admin 不能注销")
+        if confirm_username.strip() != user.username:
+            return _error_html("用户名确认不匹配")
+        if not auth.verify_user_password(user.username, current_password):
+            return _error_html("当前密码错误")
+        try:
+            auth.delete_user(user.username)
+            request.session.clear()
+        except UserManagementError as exc:
+            return _error_html(str(exc))
+        return JSONResponse(
+            {"ok": True},
+            headers={
+                "HX-Redirect": "/ruok/login",
+                "HX-Trigger": '{"toast":"Account deleted","toastType":"info"}',
+            },
+        )
 
     @router.post("/ruok/_actions/confirm/{session_id}")
     async def action_confirm(

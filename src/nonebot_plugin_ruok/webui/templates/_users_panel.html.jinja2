@@ -1,0 +1,216 @@
+<div id="users-panel">
+{% if issued_auth_key %}
+<div class="auth-key-result" role="status">
+    <strong>{{ issued_auth_key_user }}</strong> 的一次性绑定码：
+    <p><code>{{ issued_auth_key }}</code></p>
+    <p>
+        在当前聊天平台中发送 <code>/ruok bind {{ issued_auth_key }}</code> 完成绑定。
+        {% if issued_auth_key_expires_at %}
+        有效期至 {{ issued_auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}。
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+
+{% if current_user.is_admin %}
+<div class="user-admin-grid">
+    <article>
+        <h4>新增普通用户</h4>
+        <form hx-post="/ruok/_actions/user-create"
+              hx-target="#users-panel" hx-swap="outerHTML">
+            <label>
+                用户名
+                <input type="text" name="username" required autocomplete="off">
+            </label>
+            <label>
+                初始密码
+                <input type="password" name="password" required autocomplete="new-password">
+            </label>
+            <button type="submit">创建并生成绑定码</button>
+        </form>
+        <p>
+            <small>
+                内置 <code>admin</code> 账户由 <code>RUOK__WEBUI_ADMIN_PASSWORD</code> 管理。
+                绑定到 NoneBot SUPERUSERS 的普通账号会动态获得管理员权限。
+            </small>
+        </p>
+    </article>
+
+    <section class="user-card-list">
+        <article class="user-card">
+            <header class="user-card__header">
+                <div>
+                    <strong>admin</strong>
+                    <p class="metric-label">内置管理员</p>
+                </div>
+                <span class="badge badge-ok">管理员</span>
+            </header>
+            <p>密码来自 <code>RUOK__WEBUI_ADMIN_PASSWORD</code>，不写入用户存储。</p>
+        </article>
+
+        {% for user in users %}
+        <article class="user-card">
+            <header class="user-card__header">
+                <div>
+                    <strong style="overflow-wrap:anywhere;">{{ user.username }}</strong>
+                    <p class="metric-label">
+                        创建于 {{ user.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
+                    </p>
+                </div>
+                {% if auth.is_superuser_account(user) %}
+                <span class="badge badge-ok">SUPERUSER 管理员</span>
+                {% else %}
+                <span class="badge badge-warn">普通用户</span>
+                {% endif %}
+            </header>
+
+            <dl class="user-meta">
+                <div>
+                    <dt>绑定账号</dt>
+                    <dd>{{ user.bound_user_id or '未绑定' }}</dd>
+                </div>
+                <div>
+                    <dt>平台</dt>
+                    <dd>{{ user.bound_platform or '—' }}</dd>
+                </div>
+                <div>
+                    <dt>绑定码</dt>
+                    <dd>
+                        {% if user.auth_key_expires_at %}
+                        有效至 {{ user.auth_key_expires_at.astimezone().strftime('%m-%d %H:%M') }}
+                        {% else %}
+                        —
+                        {% endif %}
+                    </dd>
+                </div>
+            </dl>
+
+            <div class="user-card__actions">
+                <form hx-post="/ruok/_actions/user-update"
+                      hx-target="#users-panel" hx-swap="outerHTML">
+                    <input type="hidden" name="username" value="{{ user.username }}">
+                    <label>
+                        用户名
+                        <input type="text" name="new_username" value="{{ user.username }}" required>
+                    </label>
+                    <label>
+                        重置密码
+                        <input type="password" name="new_password"
+                               autocomplete="new-password" placeholder="留空则不修改">
+                    </label>
+                    <button type="submit" class="secondary outline">保存</button>
+                </form>
+
+                <form hx-post="/ruok/_actions/user-auth-key"
+                      hx-target="#users-panel" hx-swap="outerHTML">
+                    <input type="hidden" name="username" value="{{ user.username }}">
+                    <button type="submit" class="secondary outline">生成换绑码</button>
+                </form>
+
+                <form hx-post="/ruok/_actions/user-clear-binding"
+                      hx-target="#users-panel" hx-swap="outerHTML"
+                      hx-confirm="确定清除「{{ user.username }}」的绑定？">
+                    <input type="hidden" name="username" value="{{ user.username }}">
+                    <button type="submit" class="secondary outline">清除绑定</button>
+                </form>
+
+                <form hx-post="/ruok/_actions/user-delete"
+                      hx-target="#users-panel" hx-swap="outerHTML"
+                      hx-confirm="确定删除用户「{{ user.username }}」？">
+                    <input type="hidden" name="username" value="{{ user.username }}">
+                    <button type="submit" class="secondary outline">删除用户</button>
+                </form>
+            </div>
+        </article>
+        {% endfor %}
+    </section>
+</div>
+{% else %}
+<article>
+    <header class="account-header">
+        <div>
+            <strong>{{ current_user.username }}</strong>
+            <p class="metric-label">普通用户</p>
+        </div>
+        {% if current_user.bound_user_id %}
+        <span class="badge badge-ok">已绑定</span>
+        {% else %}
+        <span class="badge badge-warn">未绑定</span>
+        {% endif %}
+    </header>
+    <dl class="user-meta">
+        <div>
+            <dt>绑定账号</dt>
+            <dd>{{ current_user.bound_user_id or '未绑定' }}</dd>
+        </div>
+        <div>
+            <dt>平台</dt>
+            <dd>{{ current_user.bound_platform or '—' }}</dd>
+        </div>
+        <div>
+            <dt>待用绑定码</dt>
+            <dd>
+                {% if stored_user and stored_user.auth_key_expires_at %}
+                有效至 {{ stored_user.auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
+                {% else %}
+                —
+                {% endif %}
+            </dd>
+        </div>
+    </dl>
+</article>
+
+<div class="account-actions">
+    <article>
+        <h4>修改密码</h4>
+        <form hx-post="/ruok/_actions/account-password"
+              hx-target="#users-panel" hx-swap="outerHTML">
+            <label>
+                当前密码
+                <input type="password" name="current_password" required autocomplete="current-password">
+            </label>
+            <label>
+                新密码
+                <input type="password" name="new_password" required autocomplete="new-password">
+            </label>
+            <label>
+                确认新密码
+                <input type="password" name="new_password_confirm" required autocomplete="new-password">
+            </label>
+            <button type="submit">保存密码</button>
+        </form>
+    </article>
+
+    <article>
+        <h4>换绑平台账号</h4>
+        <p>生成新的一次性绑定码。旧绑定会保留，直到你在聊天平台完成新的 <code>/ruok bind</code>。</p>
+        <form hx-post="/ruok/_actions/account-rebind-key"
+              hx-target="#users-panel" hx-swap="outerHTML">
+            <label>
+                当前密码
+                <input type="password" name="current_password" required autocomplete="current-password">
+            </label>
+            <button type="submit" class="secondary outline">生成换绑码</button>
+        </form>
+    </article>
+
+    <article>
+        <h4>注销账号</h4>
+        <p>注销会删除当前 WebUI 账号和绑定信息，完成后自动退出登录。</p>
+        <form hx-post="/ruok/_actions/account-delete"
+              hx-confirm="确定注销当前账号？此操作不可撤销。">
+            <label>
+                当前密码
+                <input type="password" name="current_password" required autocomplete="current-password">
+            </label>
+            <label>
+                输入用户名确认
+                <input type="text" name="confirm_username" required autocomplete="off"
+                       placeholder="{{ current_user.username }}">
+            </label>
+            <button type="submit" class="secondary outline">注销账号</button>
+        </form>
+    </article>
+</div>
+{% endif %}
+</div>

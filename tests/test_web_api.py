@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
+from collections.abc import Iterable
 
 import pytest
 from fastapi import FastAPI
@@ -11,7 +12,12 @@ from fastapi.testclient import TestClient
 ADMIN_PASSWORD = "admin-secret"
 
 
-def _client(config, data_dir: Path) -> TestClient:
+def _client(
+    config,
+    data_dir: Path,
+    *,
+    superusers: Iterable[str] = (),
+) -> TestClient:
     from starlette.middleware.sessions import SessionMiddleware
 
     from nonebot_plugin_ruok.api import create_ruok_router
@@ -20,7 +26,7 @@ def _client(config, data_dir: Path) -> TestClient:
 
     app = FastAPI()
     app.add_middleware(SessionMiddleware, secret_key="test-secret")
-    auth = WebUIAuth(config, data_dir)
+    auth = WebUIAuth(config, data_dir, superuser_provider=lambda: superusers)
     app.include_router(auth.create_router())
     app.include_router(create_ruok_router(config, data_dir))
     app.include_router(create_webui_router(config, data_dir, auth))
@@ -224,6 +230,52 @@ def test_webui_auth_loads_legacy_bound_qq(tmp_path: Path) -> None:
     assert user.bound_user_id == "10002"
 
 
+def test_webui_auth_rejects_duplicate_platform_binding(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth, AuthUserAlreadyBound
+
+    auth = WebUIAuth(_webui_config(), tmp_path)
+    first = auth.register_user("alice", "secret")
+    second = auth.register_user("bob", "secret")
+    auth.bind_auth_key(first.auth_key, "10002", "OneBot V11")
+
+    with pytest.raises(AuthUserAlreadyBound):
+        auth.bind_auth_key(second.auth_key, "10002", "OneBot V11")
+
+
+def test_webui_superuser_bound_account_is_dynamic_admin(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+    result = auth.register_user("alice", "secret")
+    auth.bind_auth_key(result.auth_key, "10002", "OneBot V11")
+
+    client = _client(config, tmp_path, superusers={"10002"})
+    _login_user(client, "alice", "secret")
+
+    response = client.get("/ruok/modules")
+    assert response.status_code == 200
+    assert "SUPERUSER" in client.get("/ruok/users").text
+
+    client_without_superuser = _client(config, tmp_path)
+    _login_user(client_without_superuser, "alice", "secret")
+    assert client_without_superuser.get("/ruok/modules").status_code == 403
+
+    users = json.loads((tmp_path / "webui_users.json").read_text("utf-8"))["users"]
+    assert users[0]["role"] == "user"
+
+
+def test_webui_login_ui_is_modern_auth_shell(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+
+    response = client.get("/ruok/login")
+
+    assert response.status_code == 200
+    assert 'class="auth-shell"' in response.text
+    assert 'data-password-toggle="login-password"' in response.text
+    assert 'autocomplete="username"' in response.text
+
+
 def test_webui_protected_action_requires_login(tmp_path: Path) -> None:
     client = _client(_webui_config(), tmp_path)
     response = client.post(
@@ -248,6 +300,7 @@ def test_webui_user_dashboard_hides_admin_surfaces(tmp_path: Path) -> None:
     assert "/ruok/sessions" not in response.text
     assert "/ruok/modules" not in response.text
     assert "/ruok/notifications" not in response.text
+    assert "/ruok/users" in response.text
     assert "dashboard-trends" not in response.text
     assert "dashboard-system" not in response.text
     assert "/ruok bind" in response.text
@@ -266,6 +319,7 @@ def test_webui_user_cannot_access_admin_routes(tmp_path: Path) -> None:
     assert client.get("/ruok/notifications").status_code == 403
     assert client.get("/ruok/sessions").status_code == 403
     assert client.get("/ruok/_partials/dashboard-trends-data").status_code == 403
+    assert client.get("/ruok/users").status_code == 200
     assert (
         client.post(
             "/ruok/_actions/module-upsert",
@@ -340,6 +394,112 @@ def test_webui_admin_manual_report_uses_admin_identity(tmp_path: Path) -> None:
     sessions = list_sessions(tmp_path)
     assert response.status_code == 200
     assert sessions[0].reporter.user_id == "webui-admin"
+
+
+def test_webui_users_page_admin_can_manage_users(tmp_path: Path) -> None:
+    config = _webui_config()
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    page = client.get("/ruok/users")
+    assert page.status_code == 200
+    assert "新增普通用户" in page.text
+    assert "admin" in page.text
+
+    created = client.post(
+        "/ruok/_actions/user-create",
+        data={"username": "紧急 用户/a", "password": "secret"},
+    )
+    assert created.status_code == 200
+    assert "/ruok bind" in created.text
+    assert "紧急 用户/a" in created.text
+
+    updated = client.post(
+        "/ruok/_actions/user-update",
+        data={
+            "username": "紧急 用户/a",
+            "new_username": "renamed user",
+            "new_password": "new-secret",
+        },
+    )
+    assert updated.status_code == 200
+    assert "renamed user" in updated.text
+
+    _login_user(_client(config, tmp_path), "renamed user", "new-secret")
+
+    issued = client.post(
+        "/ruok/_actions/user-auth-key",
+        data={"username": "renamed user"},
+    )
+    assert issued.status_code == 200
+    assert "renamed user" in issued.text
+    assert "/ruok bind" in issued.text
+
+    deleted = client.post(
+        "/ruok/_actions/user-delete",
+        data={"username": "renamed user"},
+    )
+    assert deleted.status_code == 200
+    users = json.loads((tmp_path / "webui_users.json").read_text("utf-8"))["users"]
+    assert users == []
+
+
+def test_webui_normal_user_can_change_password_rebind_and_delete(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+    result = auth.register_user("alice", "secret")
+    auth.bind_auth_key(result.auth_key, "10001", "OneBot V11")
+    client = _client(config, tmp_path)
+    _login_user(client, "alice", "secret")
+
+    page = client.get("/ruok/users")
+    assert page.status_code == 200
+    assert "修改密码" in page.text
+    assert "新增普通用户" not in page.text
+
+    bad_password = client.post(
+        "/ruok/_actions/account-password",
+        data={
+            "current_password": "wrong",
+            "new_password": "new-secret",
+            "new_password_confirm": "new-secret",
+        },
+    )
+    assert bad_password.status_code == 400
+
+    changed = client.post(
+        "/ruok/_actions/account-password",
+        data={
+            "current_password": "secret",
+            "new_password": "new-secret",
+            "new_password_confirm": "new-secret",
+        },
+    )
+    assert changed.status_code == 200
+    _login_user(_client(config, tmp_path), "alice", "new-secret")
+
+    rebind = client.post(
+        "/ruok/_actions/account-rebind-key",
+        data={"current_password": "new-secret"},
+    )
+    assert rebind.status_code == 200
+    assert "/ruok bind" in rebind.text
+    rebound_user = WebUIAuth(config, tmp_path).get_user("alice")
+    assert rebound_user is not None
+    assert rebound_user.bound_user_id == "10001"
+
+    deleted = client.post(
+        "/ruok/_actions/account-delete",
+        data={"current_password": "new-secret", "confirm_username": "alice"},
+        follow_redirects=False,
+    )
+    assert deleted.status_code == 200
+    assert deleted.headers["HX-Redirect"] == "/ruok/login"
+    assert WebUIAuth(config, tmp_path).get_user("alice") is None
 
 
 def test_dashboard_trends_partial_uses_webui_metrics_context(tmp_path: Path) -> None:

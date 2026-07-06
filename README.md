@@ -94,7 +94,7 @@ plugins = ["nonebot_plugin_ruok"]
 | `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 允许上报问题的群白名单（群号字符串） |
 
 **上报权限判断优先级**：
-> SUPERUSERS → 白名单用户 → 群管理员/群主 → 白名单群群员
+> SUPERUSERS → 已绑定 WebUI 用户 → 白名单用户 → 群管理员/群主 → 白名单群群员
 
 **`crisis_mode=True` 时全部跳过** *(启发自Cloudflare的Zero Trust Mode，Reversed)* 。
 
@@ -208,10 +208,13 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 | 📝 详情 | `/ruok/sessions/{id}` | 完整信息 + 状态时间线 + 关联 Session + 开发者备注 |
 | 📦 模块 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件） |
 | 🔔 通知 | `/ruok/notifications` | 通知规则管理（触发条件、冷却、通道） |
+| 👤 账号 | `/ruok/users` | 管理员管理用户；普通用户改密、换绑、注销账号 |
 | 🔐 登录 | `/ruok/login` | 管理员账号固定为 `admin`，密码来自 `RUOK__WEBUI_ADMIN_PASSWORD` |
 | 🧾 注册 | `/ruok/register` | 普通用户注册，生成 10 分钟有效的一次性绑定码 |
 
 管理员可访问完整 WebUI。普通用户只能访问精简总览、模块健康状态、绑定提示、手动上报入口和自己的上报记录；普通用户必须先通过 `/ruok bind <auth_key>` 绑定当前聊天平台账号后才能使用 WebUI 上报。
+
+内置 `admin` 账号不写入用户存储，密码只通过 `.env` 管理。普通 WebUI 账号绑定的当前平台用户 ID 如果命中 NoneBot `SUPERUSERS`，会动态获得 WebUI 管理员权限；从 `SUPERUSERS` 移除后权限自动失效，不会永久写入 `webui_users.json`。
 
 当前主要测试适配器为 OneBot V11。绑定机制基于 NoneBot `Event.get_user_id()` 和 `Bot.type` 记录平台用户身份，理论上可用于其他适配器，但非 OneBot 场景未作为主支持路径保证。
 

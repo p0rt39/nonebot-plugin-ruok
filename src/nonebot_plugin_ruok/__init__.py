@@ -28,6 +28,7 @@ from .webui.auth import (
     AuthKeyExpired,
     AuthKeyInvalid,
     AuthKeyAlreadyUsed,
+    AuthUserAlreadyBound,
 )
 from .webui.router import create_webui_router
 
@@ -65,7 +66,11 @@ data_dir = Path(store.get_plugin_data_dir())
 # ────────────────────────────────
 
 log_monitor = LogMonitor(plugin_config, data_dir)
-webui_auth = WebUIAuth(plugin_config, data_dir)
+webui_auth = WebUIAuth(
+    plugin_config,
+    data_dir,
+    superuser_provider=lambda: get_driver().config.superusers,
+)
 
 # ────────────────────────────────
 # Permission checker for report
@@ -225,6 +230,9 @@ async def _cmd_bind(bot: Bot, event: Event, rest: str) -> None:
         return
     except AuthKeyAlreadyUsed:
         await ruok_cmd.finish("❌ auth_key 已被使用，请在 WebUI 重新获取绑定码。")
+        return
+    except AuthUserAlreadyBound as exc:
+        await ruok_cmd.finish(f"❌ {exc}")
         return
     except AuthKeyInvalid:
         await ruok_cmd.finish("❌ auth_key 无效，请检查后重试。")

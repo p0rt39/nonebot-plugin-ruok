@@ -1,82 +1,55 @@
-<!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>注册 — RuOK</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <style>
-        body {
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4ecf7 50%, #dce8f5 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .register-card {
-            background: rgba(255,255,255,0.5);
-            backdrop-filter: blur(16px) saturate(140%);
-            -webkit-backdrop-filter: blur(16px) saturate(140%);
-            border: 1px solid rgba(255,255,255,0.6);
-            border-radius: 24px;
-            box-shadow: 0 12px 32px rgba(0,0,0,0.1);
-            padding: 2.5rem;
-            width: 100%;
-            max-width: 520px;
-        }
-        .register-card h2 {
-            text-align: center;
-            margin-bottom: 1.5rem;
-        }
-        .auth-key {
-            overflow-wrap: anywhere;
-            font-size: 1rem;
-            padding: 0.75rem;
-            border-radius: 10px;
-            background: rgba(102,126,234,0.12);
-        }
-    </style>
-</head>
-<body>
-    <main class="container">
-        <article class="register-card">
-            <h2>🧾 注册 RuOK 用户</h2>
-            {% if error %}
-            <p style="color: var(--pico-del-color); text-align: center;">{{ error }}</p>
-            {% endif %}
-            {% if not admin_configured %}
-            <p style="color: var(--pico-del-color); text-align: center;">
-                未配置 <code>RUOK__WEBUI_ADMIN_PASSWORD</code>，注册暂不可用。
-            </p>
-            {% elif success %}
-            <p style="color: var(--pico-ins-color); text-align: center;">账户已创建并登录。</p>
-            <p>一次性绑定码：</p>
-            <p class="auth-key"><code>{{ auth_key }}</code></p>
-            <p>
-                在当前聊天平台中发送 <code>/ruok bind {{ auth_key }}</code> 完成绑定。
-                {% if auth_key_expires_at %}有效期至 {{ auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}。{% endif %}
-            </p>
-            <a href="/ruok" role="button" style="width: 100%; text-align: center;">进入总览</a>
-            {% else %}
-            <form method="post" action="/ruok/register">
-                <label>
-                    用户名
-                    <input type="text" name="username" required autofocus
-                           value="{{ username or '' }}" autocomplete="username">
-                </label>
-                <label>
-                    密码
-                    <input type="password" name="password" required autocomplete="new-password">
-                </label>
-                <label>
-                    确认密码
-                    <input type="password" name="password_confirm" required autocomplete="new-password">
-                </label>
-                <button type="submit" style="width: 100%;">注册</button>
-            </form>
-            {% endif %}
-            <p style="text-align: center; margin-top: 1rem;"><a href="/ruok/login">返回登录</a></p>
-        </article>
-    </main>
-</body>
-</html>
+{% extends "_auth_shell.html.jinja2" %}
+{% block title %}注册 — RuOK{% endblock %}
+{% block subtitle %}创建账号后用一次性绑定码连接聊天平台身份{% endblock %}
+
+{% block content %}
+{% if error %}
+<p class="auth-alert" role="alert">{{ error }}</p>
+{% endif %}
+{% if not admin_configured %}
+<p class="auth-alert" role="alert">
+    未配置 <code>RUOK__WEBUI_ADMIN_PASSWORD</code>，注册暂不可用。
+</p>
+{% elif success %}
+<p class="auth-success" role="status">账户已创建并登录。</p>
+<p>一次性绑定码：</p>
+<p class="auth-key"><code>{{ auth_key }}</code></p>
+<p>
+    在当前聊天平台中发送 <code>/ruok bind {{ auth_key }}</code> 完成绑定。
+    {% if auth_key_expires_at %}有效期至 {{ auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}。{% endif %}
+</p>
+<a href="/ruok" role="button" class="full-width" style="text-align:center;">进入总览</a>
+{% else %}
+<form method="post" action="/ruok/register">
+    <label>
+        用户名
+        <input type="text" name="username" required autofocus
+               value="{{ username or '' }}" autocomplete="username"
+               {% if error %}aria-invalid="true"{% endif %}>
+    </label>
+    <label class="password-field">
+        密码
+        <input id="register-password" type="password" name="password" required
+               autocomplete="new-password" {% if error %}aria-invalid="true"{% endif %}>
+        <button type="button" class="secondary outline password-toggle"
+                data-password-toggle="register-password" aria-label="显示密码">
+            显示
+        </button>
+    </label>
+    <label class="password-field">
+        确认密码
+        <input id="register-password-confirm" type="password" name="password_confirm"
+               required autocomplete="new-password"
+               {% if error %}aria-invalid="true"{% endif %}>
+        <button type="button" class="secondary outline password-toggle"
+                data-password-toggle="register-password-confirm" aria-label="显示密码">
+            显示
+        </button>
+    </label>
+    <button type="submit" class="full-width">注册</button>
+</form>
+{% endif %}
+<div class="auth-actions">
+    <a href="/ruok/login">返回登录</a>
+</div>
+{% endblock %}
