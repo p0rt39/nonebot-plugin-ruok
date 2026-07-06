@@ -18,30 +18,32 @@
 
 ## 介绍
 
-RUOK 是一个面向 NoneBot2 的运行状态观察与异常处理插件。它会收集系统指标、Bot 连接状态、已加载插件信息，自动捕获 ERROR/CRITICAL 日志生成可追踪 Session，并提供 SSR WebUI、HTTP API、通知规则与聊天指令。
-
-它适合用来回答这些问题：
-
-- Bot 现在整体是否健康？
-- 哪些模块被上报为异常？
-- 某个异常是否已经确认、解决或忽略？
-- 一个插件被确认异常后，会影响哪些关联模块？
-- 普通用户能否安全地通过 WebUI 上报自己的问题？
+`Nonebot, RUOK?` (RUOK) 是一个面向 NoneBot2 的运行状态观察与异常处理插件。它会收集系统指标、Bot 连接状态、已加载插件信息，自动捕获 ERROR/CRITICAL 日志生成可追踪 Session，并提供 SSR WebUI、HTTP API、通知规则与聊天指令。
 
 核心能力：
 
 - 系统指标：CPU、内存、磁盘、网络、进程、运行时间。
 - 连接监控：Bot 连接/断开、适配器、自身 ID、可选深度延迟检查。
-- 插件内省：已加载插件、元信息、Matcher、健康提示。
+- 插件内省：自动捕获已加载插件、元信息、Matcher、健康提示。
 - Session 追踪：自动捕获日志错误，支持手动上报、查找、备注、关联、确认、解决、忽略。
 - 插件级影响传播：确认 Session 时可指定影响插件，相关模块自动进入 `unavailable`。
-- WebUI：管理员完整面板，普通用户精简面板。
+- WebUI：完整鉴权、实时更新、关键指标实时显示、Bot用户/Bot开发者双显示模板。
 - 账号体系：内置 admin、普通用户注册、平台账号绑定、记住登录、自助重设密码。
 - 通知规则：按状态/模块触发，支持 Bot 私聊与 Webhook，带冷却时间。
-- API：`/ruok/api/*` JSON 接口，支持可选 API key。
-- 实时更新：WebUI 通过 SSE 获取指标和 Session 变更。
+- API：`/ruok/api/*` JSON 接口，支持可选 API key，为外接Status Page等留下空间。
 
-## 安装
+
+## 使用前的提示
+
+本插件的前端相关代码由Codex基于`L1nk Workflow`自主迭代构建，经作者人工测试后投入使用。
+
+但由于作者技术力不足，现在的项目架构亟待优化。欢迎您提交Issue；也欢迎和感谢您通过提交Pull Request为本项目做出贡献。
+
+## 快速启动
+
+如果您是第一次接入 RUOK，建议按照以下步骤进行。
+
+### 1. 安装插件
 
 推荐使用 nb-cli：
 
@@ -49,9 +51,7 @@ RUOK 是一个面向 NoneBot2 的运行状态观察与异常处理插件。它�
 nb plugin install nonebot-plugin-ruok
 ```
 
----
-
-或使用常见 Python 包管理器：
+也可以使用常见 Python 包管理器：
 
 ```bash
 uv add nonebot-plugin-ruok
@@ -59,24 +59,20 @@ pdm add nonebot-plugin-ruok
 poetry add nonebot-plugin-ruok
 ```
 
-在 NoneBot 项目的 `pyproject.toml` 中注册插件：
+### 2. 注册插件
+
+通常，nb-cli会自动为您处理本节内容。
+
+如果安装工具没有自动写入 NoneBot 配置，请在 NoneBot 项目的 `pyproject.toml` 中注册插件：
 
 ```toml
 [tool.nonebot]
 plugins = ["nonebot_plugin_ruok"]
 ```
 
----
-虽然本插件设计了通用适配器解决方案，支持None适配器（所有适配器），但是主要针对OneBot V11适配器做了优化。
+### 3. 写入推荐最小配置
 
-您**可以**就非OneBot V11适配器提交Issue，但是支持效率可能会降低。非OneBot V11适配器不是主线支持路径。
-
-**因此，推荐使用 OneBot V11**。
-
-
-## 最小配置
-
-插件本身可以零配置加载。但为了保证功能完整，推荐至少配置：
+本插件可以零配置加载，但为了启用 WebUI 管理员登录并保证重启后的登录体验，建议至少配置：
 
 ```dotenv
 RUOK__WEBUI_ADMIN_PASSWORD=change-me
@@ -84,9 +80,21 @@ RUOK__WEBUI_SECRET_KEY=replace-with-a-long-random-secret
 RUOK__API_KEY=optional-api-token
 ```
 
-虽然挂载在Nonebot Uvicorn上的本插件WebUI和API默认只监听`localhost`，但是鉴于用户可能通过Tunnel等方式向外暴露，故建议在安装阶段就配置API.
+`RUOK__API_KEY` 在您需要开放或集成 `/ruok/api/*` 时需要配置，不影响插件内部调用和WebUI使用。
 
-启动后访问：
+虽然 WebUI 和 API 挂载在Nonebot Uvicorn 上，Uvicorn 默认只监听 `localhost`，但考虑到您可能有通过 Tunnel、反向代理等方式向外暴露或者修改 Nonebot Uvicorn 的监听行为的需求，建议在安装阶段就配置 API key。
+
+如果`RUOK__WEBUI_ADMIN_PASSWORD`未配置，WebUI将**不可用**。
+
+如果没有配置 `RUOK__WEBUI_SECRET_KEY`，WebUI session 会使用启动时随机密钥。这不会影响本次运行内的登录、注册、绑定等功能，但 Bot 重启后旧登录态和“保持登录”cookie 无法继续校验，用户需要重新登录。
+
+### 4. 启动并访问 WebUI
+
+WebUI是本插件的核心功能之一，可以帮助Bot开发者摆脱繁琐的聊天窗口命令输入。而且，许多高级配置和安装后初始化定制依赖WebUI来进行。
+
+**因此，请务必在安装后验证WebUI可访问性。**
+
+启动 Bot 后访问：
 
 ```text
 http://<host>:<port>/ruok
@@ -99,9 +107,35 @@ username: admin
 password: RUOK__WEBUI_ADMIN_PASSWORD
 ```
 
-如果没有配置 `RUOK__WEBUI_SECRET_KEY`，WebUI session 会使用启动时随机密钥。
-这不会影响本次运行内的登录、注册、绑定等功能，但 Bot 重启后旧登录态和“保持登录”
-cookie 无法继续校验，用户需要重新登录。
+**如果WebUI不可用，请检查`RUOK__WEBUI_ADMIN_PASSWORD`是否配置。**
+
+### 5. 验证聊天命令
+
+在聊天中发送：
+
+```text
+/ruok status
+/ruok list
+```
+
+`/ruok status` 应返回模块实时状态，`/ruok list` 会列出当前用户可见的 Session。SUPERUSER 还可以发送：
+
+```text
+/ruok raise quickstart
+```
+
+这会触发一次受控内部异常，用于验证 RUOK 的自动 Session 捕获流程。随后可通过 `/ruok list`、`/ruok lookup <id>` 和 `/ruok solve <id>` 检查并处理该 Session。
+
+### 适配器提示
+
+RUOK 设计上不绑定具体适配器，但当前主要针对 OneBot V11 做了优化。非 OneBot V11 适配器可以使用，也欢迎提交 Issue；只是支持效率可能低于主线适配器。
+
+### 接下来可以做什么
+
+- 在 WebUI 的通知页面配置新 Session 通知规则。
+- 阅读“聊天指令”了解权限和 Session 处理命令。
+- 阅读“聊天图片渲染”启用 `/ruok status`、`/ruok list` 图片输出。
+- 阅读“HTTP API”将 RUOK 状态接入外部监控或自动化流程。
 
 ## 配置项
 
@@ -114,9 +148,7 @@ cookie 无法继续校验，用户需要重新登录。
 | `RUOK__CHECK_TIMEOUT` | `float` | `5.0` | 健康检查超时时间，单位秒 |
 | `RUOK__WS_DEEP_CHECK_TIMEOUT` | `float` | `3.0` | Bot 深度检查超时时间 |
 | `RUOK__CACHE_TTL` | `float` | `10.0` | API 聚合状态缓存时间 |
-| `RUOK__ENABLE_DEEP_WS_CHECK` | `bool` | `true` | 是否调用 `bot.get_status()` 做深度连接检查 |
-
-*由于跨插件Deep WS检查依旧WIP，相关配置项目前无效。*
+| `RUOK__ENABLE_DEEP_WS_CHECK` | `bool` | `true` | 是否调用 `bot.get_status()` 与各Bot做端到端检查 |
 
 ### Session 与上报
 
@@ -451,7 +483,7 @@ RUOK 使用 `nonebot-plugin-localstore` 的插件数据目录。
 
 `plugin_impacts.json` 是缓存，不是权威状态。缺失、损坏或过期时会从 Session 文件重建。
 
-## 前端静态资产与许可证
+## 前端静态资产及其许可证
 
 WebUI 使用随包分发的本地静态资产，不依赖运行时 CDN：
 
@@ -529,6 +561,32 @@ uv run pytest
 ```powershell
 prek run --all-files
 ```
+
+## 鸣谢
+
+### [NoneBot2](https://nonebot.dev/) 及其社区生态
+
+提供独一无二的Bot框架，和独一无二的社区开发者们。
+
+### [kexue-z/nonebot-plugin-htmlrender](https://github.com/kexue-z/nonebot-plugin-htmlrender)
+
+为聊天命令图片渲染提供 HTML 截图能力。
+
+### [giampaolo/psutil](https://github.com/giampaolo/psutil)
+
+支撑系统指标采集功能。
+
+### [Jinja2](https://jinja.palletsprojects.com/)
+支持 WebUI 模板渲染。
+
+### [FastAPI](https://fastapi.tiangolo.com/)、[Starlette](https://www.starlette.io/) 
+支持 WebUI 和 API。
+
+### [Pico CSS](https://picocss.com/)、[htmx](https://htmx.org/)、[bigskysoftware/Idiomorph](https://github.com/bigskysoftware/idiomorph)、[Chart.js](https://www.chartjs.org/) 
+
+支撑 WebUI 的样式、交互与图表展示。
+
+>第三方前端资产的许可证信息见“前端静态资产及其许可证”。
 
 ## 许可证
 
