@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        width: 820px;
+        padding: 28px;
+        color: #1d2433;
+        background: #f5f7fb;
+        font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    .panel {
+        overflow: hidden;
+        border: 1px solid #dce3ee;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 12px 32px rgba(18, 31, 54, 0.08);
+    }
+    header {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 20px 24px;
+        border-bottom: 1px solid #e6ebf2;
+        background: #f8fafc;
+    }
+    h1 {
+        margin: 0;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 0;
+    }
+    .summary {
+        color: #607089;
+        font-size: 14px;
+        text-align: right;
+    }
+    .list {
+        display: grid;
+        gap: 0;
+    }
+    .item {
+        display: grid;
+        grid-template-columns: 34px 1fr auto;
+        gap: 12px;
+        align-items: start;
+        padding: 16px 24px;
+        border-bottom: 1px solid #edf1f6;
+    }
+    .item:last-child { border-bottom: 0; }
+    .icon {
+        width: 28px;
+        height: 28px;
+        text-align: center;
+        line-height: 28px;
+        font-size: 20px;
+    }
+    .session-id {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 700;
+    }
+    .meta {
+        margin: 5px 0 0;
+        color: #607089;
+        font-size: 13px;
+    }
+    .description {
+        margin: 7px 0 0;
+        color: #344256;
+        font-size: 14px;
+        line-height: 1.45;
+    }
+    .badge {
+        min-width: 68px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 650;
+    }
+    .status-pending { color: #92400e; background: #fef3c7; }
+    .status-unsolved { color: #b91c1c; background: #fee2e2; }
+    .status-solved { color: #0f766e; background: #ccfbf1; }
+    .status-ignored { color: #475569; background: #e2e8f0; }
+</style>
+</head>
+<body>
+    <section class="panel">
+        <header>
+            <h1>{{ title }}</h1>
+            <div class="summary">
+                显示 {{ items | length }} / {{ total_count }} 个 Session
+                {% if hidden_count > 0 %}<br>另有 {{ hidden_count }} 个未显示{% endif %}
+            </div>
+        </header>
+        <div class="list">
+            {% for item in items %}
+            <article class="item">
+                <div class="icon">{{ item.icon }}</div>
+                <div>
+                    <p class="session-id">{{ item.session_id }}</p>
+                    <p class="meta">{{ item.module_name }} · {{ item.time_text }}</p>
+                    {% if item.description %}
+                    <p class="description">{{ item.description }}</p>
+                    {% endif %}
+                </div>
+                <div class="badge status-{{ item.status }}">{{ item.label }}</div>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+</body>
+</html>

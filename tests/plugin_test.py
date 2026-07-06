@@ -282,6 +282,148 @@ async def test_ruok_status_builtin_module(app: App) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ruok_status_image_mode_sends_rendered_image(
+    app: App,
+    monkeypatch,
+) -> None:
+    """/ruok status should send a rendered image when image mode succeeds."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    sent_images: list[bytes] = []
+    rendered_module_counts: list[int] = []
+    config = ScopedConfig(chat_render_mode="image")
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+
+    async def fake_render_status_image(modules, config):
+        rendered_module_counts.append(len(modules))
+        return b"status-png"
+
+    async def fake_send_chat_image(bot, event, image: bytes) -> None:
+        sent_images.append(image)
+
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "render_status_image",
+        fake_render_status_image,
+    )
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "send_chat_image",
+        fake_send_chat_image,
+    )
+
+    event = fake_group_message_event_v11(message="/ruok status")
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_finished()
+
+    assert sent_images == [b"status-png"]
+    assert rendered_module_counts == [1]
+
+
+@pytest.mark.asyncio
+async def test_ruok_status_image_render_failure_falls_back_to_text(
+    app: App,
+    monkeypatch,
+) -> None:
+    """/ruok status should fall back to text when image rendering fails."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    config = ScopedConfig(chat_render_mode="image")
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+
+    async def fake_render_status_image(modules, config):
+        raise RuntimeError("render boom")
+
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "render_status_image",
+        fake_render_status_image,
+    )
+
+    event = fake_group_message_event_v11(message="/ruok status")
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            "🟢 RUOK — available",
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_ruok_status_image_send_failure_falls_back_to_text(
+    app: App,
+    monkeypatch,
+) -> None:
+    """/ruok status should fall back to text when image sending fails."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    config = ScopedConfig(chat_render_mode="image")
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+
+    async def fake_render_status_image(modules, config):
+        return b"status-png"
+
+    async def fake_send_chat_image(bot, event, image: bytes) -> None:
+        raise RuntimeError("send boom")
+
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "render_status_image",
+        fake_render_status_image,
+    )
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "send_chat_image",
+        fake_send_chat_image,
+    )
+
+    event = fake_group_message_event_v11(message="/ruok status")
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            "🟢 RUOK — available",
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
 async def test_ruok_list_user_shows_own_recent_sessions(
     app: App,
     tmp_path: Path,
@@ -452,6 +594,222 @@ async def test_ruok_list_superuser_shows_recent_active_sessions(
             bot=bot,
         )
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_ruok_list_image_mode_user_uses_own_recent_sessions(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok list image mode should render only the sender's own sessions."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import (
+        get_session,
+        create_session,
+        update_session,
+    )
+
+    config = ScopedConfig(chat_render_mode="image")
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", set())
+    base_time = datetime(2026, 7, 6, 12, 0, tzinfo=timezone.utc)
+
+    own_sessions = []
+    for index in range(6):
+        session = create_session(
+            tmp_path,
+            f"own-{index}",
+            f"own issue {index}",
+            ReporterInfo(type="user", user_id="12345678"),
+        )
+        update_session(
+            tmp_path,
+            session.session_id,
+            {"last_seen_at": base_time + timedelta(minutes=index)},
+        )
+        own_sessions.append(session)
+    other = create_session(
+        tmp_path,
+        "other",
+        "other issue",
+        ReporterInfo(type="user", user_id="99999999"),
+    )
+    update_session(
+        tmp_path,
+        other.session_id,
+        {"last_seen_at": base_time + timedelta(hours=1)},
+    )
+
+    expected_ids = []
+    for session in reversed(own_sessions[-5:]):
+        reloaded = get_session(tmp_path, session.session_id)
+        assert reloaded is not None
+        expected_ids.append(reloaded.session_id)
+
+    rendered = []
+    sent_images: list[bytes] = []
+
+    async def fake_render_session_list_image(
+        *,
+        title,
+        sessions,
+        total_count,
+        hidden_count,
+        config,
+    ):
+        rendered.append((title, [session.session_id for session in sessions]))
+        assert total_count == 6
+        assert hidden_count == 1
+        return b"list-png"
+
+    async def fake_send_chat_image(bot, event, image: bytes) -> None:
+        sent_images.append(image)
+
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "render_session_list_image",
+        fake_render_session_list_image,
+    )
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "send_chat_image",
+        fake_send_chat_image,
+    )
+
+    event = fake_group_message_event_v11(
+        message="/ruok list",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_finished()
+
+    assert rendered == [("你的 Session", expected_ids)]
+    assert sent_images == [b"list-png"]
+
+
+@pytest.mark.asyncio
+async def test_ruok_list_image_mode_superuser_uses_active_sessions(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok list image mode should render SUPERUSER's global active view."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import (
+        get_session,
+        create_session,
+        update_session,
+    )
+
+    config = ScopedConfig(chat_render_mode="image")
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
+    base_time = datetime(2026, 7, 6, 12, 0, tzinfo=timezone.utc)
+
+    active_sessions = []
+    for index in range(16):
+        session = create_session(
+            tmp_path,
+            f"active-{index}",
+            f"active issue {index}",
+            ReporterInfo(type="user", user_id=str(index)),
+        )
+        update_session(
+            tmp_path,
+            session.session_id,
+            {
+                "status": "unsolved" if index % 2 else "pending",
+                "last_seen_at": base_time + timedelta(minutes=index),
+            },
+        )
+        active_sessions.append(session)
+    solved = create_session(
+        tmp_path,
+        "solved",
+        "not active",
+        ReporterInfo(type="user", user_id="12345678"),
+    )
+    update_session(
+        tmp_path,
+        solved.session_id,
+        {
+            "status": "solved",
+            "last_seen_at": base_time + timedelta(hours=1),
+        },
+    )
+
+    expected_ids = []
+    for session in reversed(active_sessions[-15:]):
+        reloaded = get_session(tmp_path, session.session_id)
+        assert reloaded is not None
+        expected_ids.append(reloaded.session_id)
+
+    rendered = []
+    sent_images: list[bytes] = []
+
+    async def fake_render_session_list_image(
+        *,
+        title,
+        sessions,
+        total_count,
+        hidden_count,
+        config,
+    ):
+        rendered.append((title, [session.session_id for session in sessions]))
+        assert total_count == 16
+        assert hidden_count == 1
+        return b"list-png"
+
+    async def fake_send_chat_image(bot, event, image: bytes) -> None:
+        sent_images.append(image)
+
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "render_session_list_image",
+        fake_render_session_list_image,
+    )
+    monkeypatch.setattr(
+        nonebot_plugin_ruok,
+        "send_chat_image",
+        fake_send_chat_image,
+    )
+
+    event = fake_group_message_event_v11(
+        message="/ruok list",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_finished()
+
+    assert rendered == [("活跃 Session", expected_ids)]
+    assert sent_images == [b"list-png"]
 
 
 @pytest.mark.asyncio

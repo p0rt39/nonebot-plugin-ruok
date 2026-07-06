@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 authors = [{ name = "p0rt39", email = "YuibataMiraa@gmail.com" }]
 dependencies = [
     "nonebot2[fastapi,httpx]>=2.5.0,<3.0.0",
+    "nonebot-plugin-htmlrender>=0.7.1,<1.0.0",
     "nonebot-plugin-localstore>=0.7.0,<1.0.0",
     "psutil>=6.0.0,<7.0.0",
     "jinja2>=3.1.6",

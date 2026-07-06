@@ -1,5 +1,7 @@
 """RUOK plugin configuration model."""
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from .protocol import NotificationRule
@@ -35,6 +37,10 @@ class ScopedConfig(BaseModel):
 
     # ── Time-series metrics ──
     metrics_retention_days: int = 7
+
+    # ── Chat rendering ──
+    chat_render_mode: Literal["text", "image"] = "text"
+    chat_render_timeout: float = 8.0
 
     # ── Notification rules ──
     notification_enabled: bool = True

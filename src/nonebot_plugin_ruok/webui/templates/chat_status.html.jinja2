@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        width: 760px;
+        padding: 28px;
+        color: #1d2433;
+        background: #f5f7fb;
+        font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    .panel {
+        overflow: hidden;
+        border: 1px solid #dce3ee;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 12px 32px rgba(18, 31, 54, 0.08);
+    }
+    header {
+        padding: 20px 24px;
+        border-bottom: 1px solid #e6ebf2;
+        background: #f8fafc;
+    }
+    h1 {
+        margin: 0;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 0;
+    }
+    .subtitle {
+        margin-top: 6px;
+        color: #607089;
+        font-size: 14px;
+    }
+    .list {
+        display: grid;
+        gap: 0;
+    }
+    .item {
+        display: grid;
+        grid-template-columns: 36px 1fr auto;
+        gap: 12px;
+        align-items: start;
+        padding: 16px 24px;
+        border-bottom: 1px solid #edf1f6;
+    }
+    .item:last-child { border-bottom: 0; }
+    .icon {
+        width: 28px;
+        height: 28px;
+        text-align: center;
+        line-height: 28px;
+        font-size: 20px;
+    }
+    .name {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 650;
+    }
+    .reason {
+        margin: 6px 0 0;
+        color: #65748b;
+        font-size: 13px;
+        line-height: 1.45;
+    }
+    .badge {
+        min-width: 64px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 650;
+    }
+    .status-available { color: #0f766e; background: #ccfbf1; }
+    .status-degraded { color: #92400e; background: #fef3c7; }
+    .status-unavailable { color: #b91c1c; background: #fee2e2; }
+</style>
+</head>
+<body>
+    <section class="panel">
+        <header>
+            <h1>RUOK 模块状态</h1>
+            <div class="subtitle">共 {{ items | length }} 个模块</div>
+        </header>
+        <div class="list">
+            {% for item in items %}
+            <article class="item">
+                <div class="icon">{{ item.icon }}</div>
+                <div>
+                    <p class="name">{{ item.name }}</p>
+                    {% for reason in item.reasons %}
+                    <p class="reason">{{ reason }}</p>
+                    {% endfor %}
+                </div>
+                <div class="badge status-{{ item.status }}">{{ item.label }}</div>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+</body>
+</html>

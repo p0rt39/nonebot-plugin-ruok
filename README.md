@@ -148,6 +148,22 @@ Authorization: Bearer your-token
 | :--- | :--- | :--- | :--- |
 | `RUOK__METRICS_RETENTION_DAYS` | `int` | `7` | 指标数据保留天数 |
 
+### 聊天图片渲染
+
+RUOK 默认依赖 `nonebot-plugin-htmlrender`，可将 `/ruok status` 和 `/ruok list`
+渲染成图片发送。默认仍使用文本输出；图片渲染失败、浏览器不可用或适配器不支持图片时，
+会自动回退文本结果。
+
+| 配置项 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `RUOK__CHAT_RENDER_MODE` | `"text" \| "image"` | `"text"` | 聊天命令输出模式 |
+| `RUOK__CHAT_RENDER_TIMEOUT` | `float` | `8.0` | 图片渲染超时时间，单位秒 |
+
+图片渲染由 `nonebot-plugin-htmlrender` 封装，RUOK 调用其 `render_html` API，
+不直接操控 Playwright。开启 `RUOK__CHAT_RENDER_MODE=image` 后，还需要按
+htmlrender 配置启用渲染后端（例如 `RENDER_BACKEND=playwright`）；运行环境可能
+需要安装 Chromium 浏览器二进制、系统字体或 Chromium 依赖库。
+
 ### 通知规则
 
 新 Session 即时通知由通知规则系统统一处理，覆盖聊天上报、WebUI 上报、API 创建

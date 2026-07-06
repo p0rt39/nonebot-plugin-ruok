@@ -79,3 +79,9 @@ def render(template_name: str, **context) -> HTMLResponse:
     headers = context.pop("headers", None)
     template = _jinja_env.get_template(template_name)
     return HTMLResponse(template.render(**context), headers=headers)
+
+
+def render_to_string(template_name: str, **context) -> str:
+    """Render a Jinja2 template to a plain string."""
+    template = _jinja_env.get_template(template_name)
+    return template.render(**context)

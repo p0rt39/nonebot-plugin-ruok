@@ -4,6 +4,7 @@ import secrets
 from typing import Annotated
 from pathlib import Path
 from datetime import datetime, timezone
+from collections.abc import Callable, Awaitable
 
 from nonebot import logger, require, get_driver, on_command, get_plugin_config
 from nonebot.params import CommandArg
@@ -32,10 +33,17 @@ from .webui.auth import (
     AuthKeyAlreadyUsed,
     AuthUserAlreadyBound,
 )
+from .chat_render import (
+    send_chat_image,
+    chat_render_enabled,
+    render_status_image,
+    render_session_list_image,
+)
 from .webui.router import create_webui_router
 
 require("nonebot_plugin_localstore")
 store = __import__("nonebot_plugin_localstore")
+require("nonebot_plugin_htmlrender")
 
 __plugin_meta__ = PluginMetadata(
     name="Nonebot, RUOK?",
@@ -178,9 +186,9 @@ async def handle_ruok(
     elif subcmd == "reset":
         await _cmd_reset(bot, event)
     elif subcmd == "status":
-        await _cmd_status()
+        await _cmd_status(bot, event)
     elif subcmd == "list":
-        await _cmd_list(event)
+        await _cmd_list(bot, event)
     elif subcmd == "lookup":
         await _cmd_lookup(event, rest)
     elif subcmd in ("raise", "test"):
@@ -311,7 +319,26 @@ async def _cmd_reset(bot: Bot, event: Event) -> None:
     await ruok_cmd.finish(text)
 
 
-async def _cmd_status() -> None:
+async def _finish_with_optional_image(
+    bot: Bot,
+    event: Event,
+    text: str,
+    render_image: Callable[[], Awaitable[bytes]],
+) -> None:
+    """Try to send a rendered image, then fall back to text."""
+    if chat_render_enabled(plugin_config):
+        try:
+            image = await render_image()
+            await send_chat_image(bot, event, image)
+        except Exception as exc:
+            logger.warning(f"RUOK: chat image output failed, falling back: {exc}")
+        else:
+            await ruok_cmd.finish()
+            return
+    await ruok_cmd.finish(text)
+
+
+async def _cmd_status(bot: Bot, event: Event) -> None:
     """Handle /ruok status"""
     try:
         from .collector import list_modules as lm
@@ -334,10 +361,16 @@ async def _cmd_status() -> None:
             m.status, "⚪"
         )
         lines.append(f"{icon} {m.display_name or m.name} — {m.status}")
-    await ruok_cmd.finish("\n".join(lines))
+    text = "\n".join(lines)
+    await _finish_with_optional_image(
+        bot,
+        event,
+        text,
+        lambda: render_status_image(modules, plugin_config),
+    )
 
 
-async def _cmd_list(event: Event) -> None:
+async def _cmd_list(bot: Bot, event: Event) -> None:
     """Handle /ruok list with scoped visibility."""
     if _is_superuser(event):
         sessions = list_sessions(data_dir)
@@ -353,7 +386,19 @@ async def _cmd_list(event: Event) -> None:
             lines.append(
                 f"... 还有 {len(active) - 15} 个，使用 /ruok lookup <id> 查看详情"
             )
-        await ruok_cmd.finish("\n".join(lines))
+        text = "\n".join(lines)
+        await _finish_with_optional_image(
+            bot,
+            event,
+            text,
+            lambda: render_session_list_image(
+                title="活跃 Session",
+                sessions=visible,
+                total_count=len(active),
+                hidden_count=max(len(active) - len(visible), 0),
+                config=plugin_config,
+            ),
+        )
         return
 
     sessions = list_sessions(data_dir, reporter_user_id=event.get_user_id())
@@ -368,7 +413,19 @@ async def _cmd_list(event: Event) -> None:
         lines.append(
             f"... 还有 {len(sessions) - 5} 个，使用 /ruok lookup <id> 查看详情"
         )
-    await ruok_cmd.finish("\n".join(lines))
+    text = "\n".join(lines)
+    await _finish_with_optional_image(
+        bot,
+        event,
+        text,
+        lambda: render_session_list_image(
+            title="你的 Session",
+            sessions=visible,
+            total_count=len(sessions),
+            hidden_count=max(len(sessions) - len(visible), 0),
+            config=plugin_config,
+        ),
+    )
 
 
 async def _cmd_lookup(event: Event, rest: str) -> None:
