@@ -699,7 +699,7 @@ async def _startup() -> None:
     # Ensure notification rules are initialized on first run
     from .collectors.notifications import _load_rules
 
-    _load_rules(data_dir, plugin_config)
+    _load_rules(data_dir)
 
     # Register summary notification job (best-effort, APScheduler optional)
     try:

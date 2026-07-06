@@ -67,7 +67,7 @@ def _save_notification_rules(config, data_dir: Path, rules) -> None:
 def _load_notification_rules(config, data_dir: Path):
     from nonebot_plugin_ruok.collectors.notifications import _load_rules
 
-    return _load_rules(data_dir, config)
+    return _load_rules(data_dir)
 
 
 def _upsert_module(data_dir: Path, module) -> None:

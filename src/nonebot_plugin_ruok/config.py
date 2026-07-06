@@ -4,8 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .protocol import NotificationRule
-
 
 class ScopedConfig(BaseModel):
     """RUOK plugin config, scoped under ``RUOK__`` in dotenv."""
@@ -44,7 +42,6 @@ class ScopedConfig(BaseModel):
 
     # ── Notification rules ──
     notification_enabled: bool = True
-    notification_rules: list[NotificationRule] = []
 
 
 class Config(BaseModel):

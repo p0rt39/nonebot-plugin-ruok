@@ -295,6 +295,25 @@ def test_notification_detail_delete_redirects_to_list(tmp_path: Path) -> None:
     assert [rule.name for rule in rules] == ["keep"]
 
 
+def test_notification_rules_are_loaded_from_webui_storage_only(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import NotificationRule
+    from nonebot_plugin_ruok.collectors.notifications import _load_rules
+
+    config = ScopedConfig()
+    object.__setattr__(
+        config,
+        "notification_rules",
+        [NotificationRule(name="env-like")],
+    )
+
+    rules = _load_rules(tmp_path)
+
+    assert [rule.name for rule in rules] == ["superusers"]
+
+
 async def test_dispatch_notification_is_independent_from_auto_session_enabled(
     tmp_path: Path,
     monkeypatch,
@@ -312,11 +331,12 @@ async def test_dispatch_notification_is_independent_from_auto_session_enabled(
         "nonebot_plugin_ruok.collectors.notifications._send_bot_dm",
         fake_send_bot_dm,
     )
-    config = ScopedConfig(
-        auto_session_enabled=False,
-        notification_rules=[
-            NotificationRule(name="test", channels=["bot_dm"], cooldown_minutes=0)
-        ],
+    config = ScopedConfig(auto_session_enabled=False)
+    from nonebot_plugin_ruok.collectors.notifications import _save_rules
+
+    _save_rules(
+        tmp_path,
+        [NotificationRule(name="test", channels=["bot_dm"], cooldown_minutes=0)],
     )
     session = Session(
         session_id="ruok-1234abcd",
@@ -347,11 +367,12 @@ async def test_dispatch_notification_respects_notification_enabled(
         "nonebot_plugin_ruok.collectors.notifications._send_bot_dm",
         fake_send_bot_dm,
     )
-    config = ScopedConfig(
-        notification_enabled=False,
-        notification_rules=[
-            NotificationRule(name="test", channels=["bot_dm"], cooldown_minutes=0)
-        ],
+    config = ScopedConfig(notification_enabled=False)
+    from nonebot_plugin_ruok.collectors.notifications import _save_rules
+
+    _save_rules(
+        tmp_path,
+        [NotificationRule(name="test", channels=["bot_dm"], cooldown_minutes=0)],
     )
     session = Session(
         session_id="ruok-1234abcd",

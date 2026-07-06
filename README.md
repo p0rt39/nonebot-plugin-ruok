@@ -43,11 +43,13 @@ RUOK 是一个面向 NoneBot2 的运行状态观察与异常处理插件。它�
 
 ## 安装
 
-使用 nb-cli：
+推荐使用 nb-cli：
 
 ```bash
-nb plugin install nonebot-plugin-ruok --upgrade
+nb plugin install nonebot-plugin-ruok
 ```
+
+---
 
 或使用常见 Python 包管理器：
 
@@ -64,17 +66,25 @@ poetry add nonebot-plugin-ruok
 plugins = ["nonebot_plugin_ruok"]
 ```
 
-如果使用 OneBot V11，确保项目已安装并加载对应适配器。当前主要测试适配器为 OneBot V11；平台绑定逻辑基于 NoneBot 的 `Event.get_user_id()` 和 `Bot.type`，但非 OneBot 场景不是主要保证路径。
+---
+虽然本插件设计了通用适配器解决方案，支持None适配器（所有适配器），但是主要针对OneBot V11适配器做了优化。
+
+您**可以**就非OneBot V11适配器提交Issue，但是支持效率可能会降低。非OneBot V11适配器不是主线支持路径。
+
+**因此，推荐使用 OneBot V11**。
+
 
 ## 最小配置
 
-WebUI 登录需要管理员密码。推荐至少配置：
+插件本身可以零配置加载。但为了保证功能完整，推荐至少配置：
 
 ```dotenv
 RUOK__WEBUI_ADMIN_PASSWORD=change-me
 RUOK__WEBUI_SECRET_KEY=replace-with-a-long-random-secret
 RUOK__API_KEY=optional-api-token
 ```
+
+虽然挂载在Nonebot Uvicorn上的本插件WebUI和API默认只监听`localhost`，但是鉴于用户可能通过Tunnel等方式向外暴露，故建议在安装阶段就配置API.
 
 启动后访问：
 
@@ -106,6 +116,8 @@ cookie 无法继续校验，用户需要重新登录。
 | `RUOK__CACHE_TTL` | `float` | `10.0` | API 聚合状态缓存时间 |
 | `RUOK__ENABLE_DEEP_WS_CHECK` | `bool` | `true` | 是否调用 `bot.get_status()` 做深度连接检查 |
 
+*由于跨插件Deep WS检查依旧WIP，相关配置项目前无效。*
+
 ### Session 与上报
 
 | 配置项 | 类型 | 默认值 | 说明 |
@@ -113,9 +125,9 @@ cookie 无法继续校验，用户需要重新登录。
 | `RUOK__SESSION_ENABLED` | `bool` | `true` | 是否启用 Session 系统 |
 | `RUOK__AUTO_SESSION_ENABLED` | `bool` | `true` | 是否自动捕获日志错误生成 Session |
 | `RUOK__STRICT_EXCEPTION_CAPTURE` | `bool` | `false` | 是否捕获所有 stdlib ERROR/CRITICAL；默认只捕获框架相关 logger |
-| `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 允许上报的用户 ID |
-| `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 允许上报的群 ID |
-| `RUOK__CRISIS_MODE` | `bool` | `false` | 跳过上报权限检查，适合测试或紧急场景 |
+| `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 上报白名单用户 ID |
+| `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 上报白名单群 ID |
+| `RUOK__CRISIS_MODE` | `bool` | `false` | 危机模式，跳过上报权限检查 |
 | `RUOK__SUMMARY_INTERVAL_HOURS` | `float` | `4.0` | 未解决 Session 汇总通知间隔 |
 
 上报权限顺序：
@@ -125,7 +137,9 @@ cookie 无法继续校验，用户需要重新登录。
 3. 已绑定 WebUI 用户
 4. `RUOK__REPORT_WHITELIST_USERS`
 5. 群管理员或群主
-6. `RUOK__REPORT_WHITELIST_GROUPS`
+6. `RUOK__REPORT_WHITELIST_GROUPS` 中的 `Member`
+
+若鉴权时上报用户不符合其上所有条件，插件将拒绝上报和创建Session.
 
 ### API 与 WebUI
 
@@ -134,7 +148,7 @@ cookie 无法继续校验，用户需要重新登录。
 | `RUOK__CORS_ORIGINS` | `list[str]` | `["*"]` | API CORS 允许源 |
 | `RUOK__API_KEY` | `str` | `""` | API key；为空则 API 不校验 |
 | `RUOK__WEBUI_ADMIN_PASSWORD` | `str` | `""` | 内置 `admin` 账户密码；为空则 WebUI 无法登录 |
-| `RUOK__WEBUI_SECRET_KEY` | `str` | `""` | WebUI session 签名密钥；为空则每次启动随机，重启后登录态/保持登录降级为失效 |
+| `RUOK__WEBUI_SECRET_KEY` | `str` | `""` | WebUI session 签名密钥；为空则每次启动随机，重启后登录态/保持登录功能会失效 |
 | `RUOK__SSE_PUBLIC` | `bool` | `false` | 是否允许未登录访问 SSE |
 
 API key 可通过任一方式传递：
@@ -153,7 +167,9 @@ Authorization: Bearer your-token
 ### 聊天图片渲染
 
 RUOK 默认依赖 `nonebot-plugin-htmlrender`，可将 `/ruok status` 和 `/ruok list`
-渲染成图片发送。默认仍使用文本输出；图片渲染失败、浏览器不可用或适配器不支持图片时，
+渲染成图片发送。
+
+默认仍使用文本输出；图片渲染失败、浏览器不可用或适配器不支持图片时，
 会自动回退文本结果。
 
 | 配置项 | 类型 | 默认值 | 说明 |
@@ -161,20 +177,15 @@ RUOK 默认依赖 `nonebot-plugin-htmlrender`，可将 `/ruok status` 和 `/ruok
 | `RUOK__CHAT_RENDER_MODE` | `"text" \| "image"` | `"text"` | 聊天命令输出模式 |
 | `RUOK__CHAT_RENDER_TIMEOUT` | `float` | `8.0` | 图片渲染超时时间，单位秒 |
 
-图片渲染由 `nonebot-plugin-htmlrender` 封装，RUOK 调用其 `render_html` API，
-不直接操控 Playwright。开启 `RUOK__CHAT_RENDER_MODE=image` 后，还需要按
-htmlrender 配置启用渲染后端（例如 `RENDER_BACKEND=playwright`）；运行环境可能
-需要安装 Chromium 浏览器二进制、系统字体或 Chromium 依赖库。
-
 ### 通知规则
 
 新 Session 即时通知由通知规则系统统一处理，覆盖聊天上报、WebUI 上报、API 创建
 和自动日志捕获。`RUOK__NOTIFICATION_ENABLED=false` 会关闭全部即时通知；定时汇总仍
 由 `RUOK__SUMMARY_INTERVAL_HOURS` 单独控制。
 
-`RUOK__NOTIFICATION_RULES` 是 JSON 数组，也可在 WebUI 通知页面管理。未配置任何规则
-时，RUOK 会自动创建一条 `superusers` 默认规则，通过 Bot 私聊通知 NoneBot
-`SUPERUSERS`。
+通知规则仅通过 WebUI 创建、编辑和删除，并持久化到插件 data 目录的
+`notification_rules.json`。未创建任何规则时，RUOK 会自动创建一条 `superusers`
+默认规则，通过 Bot 私聊通知 NoneBot `SUPERUSERS`。
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -189,12 +200,6 @@ htmlrender 配置启用渲染后端（例如 `RENDER_BACKEND=playwright`）；�
 | `cooldown_minutes` | `float` | 同规则冷却时间 |
 | `channels` | `list[str]` | `bot_dm`、`webhook` |
 | `webhook_url` | `str | null` | Webhook URL |
-
-示例：
-
-```dotenv
-RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["pending","unsolved"],"on_module":[],"cooldown_minutes":60,"channels":["bot_dm"]}]'
-```
 
 ## 聊天指令
 
@@ -211,10 +216,10 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 | `/ruok solve <id>` | SUPERUSER | 标记已解决 |
 | `/ruok ignore <id>` | SUPERUSER | 忽略误报 |
 | `/ruok raise [message]` | SUPERUSER | 触发一次受控内部异常，验证 RUOK 自监控 Session 创建流程 |
+| `/ruok test [message]` | SUPERUSER | `/ruok raise [message]` 的别名|
 
 普通用户的 `list`/`lookup` 可见范围按 Session `reporter.user_id` 与当前聊天平台用户 ID
-匹配；不泄露其他用户或自动内部异常 Session。`/ruok test [message]` 是
-`/ruok raise [message]` 的别名。
+匹配，
 
 `/ruok confirm` 的插件参数支持空格或逗号：
 
@@ -223,7 +228,7 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 /ruok confirm ruok-1234abcd nonebot_plugin_a,nonebot_plugin_b
 ```
 
-不传插件时，Session 仍会从 `pending` 变为 `unsolved`，但不会产生插件级传播影响。
+不传入插件名参数时，Session 仍会从 `pending` 变为 `unsolved`，但不会产生插件级传播影响。
 
 ## Session 状态与插件影响传播
 

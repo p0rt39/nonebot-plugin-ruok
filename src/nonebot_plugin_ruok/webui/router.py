@@ -1415,7 +1415,7 @@ def create_webui_router(
         """Load notification rules — delegates to collectors/notifications.py."""
         from ..collectors.notifications import _load_rules
 
-        return _load_rules(data_dir, config)
+        return _load_rules(data_dir)
 
     def _save_notification_rules(rules: list[NotificationRule]) -> None:
         """Persist notification rules — delegates to collectors/notifications.py."""

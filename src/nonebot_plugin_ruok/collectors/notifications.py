@@ -41,8 +41,8 @@ def _default_rule() -> NotificationRule:
     )
 
 
-def _load_rules(data_dir: Path, config: ScopedConfig) -> list[NotificationRule]:
-    """Load merged rules from config defaults + persisted file."""
+def _load_rules(data_dir: Path) -> list[NotificationRule]:
+    """Load persisted notification rules, creating a default rule if needed."""
     rules_file = data_dir / "notification_rules.json"
     file_rules: list[dict[str, Any]] = []
     if rules_file.exists():
@@ -51,12 +51,7 @@ def _load_rules(data_dir: Path, config: ScopedConfig) -> list[NotificationRule]:
         except (json.JSONDecodeError, OSError, ValueError):
             file_rules = []
 
-    config_rules = [r.model_dump(mode="json") for r in config.notification_rules]
-    merged: dict[str, dict[str, Any]] = {r["name"]: r for r in config_rules}
-    for r in file_rules:
-        merged[r["name"]] = r
-
-    rules = [NotificationRule(**r) for r in merged.values()]
+    rules = [NotificationRule(**rule) for rule in file_rules]
 
     # Auto-create default rule if none exist
     if not rules:
@@ -227,7 +222,7 @@ async def dispatch_notification(
     if not config.notification_enabled:
         return
 
-    rules = _load_rules(data_dir, config)
+    rules = _load_rules(data_dir)
     matching = evaluate_rules(session, rules)
     if not matching:
         return
