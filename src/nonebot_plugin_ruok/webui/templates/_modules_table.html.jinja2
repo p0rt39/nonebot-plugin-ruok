@@ -19,7 +19,7 @@
                 {% elif m.status == 'degraded' %}🟡
                 {% elif m.status == 'unavailable' %}🔴
                 {% else %}⚪{% endif %}
-                {{ m.status }}
+                {{ m.status | _status_label }}
             </td>
             <td>
                 <strong>

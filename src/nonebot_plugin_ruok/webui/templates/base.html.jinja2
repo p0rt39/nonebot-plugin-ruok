@@ -173,6 +173,62 @@
             transform: translateY(-1px);
             box-shadow: var(--shadow-md);
         }
+        .ruok-button-row {
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .ruok-button-row--end {
+            justify-content: flex-end;
+        }
+        .ruok-button-row--grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+            gap: 0.6rem;
+            align-items: stretch;
+        }
+        .ruok-button-row form {
+            margin: 0;
+        }
+        .ruok-button,
+        .ruok-button-row button,
+        .ruok-button-row [role="button"],
+        .ruok-button-row--grid button,
+        .ruok-button-row--grid [role="button"] {
+            min-height: 2.55rem;
+            margin-bottom: 0;
+            text-align: center;
+        }
+        .ruok-button-row--grid button,
+        .ruok-button-row--grid [role="button"] {
+            width: 100%;
+        }
+        .ruok-button-danger {
+            color: var(--pico-del-color) !important;
+            border-color: var(--pico-del-color) !important;
+        }
+        .ruok-button-danger:hover {
+            background: rgba(217,45,32,0.08) !important;
+        }
+        .ruok-icon-button {
+            width: 1.75rem;
+            height: 1.75rem;
+            min-height: 1.75rem;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
+            display: inline-grid;
+            place-items: center;
+        }
+        .ruok-button-compact {
+            min-height: 2rem !important;
+            padding: 0.25rem 0.65rem;
+            font-size: 0.85em;
+        }
+        .ruok-button-full {
+            width: 100%;
+        }
 
         /* ── Form inputs ── */
         input, select, textarea {

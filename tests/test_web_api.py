@@ -639,6 +639,33 @@ def test_session_detail_renders_manual_description_separately(
     assert "<strong>描述</strong>" not in response.text
 
 
+def test_webui_session_buttons_and_status_labels_are_consistent(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    create_session(
+        tmp_path,
+        "music",
+        "pending issue",
+        ReporterInfo(type="user", user_id="u1"),
+        source="manual",
+    )
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert response.status_code == 200
+    assert "待确认" in response.text
+    assert "未解决" in response.text
+    assert "Pending" not in response.text
+    assert "Unsolved" not in response.text
+    assert 'class="ruok-button-row--grid"' in response.text
+    assert 'class="secondary outline ruok-button-danger"' in response.text
+
+
 def test_session_detail_renders_automatic_traceback_as_code_block(
     tmp_path: Path,
 ) -> None:
@@ -882,6 +909,9 @@ def test_module_detail_contains_edit_and_delete_actions(tmp_path: Path) -> None:
     assert 'data-field-name="selected_plugins"' in response.text
     assert 'name="selected_plugins" value="nonebot_plugin_ruok"' in response.text
     assert 'name="enabled"' not in response.text
+    assert "← 返回模块列表" in response.text
+    assert "Back to Modules" not in response.text
+    assert 'class="secondary outline ruok-button-danger"' in response.text
 
 
 def test_module_edit_form_loads_special_character_name(tmp_path: Path) -> None:

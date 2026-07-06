@@ -15,7 +15,7 @@
             <p><strong>模块:</strong> {{ s.module_name }}</p>
             <p><strong>状态:</strong>
                 <span class="badge badge-{% if s.status == 'solved' %}ok{% elif s.status in ('pending','unsolved') %}warn{% else %}error{% endif %}">
-                    {{ s.status }}
+                    {{ s.status | _status_label }}
                 </span>
             </p>
             {% if s.reporter.user_id %}
@@ -33,25 +33,25 @@
 
     {% if s.status in ('pending', 'unsolved') %}
     <footer>
-        <div class="grid">
-            <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline" style="text-align: center;">
+        <div class="ruok-button-row--grid">
+            <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline ruok-button">
                 📋 详情
             </a>
             {% if s.status == 'pending' %}
-            <button class="secondary"
+            <button class="secondary outline"
                     hx-post="/ruok/_actions/confirm/{{ s.session_id }}"
                     hx-target="#session-{{ s.session_id }}"
                     hx-swap="outerHTML">
                 ✅ 确认
             </button>
             {% endif %}
-            <button class="secondary"
+            <button class="secondary outline"
                     hx-post="/ruok/_actions/solve/{{ s.session_id }}"
                     hx-target="#session-{{ s.session_id }}"
                     hx-swap="outerHTML">
                 🟢 解决
             </button>
-            <button class="contrast"
+            <button class="secondary outline ruok-button-danger"
                     hx-post="/ruok/_actions/ignore/{{ s.session_id }}"
                     hx-target="#session-{{ s.session_id }}"
                     hx-swap="outerHTML">
@@ -61,7 +61,7 @@
     </footer>
     {% else %}
     <footer>
-        <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline" style="text-align: center; width: 100%;">
+        <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline ruok-button ruok-button-full">
             📋 查看详情
         </a>
     </footer>

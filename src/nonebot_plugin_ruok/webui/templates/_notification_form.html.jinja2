@@ -68,7 +68,7 @@
                    {% if current_rule is none or current_rule.enabled %}checked{% endif %}>
             启用
         </label>
-        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+        <div class="ruok-button-row">
             <button type="submit">💾 保存规则</button>
             {% if current_rule %}
             <button type="button" class="outline secondary"

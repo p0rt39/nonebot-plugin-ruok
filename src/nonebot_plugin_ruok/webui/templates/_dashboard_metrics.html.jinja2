@@ -7,7 +7,7 @@
         <header>
             <strong>{{ check.name }}</strong>
             <span class="badge badge-{% if check.status == 'healthy' %}ok{% elif check.status == 'degraded' %}warn{% else %}error{% endif %}">
-                {{ check.status }}
+                {{ check.status | _status_label }}
             </span>
         </header>
         {% if check.message %}<p>{{ check.message }}</p>{% endif %}

@@ -7,10 +7,10 @@
     <article>
         <h4>概览</h4>
         <table>
-            <tr><td>🟡 Pending</td><td><strong>{{ stats.pending }}</strong></td></tr>
-            <tr><td>🔴 Unsolved</td><td><strong>{{ stats.unsolved }}</strong></td></tr>
-            <tr><td>🟢 Solved</td><td><strong>{{ stats.solved }}</strong></td></tr>
-            <tr><td>⚪ Ignored</td><td><strong>{{ stats.ignored }}</strong></td></tr>
+            <tr><td>🟡 待确认</td><td><strong>{{ stats.pending }}</strong></td></tr>
+            <tr><td>🔴 未解决</td><td><strong>{{ stats.unsolved }}</strong></td></tr>
+            <tr><td>🟢 已解决</td><td><strong>{{ stats.solved }}</strong></td></tr>
+            <tr><td>⚪ 已忽略</td><td><strong>{{ stats.ignored }}</strong></td></tr>
             <tr><td><strong>总计</strong></td><td><strong>{{ stats.total }}</strong></td></tr>
         </table>
     </article>
@@ -28,7 +28,7 @@
         new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: ['Pending', 'Unsolved', 'Solved', 'Ignored'],
+                labels: ['待确认', '未解决', '已解决', '已忽略'],
                 datasets: [{
                     data: data,
                     backgroundColor: ['#ffdc00', '#ff4136', '#2ecc40', '#aaa'],

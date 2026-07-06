@@ -17,7 +17,7 @@
                 <div style="display:flex;gap:0.35rem;flex-wrap:wrap;">
                     {% for s in rule.on_status %}
                     <span class="badge badge-{% if s == 'solved' %}ok{% elif s in ('pending','unsolved') %}warn{% else %}error{% endif %}">
-                        {{ s }}
+                        {{ s | _status_label }}
                     </span>
                     {% endfor %}
                 </div>
@@ -47,8 +47,8 @@
         </div>
         {% endif %}
 
-        <footer style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:auto;">
-            <button class="outline secondary" style="font-size:0.8em;"
+        <footer class="ruok-button-row" style="margin-top:auto;">
+            <button class="outline secondary"
                     hx-get="/ruok/_actions/notification-edit-form?{{ {'name': rule.name} | urlencode }}"
                     hx-target="#notification-form-panel"
                     hx-swap="innerHTML">
@@ -60,7 +60,7 @@
                   hx-confirm="确定删除规则「{{ rule.name }}」？"
                   style="margin:0;">
                 <input type="hidden" name="name" value="{{ rule.name }}">
-                <button type="submit" class="outline secondary" style="font-size:0.8em;">
+                <button type="submit" class="outline secondary ruok-button-danger">
                     🗑️ 删除
                 </button>
             </form>

@@ -83,7 +83,7 @@
 <div class="active-filters">
     {% if current_status %}
     <span class="filter-tag">
-        状态: {{ current_status }}
+        状态: {{ current_status | _status_label }}
         <a href="?" hx-get="/ruok/_partials/sessions?{{ {'search': current_search, 'module': current_module, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
     </span>
     {% endif %}
@@ -105,7 +105,7 @@
         <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'search': current_search, 'module': current_module, 'plugin': current_plugin} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
     </span>
     {% endif %}
-    <a href="/ruok/sessions" style="font-size: 0.8em; margin-left: 0.5rem;">清除全部</a>
+    <a href="/ruok/sessions" role="button" class="secondary outline ruok-button ruok-button-compact">清除全部</a>
 </div>
 {% endif %}
 
@@ -125,10 +125,10 @@
         状态
         <select name="status">
             <option value="" {% if not current_status %}selected{% endif %}>全部状态</option>
-            <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>🟡 Pending</option>
-            <option value="unsolved" {% if current_status == 'unsolved' %}selected{% endif %}>🔴 Unsolved</option>
-            <option value="solved" {% if current_status == 'solved' %}selected{% endif %}>🟢 Solved</option>
-            <option value="ignored" {% if current_status == 'ignored' %}selected{% endif %}>⚪ Ignored</option>
+            <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>🟡 待确认</option>
+            <option value="unsolved" {% if current_status == 'unsolved' %}selected{% endif %}>🔴 未解决</option>
+            <option value="solved" {% if current_status == 'solved' %}selected{% endif %}>🟢 已解决</option>
+            <option value="ignored" {% if current_status == 'ignored' %}selected{% endif %}>⚪ 已忽略</option>
         </select>
     </label>
     <label style="flex: 1; min-width: 130px;">

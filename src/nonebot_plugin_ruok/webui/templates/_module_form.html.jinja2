@@ -73,10 +73,10 @@
             <textarea name="plugins" rows="3"
                       placeholder="nonebot_plugin_weather, nonebot_plugin_scheduler">{{ extra_plugins | default([]) | join(',') }}</textarea>
         </label>
-        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
-            <button type="submit">保存</button>
+        <div class="ruok-button-row">
+            <button type="submit">保存模块</button>
             {% if current_module %}
-            <a href="/ruok/modules" role="button" class="outline secondary">返回模块列表</a>
+            <a href="/ruok/modules" role="button" class="outline secondary ruok-button">返回模块列表</a>
             {% endif %}
         </div>
         <div id="module-edit-result"></div>

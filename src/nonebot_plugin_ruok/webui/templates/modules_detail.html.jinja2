@@ -17,7 +17,7 @@
             <h3 style="margin:0;color:#fff;text-shadow:0 0 12px rgba(255,255,255,0.3);">
                 {{ module.display_name or module.name }}
             </h3>
-            <small style="opacity:0.65;">{{ module.name }} · {{ module.status }}</small>
+            <small style="opacity:0.65;">{{ module.name }} · {{ module.status | _status_label }}</small>
         </div>
     </div>
     {% if module.description %}
@@ -28,8 +28,8 @@
 </article>
 
 <!-- Actions -->
-<div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1.5rem;">
-    <a href="/ruok/modules" role="button" class="secondary outline">← Back to Modules</a>
+<div class="ruok-button-row" style="margin-bottom:1.5rem;">
+    <a href="/ruok/modules" role="button" class="secondary outline ruok-button">← 返回模块列表</a>
     <form hx-post="/ruok/_actions/module-delete"
           hx-target="body"
           hx-swap="none"
@@ -37,7 +37,7 @@
           style="margin:0;">
         <input type="hidden" name="name" value="{{ module.name }}">
         <input type="hidden" name="redirect_to" value="/ruok/modules">
-        <button type="submit" class="outline secondary">删除模块</button>
+        <button type="submit" class="secondary outline ruok-button-danger">删除模块</button>
     </form>
 </div>
 

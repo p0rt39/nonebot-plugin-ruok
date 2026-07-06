@@ -39,11 +39,28 @@ def _fmt_uptime_s(seconds: int) -> str:
     return f"{mins}m {secs}s"
 
 
+def _status_label(status: object) -> str:
+    """Return a localized label for internal status values."""
+    value = str(status)
+    labels = {
+        "pending": "待确认",
+        "unsolved": "未解决",
+        "solved": "已解决",
+        "ignored": "已忽略",
+        "available": "可用",
+        "degraded": "降级",
+        "unavailable": "不可用",
+        "healthy": "健康",
+    }
+    return labels.get(value, value)
+
+
 # ── Singleton environment ─────────────────────────────────────
 
 _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
 _jinja_env.filters["_fmt_bytes_s"] = _fmt_bytes_s
 _jinja_env.filters["_fmt_uptime_s"] = _fmt_uptime_s
+_jinja_env.filters["_status_label"] = _status_label
 
 
 def render(template_name: str, **context) -> HTMLResponse:

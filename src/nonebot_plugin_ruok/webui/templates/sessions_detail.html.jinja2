@@ -5,8 +5,8 @@
 {% block content %}
 
 <!-- Actions -->
-<div style="margin-bottom:1.5rem;">
-    <a href="/ruok/sessions" role="button" class="secondary outline">← 返回 Sessions 列表</a>
+<div class="ruok-button-row" style="margin-bottom:1.5rem;">
+    <a href="/ruok/sessions" role="button" class="secondary outline ruok-button">← 返回 Session 列表</a>
 </div>
 
 <div id="session-detail-content">
@@ -16,7 +16,7 @@
         <span class="status-dot status-{{ session.status }}"></span>
         <strong>{{ session.session_id }}</strong>
         <span class="badge badge-{% if session.status == 'solved' %}ok{% elif session.status in ('pending','unsolved') %}warn{% elif session.status == 'ignored' %}error{% else %}ok{% endif %}" style="margin-left: 1rem;">
-            {{ session.status }}
+            {{ session.status | _status_label }}
         </span>
     </header>
 
@@ -102,13 +102,13 @@
           hx-target="#linked-container" hx-swap="outerHTML"
           style="margin-top:1rem; display:flex; gap:0.5rem;">
         <input type="text" name="other_id" placeholder="输入 Session ID" required style="margin-bottom:0;">
-        <button type="submit">关联</button>
+        <button type="submit" class="secondary outline ruok-button">关联</button>
     </form>
     {% if session.link_group %}
     <form hx-post="/ruok/_actions/unlink/{{ session.session_id }}"
           hx-target="#linked-container" hx-swap="outerHTML"
           style="margin-top:0.5rem;">
-        <button type="submit" class="contrast outline" style="font-size:0.8em;">🔓 退出关联组</button>
+        <button type="submit" class="secondary outline ruok-button-danger">🔓 退出关联组</button>
     </form>
     {% endif %}
 </article>
@@ -117,31 +117,31 @@
 {% if session.status in ('pending', 'unsolved') %}
 <article>
     <h4>⚡ 操作</h4>
-    <div class="grid">
+    <div class="ruok-button-row--grid">
         {% if session.status == 'pending' %}
-        <button class="secondary"
+        <button class="secondary outline"
                 hx-post="/ruok/_actions/confirm/{{ session.session_id }}"
                 hx-target="#session-detail-content"
                 hx-swap="outerHTML"
                 hx-get="/ruok/sessions/{{ session.session_id }}"
                 hx-trigger="click"
                 hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
-            ✅ 确认 (pending → unsolved)
+            ✅ 确认为未解决
         </button>
         {% endif %}
-        <button class="secondary"
+        <button class="secondary outline"
                 hx-post="/ruok/_actions/solve/{{ session.session_id }}"
                 hx-target="#session-detail-content"
                 hx-swap="outerHTML"
                 hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
             🟢 解决
         </button>
-        <button class="contrast"
+        <button class="secondary outline ruok-button-danger"
                 hx-post="/ruok/_actions/ignore/{{ session.session_id }}"
                 hx-target="#session-detail-content"
                 hx-swap="outerHTML"
                 hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
-            ⚪ 忽略 (误报)
+            ⚪ 忽略误报
         </button>
     </div>
 </article>
