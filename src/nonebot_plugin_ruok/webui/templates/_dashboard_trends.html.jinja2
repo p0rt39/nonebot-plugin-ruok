@@ -1,95 +1,195 @@
-<!-- HTMX-polled partial: CPU + Memory trend charts (last 1 hour) -->
+<!-- CPU + Memory trend charts (last 1 hour) -->
 <div class="grid">
     <article>
-        <div style="position:relative; height:220px;">
-            <canvas id="chart-cpu"></canvas>
+        <h4 style="margin-bottom:0.5rem;">CPU</h4>
+        <div style="position:relative; height:260px; min-height:220px; width:100%;">
+            <canvas id="chart-cpu" aria-label="CPU 使用率趋势" role="img"
+                    style="display:block; width:100%; height:100%;"></canvas>
         </div>
     </article>
     <article>
-        <div style="position:relative; height:220px;">
-            <canvas id="chart-memory"></canvas>
+        <h4 style="margin-bottom:0.5rem;">Memory</h4>
+        <div style="position:relative; height:260px; min-height:220px; width:100%;">
+            <canvas id="chart-memory" aria-label="内存使用率趋势" role="img"
+                    style="display:block; width:100%; height:100%;"></canvas>
         </div>
     </article>
 </div>
 <script>
 (function() {
-    var cpuCtx = document.getElementById('chart-cpu');
-    var memCtx = document.getElementById('chart-memory');
-    if (!cpuCtx && !memCtx) return;
+    var DATA_URL = '/ruok/_partials/dashboard-trends-data?hours=1';
+    var MAX_POINTS = 240;
+    var initialMetrics = {{ metrics_history | default([]) | tojson }};
+    var cpuCanvas = document.getElementById('chart-cpu');
+    var memCanvas = document.getElementById('chart-memory');
+    var cpuChart = null;
+    var memChart = null;
+
+    if (!cpuCanvas && !memCanvas) return;
     if (typeof Chart === 'undefined') return;
 
-    var metrics = {{ metrics_history | default([]) | tojson }};
-    if (!metrics.length) return;
+    if (window.ruokTrendRefreshTimer) {
+        window.clearInterval(window.ruokTrendRefreshTimer);
+    }
+    if (window.ruokTrendMetricsListener) {
+        document.removeEventListener('ruok:metrics', window.ruokTrendMetricsListener);
+    }
+    if (window.ruokTrendResizeListener) {
+        window.removeEventListener('resize', window.ruokTrendResizeListener);
+    }
+    if (window.ruokTrendCharts) {
+        if (window.ruokTrendCharts.cpu &&
+                window.ruokTrendCharts.cpu.canvas !== cpuCanvas) {
+            window.ruokTrendCharts.cpu.destroy();
+        }
+        if (window.ruokTrendCharts.mem &&
+                window.ruokTrendCharts.mem.canvas !== memCanvas) {
+            window.ruokTrendCharts.mem.destroy();
+        }
+    }
 
-    var labels = metrics.map(function(m) {
-        return new Date(m.ts).toLocaleTimeString('zh-CN',
-            {hour:'2-digit', minute:'2-digit'});
-    });
-    var cpuData = metrics.map(function(m) { return m.cpu_percent; });
-    var memData = metrics.map(function(m) { return m.memory_percent; });
+    function normalizeMetrics(metrics) {
+        if (!Array.isArray(metrics)) return [];
+        return metrics.filter(function(m) { return m && m.ts; }).slice(-MAX_POINTS);
+    }
 
-    // ── CPU chart: update if exists, create if new ──
-    if (cpuCtx) {
-        var cpuChart = Chart.getChart(cpuCtx);
+    function labelsFrom(metrics) {
+        return metrics.map(function(m) {
+            return new Date(m.ts).toLocaleTimeString('zh-CN',
+                {hour:'2-digit', minute:'2-digit'});
+        });
+    }
+
+    function valuesFrom(metrics, key) {
+        return metrics.map(function(m) {
+            return m[key] == null ? null : m[key];
+        });
+    }
+
+    function makeOptions() {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            resizeDelay: 120,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: { enabled: true, mode: 'index', intersect: false },
+            },
+            scales: {
+                y: {
+                    min: 0,
+                    max: 100,
+                    ticks: { callback: function(v) { return v + '%'; } },
+                },
+                x: { ticks: { maxTicksLimit: 8 } },
+            },
+            animation: { duration: 200 },
+        };
+    }
+
+    function ensureChart(canvas, label, borderColor, backgroundColor) {
+        if (!canvas) return null;
+        var chart = Chart.getChart(canvas);
+        if (chart) return chart;
+        return new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: label,
+                    data: [],
+                    borderColor: borderColor,
+                    backgroundColor: backgroundColor,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHitRadius: 12,
+                    spanGaps: true,
+                }],
+            },
+            options: makeOptions(),
+        });
+    }
+
+    function resizeCharts() {
+        window.requestAnimationFrame(function() {
+            if (cpuChart) cpuChart.resize();
+            if (memChart) memChart.resize();
+        });
+    }
+
+    function renderMetrics(metrics) {
+        var rows = normalizeMetrics(metrics);
+        var labels = labelsFrom(rows);
+
         if (cpuChart) {
             cpuChart.data.labels = labels;
-            cpuChart.data.datasets[0].data = cpuData;
+            cpuChart.data.datasets[0].data = valuesFrom(rows, 'cpu_percent');
             cpuChart.update('none');
-        } else if (cpuData.length) {
-            new Chart(cpuCtx, {
-                type: 'line',
-                data: {
-                    labels: labels, datasets: [{
-                        label: 'CPU %', data: cpuData,
-                        borderColor: '#667eea',
-                        backgroundColor: 'rgba(102,126,234,0.1)',
-                        fill: true, tension: 0.3, pointRadius: 0,
-                    }]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: { min: 0, max: 100,
-                             ticks: { callback: function(v) { return v + '%'; } } },
-                        x: { ticks: { maxTicksLimit: 8 } }
-                    },
-                    animation: { duration: 300 },
-                }
-            });
         }
-    }
-
-    // ── Memory chart: update if exists, create if new ──
-    if (memCtx) {
-        var memChart = Chart.getChart(memCtx);
         if (memChart) {
             memChart.data.labels = labels;
-            memChart.data.datasets[0].data = memData;
+            memChart.data.datasets[0].data = valuesFrom(rows, 'memory_percent');
             memChart.update('none');
-        } else if (memData.length) {
-            new Chart(memCtx, {
-                type: 'line',
-                data: {
-                    labels: labels, datasets: [{
-                        label: 'Memory %', data: memData,
-                        borderColor: '#11998e',
-                        backgroundColor: 'rgba(17,153,142,0.1)',
-                        fill: true, tension: 0.3, pointRadius: 0,
-                    }]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: { min: 0, max: 100,
-                             ticks: { callback: function(v) { return v + '%'; } } },
-                        x: { ticks: { maxTicksLimit: 8 } }
-                    },
-                    animation: { duration: 300 },
-                }
-            });
         }
+        resizeCharts();
     }
+
+    function appendPoint(ts, cpu, mem) {
+        var label = new Date(ts).toLocaleTimeString('zh-CN',
+            {hour:'2-digit', minute:'2-digit'});
+
+        [
+            { chart: cpuChart, value: cpu },
+            { chart: memChart, value: mem },
+        ].forEach(function(item) {
+            if (!item.chart) return;
+            item.chart.data.labels.push(label);
+            item.chart.data.datasets[0].data.push(
+                item.value == null ? null : item.value
+            );
+            if (item.chart.data.labels.length > MAX_POINTS) {
+                item.chart.data.labels.shift();
+                item.chart.data.datasets[0].data.shift();
+            }
+            item.chart.update('none');
+        });
+    }
+
+    function refreshHistory() {
+        fetch(DATA_URL, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+            .then(function(response) {
+                if (!response.ok) throw new Error('Trend data HTTP ' + response.status);
+                return response.json();
+            })
+            .then(renderMetrics)
+            .catch(function() { /* trend refresh is best-effort */ });
+    }
+
+    cpuChart = ensureChart(
+        cpuCanvas,
+        'CPU %',
+        '#667eea',
+        'rgba(102,126,234,0.1)'
+    );
+    memChart = ensureChart(
+        memCanvas,
+        'Memory %',
+        '#11998e',
+        'rgba(17,153,142,0.1)'
+    );
+    window.ruokTrendCharts = { cpu: cpuChart, mem: memChart };
+    renderMetrics(initialMetrics);
+
+    window.ruokTrendMetricsListener = function(e) {
+        var m = e.detail || {};
+        appendPoint(new Date().toISOString(), m.cpu, m.mem_pct);
+    };
+    document.addEventListener('ruok:metrics', window.ruokTrendMetricsListener);
+
+    window.ruokTrendResizeListener = resizeCharts;
+    window.addEventListener('resize', window.ruokTrendResizeListener);
+    window.ruokTrendRefreshTimer = window.setInterval(refreshHistory, 30000);
 })();
 </script>

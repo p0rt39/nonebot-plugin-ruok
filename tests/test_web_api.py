@@ -96,11 +96,33 @@ def test_dashboard_trends_partial_uses_webui_metrics_context(tmp_path: Path) -> 
 
     assert response.status_code == 200
     assert "fetch('/ruok/api/metrics/history?hours=1')" not in response.text
-    assert "var metrics =" in response.text
+    assert "/ruok/_partials/dashboard-trends-data?hours=1" in response.text
+    assert "var initialMetrics =" in response.text
     assert '"cpu_percent": 12.5' in response.text
 
 
-def test_dashboard_trends_polling_preserves_container(tmp_path: Path) -> None:
+def test_dashboard_trends_data_uses_webui_auth_not_api_key(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import MetricPoint
+    from nonebot_plugin_ruok.collector import MetricsStore
+
+    MetricsStore.append(
+        tmp_path,
+        MetricPoint(
+            ts=datetime.now(timezone.utc).isoformat(),
+            cpu_percent=22.5,
+            memory_percent=44.5,
+        ),
+    )
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+
+    response = client.get("/ruok/_partials/dashboard-trends-data?hours=1")
+
+    assert response.status_code == 200
+    assert response.json()[0]["cpu_percent"] == 22.5
+
+
+def test_dashboard_trends_do_not_replace_canvas_with_htmx(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.config import ScopedConfig
 
     client = _client(ScopedConfig(), tmp_path)
@@ -108,5 +130,5 @@ def test_dashboard_trends_polling_preserves_container(tmp_path: Path) -> None:
     response = client.get("/ruok")
 
     assert response.status_code == 200
-    assert 'id="dashboard-trends"' in response.text
-    assert 'hx-swap="innerHTML"' in response.text
+    assert '<div id="dashboard-trends">' in response.text
+    assert "ruok:metrics" in response.text

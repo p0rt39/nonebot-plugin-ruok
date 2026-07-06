@@ -145,6 +145,7 @@
         var t0 = performance.now();
         try {
             var m = JSON.parse(e.data);
+            document.dispatchEvent(new CustomEvent('ruok:metrics', { detail: m }));
             var fields = Object.keys(m).length;
             console.log(DBG, '📊 metrics #' + _evtCount.metrics,
                 '(' + fields + ' 字段)',
@@ -352,12 +353,9 @@
     {% include "_modules_table.html.jinja2" %}
 </div>
 
-<!-- Trend Charts — auto-refresh every 30s via HTMX polling -->
+<!-- Trend Charts — JS refreshes data without replacing canvas elements -->
 <h3>📈 指标趋势</h3>
-<div id="dashboard-trends"
-     hx-get="/ruok?_partial=dashboard-trends"
-     hx-trigger="load, every 30s"
-     hx-swap="innerHTML">
+<div id="dashboard-trends">
     {% include "_dashboard_trends.html.jinja2" %}
 </div>
 

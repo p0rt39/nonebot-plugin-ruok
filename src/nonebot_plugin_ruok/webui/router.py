@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import Form, Depends, Request, APIRouter, HTTPException
+from fastapi import Form, Query, Depends, Request, APIRouter, HTTPException
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
@@ -412,6 +412,18 @@ def create_webui_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+
+    @router.get("/ruok/_partials/dashboard-trends-data")
+    async def partial_dashboard_trends_data(
+        hours: float = Query(1.0, ge=0.5, le=168.0),
+        _guard_ok=Depends(_webui_guard),
+    ) -> list[dict[str, Any]]:
+        """JSON data for dashboard trend charts.
+
+        This route is WebUI-authenticated but independent from the public API key
+        because it is consumed by the already-authenticated SSR UI.
+        """
+        return _query_metrics_history(data_dir, hours=hours)
 
     @router.get("/ruok/_partials/sessions", response_class=HTMLResponse)
     async def partial_sessions(
