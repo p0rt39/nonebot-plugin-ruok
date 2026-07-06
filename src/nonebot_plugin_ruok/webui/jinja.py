@@ -7,6 +7,7 @@ consistent filters, autoescape, and template caching.
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from jinja2 import Environment, FileSystemLoader
 from fastapi.responses import HTMLResponse
@@ -55,12 +56,18 @@ def _status_label(status: object) -> str:
     return labels.get(value, value)
 
 
+def _path_quote(value: object) -> str:
+    """Quote a value for use as a single URL path segment."""
+    return quote(str(value), safe="")
+
+
 # ── Singleton environment ─────────────────────────────────────
 
 _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
 _jinja_env.filters["_fmt_bytes_s"] = _fmt_bytes_s
 _jinja_env.filters["_fmt_uptime_s"] = _fmt_uptime_s
 _jinja_env.filters["_status_label"] = _status_label
+_jinja_env.filters["_path_quote"] = _path_quote
 
 
 def render(template_name: str, **context) -> HTMLResponse:

@@ -1,0 +1,70 @@
+{% extends "base.html.jinja2" %}
+{% set active_page = "notifications" %}
+{% block title %}{{ rule.name }} — 通知规则{% endblock %}
+
+{% block content %}
+
+<article class="hero-banner {% if rule.enabled %}ok{% else %}error{% endif %}"
+         style="margin-bottom:1.5rem;color:#fff;text-shadow:0 0 12px rgba(255,255,255,0.25);">
+    <div style="display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+        <span style="font-size:2em;line-height:1;">
+            {% if rule.enabled %}🟢{% else %}⚪{% endif %}
+        </span>
+        <div>
+            <h3 style="margin:0;color:#fff;text-shadow:0 0 12px rgba(255,255,255,0.3);">
+                {{ rule.name }}
+            </h3>
+            <small style="opacity:0.75;">
+                {{ '已启用' if rule.enabled else '已禁用' }} · 冷却 {{ rule.cooldown_minutes }} 分钟
+            </small>
+        </div>
+    </div>
+</article>
+
+<div class="ruok-button-row" style="margin-bottom:1.5rem;">
+    <a href="/ruok/notifications" role="button" class="secondary outline ruok-button">← 返回规则列表</a>
+    <form hx-post="/ruok/_actions/notification-delete"
+          hx-target="body"
+          hx-swap="none"
+          hx-confirm="确定删除规则「{{ rule.name }}」？"
+          style="margin:0;">
+        <input type="hidden" name="name" value="{{ rule.name }}">
+        <input type="hidden" name="redirect_to" value="/ruok/notifications">
+        <button type="submit" class="secondary outline ruok-button-danger">删除规则</button>
+    </form>
+</div>
+
+<h4>✏️ 编辑规则</h4>
+{% include "_notification_form.html.jinja2" %}
+
+<h4>📋 规则摘要</h4>
+<article>
+    <dl class="user-meta">
+        <div>
+            <dt>触发状态</dt>
+            <dd>
+                {% for status in rule.on_status %}
+                <span class="badge badge-{% if status == 'solved' %}ok{% elif status in ('pending','unsolved') %}warn{% else %}error{% endif %}">
+                    {{ status | _status_label }}
+                </span>
+                {% endfor %}
+            </dd>
+        </div>
+        <div>
+            <dt>适用模块</dt>
+            <dd>{{ rule.on_module | join(', ') if rule.on_module else '全部' }}</dd>
+        </div>
+        <div>
+            <dt>通知通道</dt>
+            <dd>{{ rule.channels | join(', ') }}</dd>
+        </div>
+        {% if rule.webhook_url %}
+        <div>
+            <dt>Webhook</dt>
+            <dd><code>{{ rule.webhook_url }}</code></dd>
+        </div>
+        {% endif %}
+    </dl>
+</article>
+
+{% endblock %}

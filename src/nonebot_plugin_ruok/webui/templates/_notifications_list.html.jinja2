@@ -48,22 +48,11 @@
         {% endif %}
 
         <footer class="ruok-button-row" style="margin-top:auto;">
-            <button class="outline secondary"
-                    hx-get="/ruok/_actions/notification-edit-form?{{ {'name': rule.name} | urlencode }}"
-                    hx-target="#notification-form-panel"
-                    hx-swap="innerHTML">
-                ✏️ 编辑
-            </button>
-            <form hx-post="/ruok/_actions/notification-delete"
-                  hx-target="#notifications-container"
-                  hx-swap="outerHTML"
-                  hx-confirm="确定删除规则「{{ rule.name }}」？"
-                  style="margin:0;">
-                <input type="hidden" name="name" value="{{ rule.name }}">
-                <button type="submit" class="outline secondary ruok-button-danger">
-                    🗑️ 删除
-                </button>
-            </form>
+            <a href="/ruok/notifications/{{ rule.name | _path_quote }}"
+               role="button"
+               class="secondary outline ruok-button">
+                📋 详情
+            </a>
         </footer>
     </article>
     {% endfor %}

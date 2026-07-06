@@ -108,6 +108,11 @@ def _module_detail_url(name: str) -> str:
     return f"/ruok/modules/{quote(name, safe='')}"
 
 
+def _notification_detail_url(name: str) -> str:
+    """Build a WebUI notification detail URL for arbitrary rule names."""
+    return f"/ruok/notifications/{quote(name, safe='')}"
+
+
 def _account_reporter_id(user: CurrentWebUIUser) -> str | None:
     """Return the reporter user id used for the current WebUI account."""
     if user.admin_source == "builtin":
@@ -504,6 +509,37 @@ def create_webui_router(
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_notifications", data_dir)
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
+                status_code=500,
+            )
+
+    @router.get("/ruok/notifications/{name:path}", response_class=HTMLResponse)
+    async def page_notification_detail(
+        request: Request,
+        name: str,
+        user: CurrentWebUIUser = Depends(_admin_guard),
+    ) -> HTMLResponse:
+        try:
+            rules = _load_notification_rules()
+            rule = next((rule for rule in rules if rule.name == name), None)
+            if rule is None:
+                return HTMLResponse("<p>Rule not found</p>", status_code=404)
+            modules = list_modules(data_dir, config)
+            return render(
+                "notifications_detail.html.jinja2",
+                request=request,
+                current_user=user,
+                rule=rule,
+                all_modules=modules,
+                extra_modules=_extra_notification_modules(
+                    rule,
+                    [module.name for module in modules],
+                ),
+            )
+        except Exception as exc:
+            sid = _handle_ruok_error(exc, f"page_notification_detail {name}", data_dir)
             return HTMLResponse(
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
@@ -1200,7 +1236,7 @@ def create_webui_router(
 
         _save_rules(data_dir, rules)
 
-    @router.post("/ruok/_actions/notification-upsert")
+    @router.post("/ruok/_actions/notification-upsert", response_model=None)
     async def action_notification_upsert(
         request: Request,
         name: str = Form(...),
@@ -1212,8 +1248,9 @@ def create_webui_router(
         cooldown_minutes: float = Form(60.0),
         channels: str = Form("bot_dm"),
         webhook_url: str = Form(""),
+        return_to_detail: bool = Form(False),
         _user: CurrentWebUIUser = Depends(_admin_guard),
-    ) -> HTMLResponse:
+    ) -> HTMLResponse | JSONResponse:
         """Create or update a notification rule."""
         try:
             rules = _load_notification_rules()
@@ -1253,6 +1290,14 @@ def create_webui_router(
                 f"❌ 保存失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+        if return_to_detail:
+            return JSONResponse(
+                {"ok": True},
+                headers={
+                    "HX-Redirect": _notification_detail_url(normalized_name),
+                    "HX-Trigger": '{"toast":"Rule saved","toastType":"success"}',
+                },
+            )
         return render(
             "_notifications_list.html.jinja2",
             rules=rules,
@@ -1265,12 +1310,13 @@ def create_webui_router(
             },
         )
 
-    @router.post("/ruok/_actions/notification-delete")
+    @router.post("/ruok/_actions/notification-delete", response_model=None)
     async def action_notification_delete(
         request: Request,
         name: str = Form(...),
+        redirect_to: str = Form(""),
         _user: CurrentWebUIUser = Depends(_admin_guard),
-    ) -> HTMLResponse:
+    ) -> HTMLResponse | JSONResponse:
         """Delete a notification rule by name."""
         try:
             delete_name = name.strip()
@@ -1282,6 +1328,14 @@ def create_webui_router(
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 删除失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
+            )
+        if redirect_to:
+            return JSONResponse(
+                {"ok": True},
+                headers={
+                    "HX-Redirect": redirect_to,
+                    "HX-Trigger": '{"toast":"Rule deleted","toastType":"info"}',
+                },
             )
         return render(
             "_notifications_list.html.jinja2",
