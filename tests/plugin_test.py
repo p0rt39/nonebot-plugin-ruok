@@ -1,10 +1,51 @@
 """Tests for /ruok bot commands using nonebug + OneBot V11 fake events."""
 
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 import pytest
 from fake import fake_group_message_event_v11, fake_private_message_event_v11
 from nonebug import App
+
+
+def _session_list_line(session) -> str:
+    icon = {
+        "pending": "🟡",
+        "unsolved": "🔴",
+        "solved": "🟢",
+        "ignored": "⚪",
+    }.get(session.status, "❓")
+    return (
+        f"{icon} {session.session_id} | {session.module_name} | "
+        f"{session.status} | {session.last_seen_at.astimezone().strftime('%H:%M')}"
+    )
+
+
+def _session_lookup_text(session) -> str:
+    status_icon = {
+        "pending": "🟡",
+        "unsolved": "🔴",
+        "solved": "🟢",
+        "ignored": "⚪",
+    }.get(session.status, "❓")
+    lines = [
+        f"{status_icon} Session: {session.session_id}",
+        f"状态: {session.status} | 来源: {session.source}",
+    ]
+    if session.reporter.user_id:
+        lines.append(f"用户: {session.reporter.user_id}")
+    if session.reporter.group_id:
+        lines.append(f"群号: {session.reporter.group_id}")
+    if session.reporter.platform:
+        lines.append(f"平台: {session.reporter.platform}")
+    lines += [
+        f"模块: {session.module_name}",
+        f"描述: {session.description[:200]}",
+        "创建: "
+        f"{session.first_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"最近: {session.last_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
+    ]
+    return "\n".join(lines)
 
 
 @pytest.mark.asyncio
@@ -43,9 +84,10 @@ async def test_ruok_no_args_shows_usage(app: App) -> None:
             "/ruok bind <auth_key> — 绑定 WebUI 账户\n"
             "/ruok reset — 重设 WebUI 密码\n"
             "/ruok status — 查看状态\n"
-            "/ruok list — 查看所有 session\n"
-            "/ruok lookup <id> — 查看详情\n"
-            "/ruok confirm <id> [插件...] | solve <id> | ignore <id> — 管理",
+            "/ruok list — 查看可见 session\n"
+            "/ruok lookup <id> — 查看可见详情\n"
+            "/ruok confirm <id> [插件...] | solve <id> | ignore <id> — 管理\n"
+            "/ruok raise [message] — SUPERUSER 测试内部异常",
             result=None,
             bot=bot,
         )
@@ -240,6 +282,297 @@ async def test_ruok_status_builtin_module(app: App) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ruok_list_user_shows_own_recent_sessions(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok list should show only the sender's latest five sessions."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session, update_session
+
+    config = ScopedConfig()
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", set())
+    base_time = datetime(2026, 7, 6, 12, 0, tzinfo=timezone.utc)
+
+    own_sessions = []
+    for index, status in enumerate(
+        ["pending", "unsolved", "solved", "ignored", "pending", "solved"]
+    ):
+        session = create_session(
+            tmp_path,
+            f"own-{index}",
+            f"own issue {index}",
+            ReporterInfo(type="user", user_id="12345678"),
+        )
+        update_session(
+            tmp_path,
+            session.session_id,
+            {
+                "status": status,
+                "last_seen_at": base_time + timedelta(minutes=index),
+            },
+        )
+        own_sessions.append(session)
+    other = create_session(
+        tmp_path,
+        "other",
+        "other issue",
+        ReporterInfo(type="user", user_id="99999999"),
+    )
+    update_session(
+        tmp_path,
+        other.session_id,
+        {"last_seen_at": base_time + timedelta(hours=1)},
+    )
+
+    expected_sessions = []
+    from nonebot_plugin_ruok.collectors.sessions import get_session
+
+    for session in reversed(own_sessions[-5:]):
+        reloaded = get_session(tmp_path, session.session_id)
+        assert reloaded is not None
+        expected_sessions.append(reloaded)
+
+    event = fake_group_message_event_v11(
+        message="/ruok list",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            "\n".join(
+                ["你的最近 5 个 session:"]
+                + [_session_list_line(session) for session in expected_sessions]
+                + ["... 还有 1 个，使用 /ruok lookup <id> 查看详情"]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_ruok_list_superuser_shows_recent_active_sessions(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok list should show SUPERUSER the latest fifteen active sessions."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import (
+        get_session,
+        create_session,
+        update_session,
+    )
+
+    config = ScopedConfig()
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
+    base_time = datetime(2026, 7, 6, 12, 0, tzinfo=timezone.utc)
+
+    active_sessions = []
+    for index in range(16):
+        session = create_session(
+            tmp_path,
+            f"active-{index}",
+            f"active issue {index}",
+            ReporterInfo(type="user", user_id=str(index)),
+        )
+        update_session(
+            tmp_path,
+            session.session_id,
+            {
+                "status": "unsolved" if index % 2 else "pending",
+                "last_seen_at": base_time + timedelta(minutes=index),
+            },
+        )
+        active_sessions.append(session)
+    solved = create_session(
+        tmp_path,
+        "solved",
+        "not active",
+        ReporterInfo(type="user", user_id="12345678"),
+    )
+    update_session(
+        tmp_path,
+        solved.session_id,
+        {
+            "status": "solved",
+            "last_seen_at": base_time + timedelta(hours=1),
+        },
+    )
+
+    expected_sessions = []
+    for session in reversed(active_sessions[-15:]):
+        reloaded = get_session(tmp_path, session.session_id)
+        assert reloaded is not None
+        expected_sessions.append(reloaded)
+
+    event = fake_group_message_event_v11(
+        message="/ruok list",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            "\n".join(
+                ["共 16 个活跃 session:"]
+                + [_session_list_line(session) for session in expected_sessions]
+                + ["... 还有 1 个，使用 /ruok lookup <id> 查看详情"]
+            ),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_ruok_lookup_user_can_only_view_own_session(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok lookup should hide other users' sessions from normal users."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    config = ScopedConfig()
+    own = create_session(
+        tmp_path,
+        "music",
+        "own issue",
+        ReporterInfo(type="user", user_id="12345678", platform="OneBot V11"),
+    )
+    other = create_session(
+        tmp_path,
+        "weather",
+        "other issue",
+        ReporterInfo(type="user", user_id="99999999"),
+    )
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", set())
+
+    own_event = fake_group_message_event_v11(
+        message=f"/ruok lookup {own.session_id}",
+        user_id=12345678,
+    )
+    denied_event = fake_group_message_event_v11(
+        message=f"/ruok lookup {other.session_id}",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, own_event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            own_event,
+            _session_lookup_text(own),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, denied_event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            denied_event,
+            f"❌ Session `{other.session_id}` 未找到或无权查看。",
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_ruok_lookup_superuser_can_view_any_session(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok lookup should allow SUPERUSER to inspect any session."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    config = ScopedConfig()
+    session = create_session(
+        tmp_path,
+        "weather",
+        "other issue",
+        ReporterInfo(type="user", user_id="99999999"),
+    )
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
+
+    event = fake_group_message_event_v11(
+        message=f"/ruok lookup {session.session_id}",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            _session_lookup_text(session),
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+
+@pytest.mark.asyncio
 async def test_ruok_no_dispatches_rule_notification(
     app: App,
     tmp_path: Path,
@@ -394,3 +727,94 @@ async def test_ruok_confirm_without_plugins_does_not_propagate(
     assert reloaded.affected_plugins == []
     assert lyrics is not None
     assert lyrics.status == "available"
+
+
+@pytest.mark.asyncio
+async def test_ruok_raise_superuser_creates_internal_session(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok raise should create a RUOK internal-error session for SUPERUSER."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.collectors.sessions import get_session
+
+    config = ScopedConfig()
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", {"12345678"})
+    monkeypatch.setattr(
+        "nonebot_plugin_ruok.collectors.sessions._gen_session_id",
+        lambda: "ruok-test0002",
+    )
+    event = fake_group_message_event_v11(
+        message="/ruok raise contract check",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            "🧪 已触发 RUOK 测试异常 | Session: ruok-test0002",
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+    session = get_session(tmp_path, "ruok-test0002")
+    assert session is not None
+    assert session.module_name == "ruok"
+    assert session.source == "automatic"
+    assert "manual /ruok raise" in session.description
+    assert "contract check" in session.description
+
+
+@pytest.mark.asyncio
+async def test_ruok_raise_rejects_non_superuser(
+    app: App,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """/ruok raise should be SUPERUSER-only."""
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    config = ScopedConfig()
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", set())
+    event = fake_group_message_event_v11(
+        message="/ruok raise should not run",
+        user_id=12345678,
+    )
+
+    async with app.test_matcher(nonebot_plugin_ruok.ruok_cmd) as ctx:
+        adapter = nonebot.get_adapter(OnebotV11Adapter)
+        bot = ctx.create_bot(base=Bot, adapter=adapter)
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_pass_permission()
+        ctx.should_call_send(
+            event,
+            "❌ 此操作仅 SUPERUSER 可用",
+            result=None,
+            bot=bot,
+        )
+        ctx.should_finished()
+
+    assert list_sessions(tmp_path) == []

@@ -13,7 +13,7 @@ from nonebot.adapters import Bot, Event, Message
 
 from .api import create_ruok_router
 from .config import Config
-from .protocol import ReporterInfo, BotConnectionStatus
+from .protocol import Session, ReporterInfo, BotConnectionStatus
 from .collector import (
     LogMonitor,
     SessionPluginValidationError,
@@ -45,10 +45,12 @@ __plugin_meta__ = PluginMetadata(
         "/ruok bind <auth_key> — bind WebUI account to current platform user\n"
         "/ruok reset — issue a password reset key for bound WebUI user\n"
         "/ruok status — check module health\n"
-        "/ruok lookup <session_id> — view session details\n"
+        "/ruok list — view visible sessions\n"
+        "/ruok lookup <session_id> — view visible session details\n"
         "/ruok confirm <session_id> — confirm issue (pending→unsolved)\n"
         "/ruok solve <session_id> — mark as resolved\n"
         "/ruok ignore <session_id> — ignore (false alarm)\n"
+        "/ruok raise [message] — create a SUPERUSER-only test internal error\n"
         "Visit /ruok for WebUI dashboard"
     ),
     type="application",
@@ -113,6 +115,30 @@ async def _can_report(event: Event) -> bool:
     return False
 
 
+def _is_superuser(event: Event) -> bool:
+    """Return whether the current platform user is a NoneBot SUPERUSER."""
+    return event.get_user_id() in get_driver().config.superusers
+
+
+def _is_session_owner(session: Session, event: Event) -> bool:
+    """Return whether a session belongs to the current platform user."""
+    return session.reporter.user_id == event.get_user_id()
+
+
+def _format_session_list_line(session: Session) -> str:
+    """Return one compact chat list line for a session."""
+    icon = {
+        "pending": "🟡",
+        "unsolved": "🔴",
+        "solved": "🟢",
+        "ignored": "⚪",
+    }.get(session.status, "❓")
+    return (
+        f"{icon} {session.session_id} | {session.module_name} | "
+        f"{session.status} | {session.last_seen_at.astimezone().strftime('%H:%M')}"
+    )
+
+
 # ────────────────────────────────
 # RUOK Main Entrypoint
 # ────────────────────────────────
@@ -134,9 +160,10 @@ async def handle_ruok(
             "/ruok bind <auth_key> — 绑定 WebUI 账户\n"
             "/ruok reset — 重设 WebUI 密码\n"
             "/ruok status — 查看状态\n"
-            "/ruok list — 查看所有 session\n"
-            "/ruok lookup <id> — 查看详情\n"
-            "/ruok confirm <id> [插件...] | solve <id> | ignore <id> — 管理"
+            "/ruok list — 查看可见 session\n"
+            "/ruok lookup <id> — 查看可见详情\n"
+            "/ruok confirm <id> [插件...] | solve <id> | ignore <id> — 管理\n"
+            "/ruok raise [message] — SUPERUSER 测试内部异常"
         )
         return
 
@@ -153,15 +180,20 @@ async def handle_ruok(
     elif subcmd == "status":
         await _cmd_status()
     elif subcmd == "list":
-        await _cmd_list()
+        await _cmd_list(event)
     elif subcmd == "lookup":
-        await _cmd_lookup(rest)
+        await _cmd_lookup(event, rest)
+    elif subcmd in ("raise", "test"):
+        await _cmd_raise(event, rest, subcmd)
     elif subcmd in ("confirm", "solve", "ignore"):
         await _cmd_admin(bot, event, subcmd, rest)
     else:
         await ruok_cmd.finish(
             f"❓ 未知子命令: {subcmd}\n"
-            + "可用: no / bind / reset / status / lookup / confirm / solve / ignore"
+            + (
+                "可用: no / bind / reset / status / list / lookup / confirm / "
+                "solve / ignore / raise"
+            )
         )
 
 
@@ -305,36 +337,59 @@ async def _cmd_status() -> None:
     await ruok_cmd.finish("\n".join(lines))
 
 
-async def _cmd_list() -> None:
-    """Handle /ruok list — show all active sessions"""
-    sessions = list_sessions(data_dir)
-    active = [s for s in sessions if s.status in ("pending", "unsolved")]
-    if not active:
-        await ruok_cmd.finish("🎉 没有活跃的 session。")
+async def _cmd_list(event: Event) -> None:
+    """Handle /ruok list with scoped visibility."""
+    if _is_superuser(event):
+        sessions = list_sessions(data_dir)
+        active = [s for s in sessions if s.status in ("pending", "unsolved")]
+        if not active:
+            await ruok_cmd.finish("🎉 没有活跃的 session。")
+            return
+
+        visible = active[:15]
+        lines = [f"共 {len(active)} 个活跃 session:"]
+        lines.extend(_format_session_list_line(s) for s in visible)
+        if len(active) > 15:
+            lines.append(
+                f"... 还有 {len(active) - 15} 个，使用 /ruok lookup <id> 查看详情"
+            )
+        await ruok_cmd.finish("\n".join(lines))
         return
 
-    lines = [f"共 {len(active)} 个活跃 session:"]
-    for s in active[:10]:  # cap at 10 for chat
-        icon = {"pending": "🟡", "unsolved": "🔴"}.get(s.status, "⚪")
+    sessions = list_sessions(data_dir, reporter_user_id=event.get_user_id())
+    visible = sessions[:5]
+    if not visible:
+        await ruok_cmd.finish("🎉 你还没有上报过 session。")
+        return
+
+    lines = [f"你的最近 {len(visible)} 个 session:"]
+    lines.extend(_format_session_list_line(s) for s in visible)
+    if len(sessions) > 5:
         lines.append(
-            f"{icon} {s.session_id} | {s.module_name} | "
-            f"{s.status} | {s.first_seen_at.astimezone().strftime('%H:%M')}"
+            f"... 还有 {len(sessions) - 5} 个，使用 /ruok lookup <id> 查看详情"
         )
-    if len(active) > 10:
-        lines.append(f"... 还有 {len(active) - 10} 个，使用 /ruok lookup <id> 查看详情")
     await ruok_cmd.finish("\n".join(lines))
 
 
-async def _cmd_lookup(rest: str) -> None:
+async def _cmd_lookup(event: Event, rest: str) -> None:
     """Handle /ruok lookup <session_id>"""
     sid = rest.strip()
     if not sid:
         await ruok_cmd.finish("用法: /ruok lookup <session_id>")
         return
 
+    is_superuser = _is_superuser(event)
     session = get_session(data_dir, sid)
     if session is None:
-        await ruok_cmd.finish(f"❌ Session `{sid}` 未找到。")
+        message = (
+            f"❌ Session `{sid}` 未找到。"
+            if is_superuser
+            else f"❌ Session `{sid}` 未找到或无权查看。"
+        )
+        await ruok_cmd.finish(message)
+        return
+    if not is_superuser and not _is_session_owner(session, event):
+        await ruok_cmd.finish(f"❌ Session `{sid}` 未找到或无权查看。")
         return
 
     status_icon = {
@@ -362,9 +417,26 @@ async def _cmd_lookup(rest: str) -> None:
     from .collector import get_linked_sessions
 
     linked = get_linked_sessions(data_dir, session.session_id)
+    if not is_superuser:
+        linked = [s for s in linked if _is_session_owner(s, event)]
     if linked:
         lines.append(f"关联 ({len(linked)}): {', '.join(s.session_id for s in linked)}")
     await ruok_cmd.finish("\n".join(lines))
+
+
+async def _cmd_raise(event: Event, rest: str, action: str) -> None:
+    """Handle /ruok raise|test [message] (SUPERUSER only)."""
+    if not _is_superuser(event):
+        await ruok_cmd.finish("❌ 此操作仅 SUPERUSER 可用")
+        return
+
+    message = rest.strip() or "manual RUOK test exception"
+    try:
+        raise RuntimeError(message)
+    except RuntimeError as exc:
+        sid = _handle_ruok_error(exc, f"manual /ruok {action}", data_dir)
+
+    await ruok_cmd.finish(f"🧪 已触发 RUOK 测试异常 | Session: {sid}")
 
 
 async def _cmd_admin(bot: Bot, event: Event, action: str, rest: str) -> None:

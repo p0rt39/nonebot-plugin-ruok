@@ -184,14 +184,19 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 | :--- | :--- | :--- |
 | `/ruok` | 所有人 | 显示帮助 |
 | `/ruok status` | 所有人 | 查看模块实时状态 |
-| `/ruok list` | 所有人 | 列出最多 10 个活跃 Session |
-| `/ruok lookup <id>` | 所有人 | 查看 Session 详情 |
+| `/ruok list` | 所有人 | 普通用户查看自己最近 5 个 Session；SUPERUSER 查看最近 15 个活跃 Session |
+| `/ruok lookup <id>` | 所有人 | 普通用户只能查看自己的 Session；SUPERUSER 可查看任意 Session |
 | `/ruok bind <auth_key>` | 普通 WebUI 用户 | 绑定 WebUI 账号与当前平台用户 |
 | `/ruok reset` | 已绑定普通 WebUI 用户 | 生成一次性密码重置码；群聊触发时通过私聊发送 |
 | `/ruok no <模块> <描述>` | 有上报权限的用户 | 手动上报问题，创建 Session |
 | `/ruok confirm <id> [插件...]` | SUPERUSER | 确认问题，可指定一个或多个影响插件 |
 | `/ruok solve <id>` | SUPERUSER | 标记已解决 |
 | `/ruok ignore <id>` | SUPERUSER | 忽略误报 |
+| `/ruok raise [message]` | SUPERUSER | 触发一次受控内部异常，验证 RUOK 自监控 Session 创建流程 |
+
+普通用户的 `list`/`lookup` 可见范围按 Session `reporter.user_id` 与当前聊天平台用户 ID
+匹配；不泄露其他用户或自动内部异常 Session。`/ruok test [message]` 是
+`/ruok raise [message]` 的别名。
 
 `/ruok confirm` 的插件参数支持空格或逗号：
 
