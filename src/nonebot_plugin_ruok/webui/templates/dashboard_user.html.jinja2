@@ -14,8 +14,12 @@
 {% include "_modules_table.html.jinja2" %}
 
 <h3>📝 手动上报</h3>
-{% if current_user.bound_qq %}
+{% if current_user.bound_user_id %}
 <article>
+    <p>
+        已绑定平台账号：<code>{{ current_user.bound_user_id }}</code>
+        {% if current_user.bound_platform %}（{{ current_user.bound_platform }}）{% endif %}
+    </p>
     <form hx-post="/ruok/_actions/session-create"
           hx-target="#my-sessions" hx-swap="outerHTML">
         <div class="grid">
@@ -43,12 +47,12 @@
 </article>
 {% else %}
 <article>
-    <p>当前账户尚未绑定 QQ，绑定后可使用 WebUI 上报。</p>
+    <p>当前账户尚未绑定聊天平台账号，绑定后可使用 WebUI 上报。</p>
     {% if auth_key %}
     <p>一次性绑定码：</p>
     <p style="overflow-wrap:anywhere;"><code>{{ auth_key }}</code></p>
     <p>
-        在 QQ 中发送 <code>/ruok bind {{ auth_key }}</code> 完成绑定。
+        在当前聊天平台中发送 <code>/ruok bind {{ auth_key }}</code> 完成绑定。
         {% if auth_key_expires_at %}有效期至 {{ auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}。{% endif %}
     </p>
     {% endif %}

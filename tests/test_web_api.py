@@ -192,10 +192,36 @@ def test_webui_auth_key_binding_expires_and_cannot_be_reused(tmp_path: Path) -> 
     active = auth.register_user("active", "secret")
     bound = auth.bind_auth_key(active.auth_key, "10002")
 
-    assert bound.bound_qq == "10002"
-    assert auth.is_qq_bound("10002")
+    assert bound.bound_user_id == "10002"
+    assert auth.is_user_bound("10002")
     with pytest.raises(AuthKeyAlreadyUsed):
         auth.bind_auth_key(active.auth_key, "10003")
+
+
+def test_webui_auth_loads_legacy_bound_qq(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth, hash_password
+
+    (tmp_path / "webui_users.json").write_text(
+        json.dumps(
+            {
+                "users": [
+                    {
+                        "username": "legacy",
+                        "password_hash": hash_password("secret"),
+                        "role": "user",
+                        "bound_qq": "10002",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    user = WebUIAuth(_webui_config(), tmp_path).get_user("legacy")
+
+    assert user is not None
+    assert user.bound_user_id == "10002"
 
 
 def test_webui_protected_action_requires_login(tmp_path: Path) -> None:
@@ -263,10 +289,10 @@ def test_webui_user_must_bind_before_manual_report(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 403
-    assert "绑定 QQ" in response.text
+    assert "绑定平台账号" in response.text
 
 
-def test_webui_bound_user_report_uses_bound_qq_and_sees_own_sessions(
+def test_webui_bound_user_report_uses_bound_user_id_and_sees_own_sessions(
     tmp_path: Path,
 ) -> None:
     from nonebot_plugin_ruok.protocol import ReporterInfo
@@ -276,7 +302,7 @@ def test_webui_bound_user_report_uses_bound_qq_and_sees_own_sessions(
     config = _webui_config()
     auth = WebUIAuth(config, tmp_path)
     result = auth.register_user("alice", "secret")
-    auth.bind_auth_key(result.auth_key, "10001")
+    auth.bind_auth_key(result.auth_key, "10001", "OneBot V11")
     create_session(
         tmp_path,
         "music",

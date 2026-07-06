@@ -26,7 +26,7 @@ RuOK 是一个 NoneBot2 **健康监控 + 事件追踪 + WebUI 面板**插件，�
 - 🌐 **HTTP API + WebUI**：`/ruok/api/*` JSON 接口 + `/ruok` 可视化面板，同一端口
 - 📡 **SSE 实时推送**：Dashboard 实时状态更新 + Session 变更即时通知
 - 📊 **数据可视化**：CPU/内存趋势折线图 + Session 状态饼图（Chart.js）
-- 🔐 **WebUI 分级鉴权**：内置管理员 + 普通用户账号，支持 QQ 绑定上报
+- 🔐 **WebUI 分级鉴权**：内置管理员 + 普通用户账号，支持聊天平台账号绑定上报
 - � **通知引擎**：多规则、冷却期、Bot 私聊 + Webhook 双通道
 
 ```mermaid
@@ -90,7 +90,7 @@ plugins = ["nonebot_plugin_ruok"]
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | :----- | :--: | :----: | :--- |
-| `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 允许上报问题的用户白名单（QQ号字符串） |
+| `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 允许上报问题的用户白名单（平台用户 ID 字符串） |
 | `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 允许上报问题的群白名单（群号字符串） |
 
 **上报权限判断优先级**：
@@ -151,7 +151,7 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 | :--- | :--- | :--- | :--- |
 | `/ruok` | 所有人 | 群聊/私聊 | 显示帮助信息 |
 | `/ruok status` | 所有人 | 群聊/私聊 | 查看所有模块实时状态（🟢🟡🔴） |
-| `/ruok bind <auth_key>` | 普通 WebUI 用户 | 群聊/私聊 | 将 WebUI 账户绑定到当前 QQ |
+| `/ruok bind <auth_key>` | 普通 WebUI 用户 | 群聊/私聊 | 将 WebUI 账户绑定到当前聊天平台用户 |
 | `/ruok no <模块> <描述>` | 已绑定用户/白名单/群管/SUPERUSER | 群聊/私聊 | 手动上报问题，创建 Session |
 | `/ruok list` | 所有人 | 群聊/私聊 | 列出活跃 Session（最多 10 条） |
 | `/ruok lookup <id>` | 所有人 | 群聊/私聊 | 查看 Session 详情（含重复次数、关联） |
@@ -209,9 +209,11 @@ RUOK__NOTIFICATION_RULES='[{"name":"默认通知","enabled":true,"on_status":["p
 | 📦 模块 | `/ruok/modules` | 模块定义 CRUD（名称、显示名、关联插件） |
 | 🔔 通知 | `/ruok/notifications` | 通知规则管理（触发条件、冷却、通道） |
 | 🔐 登录 | `/ruok/login` | 管理员账号固定为 `admin`，密码来自 `RUOK__WEBUI_ADMIN_PASSWORD` |
-| 🧾 注册 | `/ruok/register` | 普通用户注册，生成 10 分钟有效的一次性 QQ 绑定码 |
+| 🧾 注册 | `/ruok/register` | 普通用户注册，生成 10 分钟有效的一次性绑定码 |
 
-管理员可访问完整 WebUI。普通用户只能访问精简总览、模块健康状态、绑定提示、手动上报入口和自己的上报记录；普通用户必须先通过 `/ruok bind <auth_key>` 绑定 QQ 后才能使用 WebUI 上报。
+管理员可访问完整 WebUI。普通用户只能访问精简总览、模块健康状态、绑定提示、手动上报入口和自己的上报记录；普通用户必须先通过 `/ruok bind <auth_key>` 绑定当前聊天平台账号后才能使用 WebUI 上报。
+
+当前主要测试适配器为 OneBot V11。绑定机制基于 NoneBot `Event.get_user_id()` 和 `Bot.type` 记录平台用户身份，理论上可用于其他适配器，但非 OneBot 场景未作为主支持路径保证。
 
 **技术架构**
 

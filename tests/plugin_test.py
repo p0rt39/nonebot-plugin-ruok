@@ -53,7 +53,7 @@ async def test_ruok_no_args_shows_usage(app: App) -> None:
 
 @pytest.mark.asyncio
 async def test_ruok_bind_auth_key(app: App, tmp_path: Path, monkeypatch) -> None:
-    """/ruok bind should bind the auth_key to the sender QQ."""
+    """/ruok bind should bind the auth_key to the sender platform user."""
     import nonebot
     from nonebot.adapters.onebot.v11 import Bot
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
@@ -82,13 +82,13 @@ async def test_ruok_bind_auth_key(app: App, tmp_path: Path, monkeypatch) -> None
         ctx.should_pass_permission()
         ctx.should_call_send(
             event,
-            "✅ WebUI 用户 alice 已绑定 QQ 12345678",
+            "✅ WebUI 用户 alice 已绑定平台账号 12345678",
             result=None,
             bot=bot,
         )
         ctx.should_finished()
 
-    assert auth.is_qq_bound("12345678")
+    assert auth.is_user_bound("12345678")
 
 
 @pytest.mark.asyncio

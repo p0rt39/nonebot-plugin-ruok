@@ -218,7 +218,7 @@ def create_webui_router(
                 raise HTTPException(status_code=403, detail="Admin required")
             auth_key = None
             auth_key_expires_at = user.auth_key_expires_at
-            if not user.bound_qq:
+            if not user.bound_user_id:
                 issued = auth.issue_auth_key(user.username)
                 auth_key = issued.auth_key
                 auth_key_expires_at = issued.user.auth_key_expires_at
@@ -229,8 +229,8 @@ def create_webui_router(
                 status=status,
                 modules=modules,
                 sessions=(
-                    list_sessions(data_dir, reporter_user_id=user.bound_qq)
-                    if user.bound_qq
+                    list_sessions(data_dir, reporter_user_id=user.bound_user_id)
+                    if user.bound_user_id
                     else []
                 ),
                 all_modules=modules,
@@ -533,16 +533,16 @@ def create_webui_router(
                 '<p style="color:var(--pico-del-color);">❌ 请选择或输入模块名</p>',
                 status_code=400,
             )
-        if not user.is_admin and not user.bound_qq:
+        if not user.is_admin and not user.bound_user_id:
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">'
-                "❌ 请先通过 /ruok bind <auth_key> 绑定 QQ 后再提交上报</p>",
+                "❌ 请先通过 /ruok bind <auth_key> 绑定平台账号后再提交上报</p>",
                 status_code=403,
             )
         try:
             reporter = ReporterInfo(
                 type="user",
-                user_id="webui-admin" if user.is_admin else user.bound_qq,
+                user_id="webui-admin" if user.is_admin else user.bound_user_id,
             )
             session = create_session(
                 data_dir,
@@ -558,7 +558,10 @@ def create_webui_router(
             if not user.is_admin:
                 return render(
                     "_user_sessions.html.jinja2",
-                    sessions=list_sessions(data_dir, reporter_user_id=user.bound_qq),
+                    sessions=list_sessions(
+                        data_dir,
+                        reporter_user_id=user.bound_user_id,
+                    ),
                     headers={
                         "HX-Trigger": (
                             '{"toast":"Session created","toastType":"success"}'

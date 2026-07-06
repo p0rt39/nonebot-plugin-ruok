@@ -1,4 +1,4 @@
-"""Session-based WebUI authentication and QQ binding support.
+"""Session-based WebUI authentication and platform user binding support.
 
 Protects /ruok SSR pages; does NOT affect /ruok/api/* endpoints.
 """
@@ -82,7 +82,8 @@ class StoredWebUIUser(BaseModel):
     username: str
     password_hash: str
     role: Literal["user"] = "user"
-    bound_qq: str | None = None
+    bound_user_id: str | None = None
+    bound_platform: str | None = None
     auth_key_hash: str | None = None
     auth_key_expires_at: datetime | None = None
     used_auth_key_hashes: list[str] = Field(default_factory=list)
@@ -95,7 +96,8 @@ class CurrentWebUIUser:
 
     username: str
     role: UserRole
-    bound_qq: str | None = None
+    bound_user_id: str | None = None
+    bound_platform: str | None = None
     auth_key_expires_at: datetime | None = None
 
     @property
@@ -104,7 +106,7 @@ class CurrentWebUIUser:
 
     @property
     def is_bound(self) -> bool:
-        return bool(self.bound_qq)
+        return bool(self.bound_user_id)
 
 
 @dataclass(frozen=True)
@@ -136,7 +138,7 @@ class UserRegistrationError(ValueError):
 
 
 class WebUIAuth:
-    """Encapsulates WebUI login, registration, and QQ binding logic."""
+    """Encapsulates WebUI login, registration, and platform binding logic."""
 
     def __init__(self, config: ScopedConfig, data_dir: Path) -> None:
         self._config = config
@@ -182,7 +184,8 @@ class WebUIAuth:
         return CurrentWebUIUser(
             username=user.username,
             role="user",
-            bound_qq=user.bound_qq,
+            bound_user_id=user.bound_user_id,
+            bound_platform=user.bound_platform,
             auth_key_expires_at=user.auth_key_expires_at,
         )
 
@@ -198,7 +201,7 @@ class WebUIAuth:
         return user
 
     def require_bound_user(self, request: Request) -> CurrentWebUIUser | None:
-        """Return current normal user only when it has a bound QQ number."""
+        """Return current normal user only when it has a bound platform user id."""
         user = self.current_user(request)
         if user is None or user.is_admin or not user.is_bound:
             return None
@@ -232,7 +235,8 @@ class WebUIAuth:
         return CurrentWebUIUser(
             username=user.username,
             role="user",
-            bound_qq=user.bound_qq,
+            bound_user_id=user.bound_user_id,
+            bound_platform=user.bound_platform,
             auth_key_expires_at=user.auth_key_expires_at,
         )
 
@@ -243,7 +247,7 @@ class WebUIAuth:
         request.session[self._session_role_key] = user.role
 
     def register_user(self, username: str, password: str) -> RegistrationResult:
-        """Create a normal user and return the one-time QQ binding key."""
+        """Create a normal user and return the one-time binding key."""
         normalized = username.strip()
         if not self.admin_configured:
             raise UserRegistrationError("WebUI 管理员密码尚未配置")
@@ -276,8 +280,8 @@ class WebUIAuth:
         user = users.get(self._user_key(username))
         if user is None:
             raise UserRegistrationError("用户不存在")
-        if user.bound_qq:
-            raise UserRegistrationError("用户已绑定 QQ")
+        if user.bound_user_id:
+            raise UserRegistrationError("用户已绑定平台账号")
 
         auth_key = secrets.token_urlsafe(24)
         user.auth_key_hash = _hash_auth_key(auth_key)
@@ -286,11 +290,17 @@ class WebUIAuth:
         self._save_users(users)
         return RegistrationResult(user=user, auth_key=auth_key)
 
-    def bind_auth_key(self, auth_key: str, qq: str) -> StoredWebUIUser:
-        """Bind a one-time auth_key to the QQ/user_id from the current event."""
+    def bind_auth_key(
+        self,
+        auth_key: str,
+        user_id: str,
+        platform: str | None = None,
+    ) -> StoredWebUIUser:
+        """Bind a one-time auth_key to the user_id from the current event."""
         normalized_key = auth_key.strip()
-        normalized_qq = qq.strip()
-        if not normalized_key or not normalized_qq:
+        normalized_user_id = user_id.strip()
+        normalized_platform = platform.strip() if platform else None
+        if not normalized_key or not normalized_user_id:
             raise AuthKeyInvalid("auth_key 无效")
 
         key_hash = _hash_auth_key(normalized_key)
@@ -308,7 +318,8 @@ class WebUIAuth:
             if expires_at is None or _aware_utc(expires_at) < _utc_now():
                 matched_expired = user
                 continue
-            user.bound_qq = normalized_qq
+            user.bound_user_id = normalized_user_id
+            user.bound_platform = normalized_platform
             user.auth_key_hash = None
             user.auth_key_expires_at = None
             user.used_auth_key_hashes.append(key_hash)
@@ -322,12 +333,21 @@ class WebUIAuth:
             raise AuthKeyAlreadyUsed("auth_key 已使用")
         raise AuthKeyInvalid("auth_key 无效")
 
-    def is_qq_bound(self, qq: str) -> bool:
-        """Return True if any normal WebUI account is bound to this QQ."""
-        normalized = qq.strip()
-        if not normalized:
+    def is_user_bound(self, user_id: str, platform: str | None = None) -> bool:
+        """Return True if any normal WebUI account is bound to this platform user."""
+        normalized_user_id = user_id.strip()
+        normalized_platform = platform.strip() if platform else None
+        if not normalized_user_id:
             return False
-        return any(user.bound_qq == normalized for user in self._load_users().values())
+        return any(
+            user.bound_user_id == normalized_user_id
+            and (
+                normalized_platform is None
+                or user.bound_platform is None
+                or user.bound_platform == normalized_platform
+            )
+            for user in self._load_users().values()
+        )
 
     def create_router(self) -> APIRouter:
         """Build login, registration, and logout routes."""
@@ -445,6 +465,10 @@ class WebUIAuth:
 
         users: dict[str, StoredWebUIUser] = {}
         for row in rows:
+            if isinstance(row, dict) and "bound_qq" in row:
+                row = row.copy()
+                row.setdefault("bound_user_id", row.pop("bound_qq"))
+                row.setdefault("bound_platform", None)
             try:
                 user = StoredWebUIUser.model_validate(row)
             except ValueError:

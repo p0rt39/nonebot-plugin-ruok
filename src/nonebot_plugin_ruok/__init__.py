@@ -39,7 +39,7 @@ __plugin_meta__ = PluginMetadata(
     description="Bot health monitoring, session tracking, and WebUI",
     usage=(
         "/ruok no <module> <description> — report an issue\n"
-        "/ruok bind <auth_key> — bind WebUI account to current QQ\n"
+        "/ruok bind <auth_key> — bind WebUI account to current platform user\n"
         "/ruok status — check module health\n"
         "/ruok lookup <session_id> — view session details\n"
         "/ruok confirm <session_id> — confirm issue (pending→unsolved)\n"
@@ -84,8 +84,8 @@ async def _can_report(event: Event) -> bool:
     if user_id in get_driver().config.superusers:
         return True
 
-    # WebUI users bound to this QQ can report from chat.
-    if webui_auth.is_qq_bound(user_id):
+    # WebUI users bound to this platform user can report from chat.
+    if webui_auth.is_user_bound(user_id):
         return True
 
     # Whitelist users
@@ -138,7 +138,7 @@ async def handle_ruok(
     if subcmd == "no":
         await _cmd_no(bot, event, rest)
     elif subcmd == "bind":
-        await _cmd_bind(event, rest)
+        await _cmd_bind(bot, event, rest)
     elif subcmd == "status":
         await _cmd_status()
     elif subcmd == "list":
@@ -211,7 +211,7 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
     )
 
 
-async def _cmd_bind(event: Event, rest: str) -> None:
+async def _cmd_bind(bot: Bot, event: Event, rest: str) -> None:
     """Handle /ruok bind <auth_key>."""
     auth_key = rest.strip()
     if not auth_key:
@@ -219,7 +219,7 @@ async def _cmd_bind(event: Event, rest: str) -> None:
         return
 
     try:
-        user = webui_auth.bind_auth_key(auth_key, event.get_user_id())
+        user = webui_auth.bind_auth_key(auth_key, event.get_user_id(), bot.type)
     except AuthKeyExpired:
         await ruok_cmd.finish("❌ auth_key 已过期，请在 WebUI 重新获取绑定码。")
         return
@@ -230,7 +230,9 @@ async def _cmd_bind(event: Event, rest: str) -> None:
         await ruok_cmd.finish("❌ auth_key 无效，请检查后重试。")
         return
 
-    await ruok_cmd.finish(f"✅ WebUI 用户 {user.username} 已绑定 QQ {user.bound_qq}")
+    await ruok_cmd.finish(
+        f"✅ WebUI 用户 {user.username} 已绑定平台账号 {user.bound_user_id}"
+    )
 
 
 async def _cmd_status() -> None:

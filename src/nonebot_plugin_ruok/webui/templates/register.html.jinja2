@@ -53,7 +53,7 @@
             <p>一次性绑定码：</p>
             <p class="auth-key"><code>{{ auth_key }}</code></p>
             <p>
-                在 QQ 中发送 <code>/ruok bind {{ auth_key }}</code> 完成绑定。
+                在当前聊天平台中发送 <code>/ruok bind {{ auth_key }}</code> 完成绑定。
                 {% if auth_key_expires_at %}有效期至 {{ auth_key_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}。{% endif %}
             </p>
             <a href="/ruok" role="button" style="width: 100%; text-align: center;">进入总览</a>
