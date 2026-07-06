@@ -26,11 +26,11 @@ def _path_write_json(path: Path, data: list[dict[str, Any]]) -> None:
 
 
 def _builtin_module() -> ModuleDefinition:
-    """Return the built-in RuOK self-monitoring module."""
+    """Return the built-in RUOK self-monitoring module."""
     return ModuleDefinition(
         name="ruok",
-        display_name="RuOK",
-        description="RuOK 插件自身 — 监控系统健康状态",
+        display_name="RUOK",
+        description="RUOK 插件自身 — 监控系统健康状态",
         plugins=["nonebot_plugin_ruok"],
     )
 
@@ -43,7 +43,7 @@ def _builtin_module() -> ModuleDefinition:
 def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]:
     """Return all defined modules with real-time derived status.
 
-    Always includes a built-in «ruok» module representing RuOK itself.
+    Always includes a built-in «ruok» module representing RUOK itself.
     On first run, this module is persisted to modules.json.
     """
     path = _modules_path(data_dir)
@@ -62,12 +62,24 @@ def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]
         modules.insert(0, _builtin_module())
         _path_write_json(path, [m.model_dump() for m in modules])
     else:
-        # Migration: ensure built-in RuOK module references itself
+        # Migration: keep old persisted built-in defaults aligned without
+        # overwriting user-customized labels.
+        changed = False
         for m in modules:
-            if m.name == "ruok" and not m.plugins:
+            if m.name != "ruok":
+                continue
+            if not m.plugins:
                 m.plugins = ["nonebot_plugin_ruok"]
-                _path_write_json(path, [mod.model_dump() for mod in modules])
-                break
+                changed = True
+            if m.display_name in {"RuOK", "ruok"}:
+                m.display_name = "RUOK"
+                changed = True
+            if m.description == "RuOK 插件自身 — 监控系统健康状态":
+                m.description = "RUOK 插件自身 — 监控系统健康状态"
+                changed = True
+            break
+        if changed:
+            _path_write_json(path, [mod.model_dump() for mod in modules])
 
     rebuild_plugin_impacts(data_dir)
     for mod in modules:

@@ -1,4 +1,4 @@
-"""Shared Jinja2 environment for RuOK WebUI.
+"""Shared Jinja2 environment for RUOK WebUI.
 
 All template rendering goes through this single instance to ensure
 consistent filters, autoescape, and template caching.

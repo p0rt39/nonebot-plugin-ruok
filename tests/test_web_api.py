@@ -13,7 +13,7 @@ def test_api_key_required_when_configured(tmp_path: Path) -> None:
     assert client.get("/ruok/api/sessions").status_code == 401
     header_response = client.get(
         "/ruok/api/sessions",
-        headers={"X-RuOK-API-Key": "secret"},
+        headers={"X-RUOK-API-Key": "secret"},
     )
     bearer_response = client.get(
         "/ruok/api/sessions",

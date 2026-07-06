@@ -292,7 +292,7 @@ def _publish_session_event(
 
 
 # ────────────────────────────────
-# 4. Internal error handler — auto-create RuOK sessions
+# 4. Internal error handler — auto-create RUOK sessions
 # ────────────────────────────────
 
 
@@ -302,7 +302,7 @@ def _handle_ruok_error(
     data_dir: Path,
 ) -> str:
     """Log an unexpected internal error with full traceback and create a
-    RuOK self-monitoring session under the built-in ``"ruok"`` module.
+    RUOK self-monitoring session under the built-in ``"ruok"`` module.
 
     Deduplicates by *error_signature*: if a pending/unsolved session already
     exists for this signature, appends an occurrence instead of creating
@@ -313,7 +313,7 @@ def _handle_ruok_error(
     """
     tb_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
-    logger.error(f"RuOK 内部异常 [{context}]: {type(exc).__name__}: {exc}\n{tb_text}")
+    logger.error(f"RUOK 内部异常 [{context}]: {type(exc).__name__}: {exc}\n{tb_text}")
 
     signature = _make_signature("ruok", type(exc).__name__, str(exc)[:100])
 

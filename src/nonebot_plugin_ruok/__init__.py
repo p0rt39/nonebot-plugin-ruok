@@ -38,7 +38,7 @@ require("nonebot_plugin_localstore")
 store = __import__("nonebot_plugin_localstore")
 
 __plugin_meta__ = PluginMetadata(
-    name="RuOK",
+    name="Nonebot, RUOK?",
     description="Bot health monitoring, session tracking, and WebUI",
     usage=(
         "/ruok no <module> <description> — report an issue\n"
@@ -114,7 +114,7 @@ async def _can_report(event: Event) -> bool:
 
 
 # ────────────────────────────────
-# RuOK Main Entrypoint
+# RUOK Main Entrypoint
 # ────────────────────────────────
 
 ruok_cmd = on_command("ruok", priority=10, block=True)
@@ -129,7 +129,7 @@ async def handle_ruok(
     text = args.extract_plain_text().strip()
     if not text:
         await ruok_cmd.finish(
-            "RuOK — 用法:\n"
+            "RUOK — 用法:\n"
             "/ruok no <模块> <描述> — 上报问题\n"
             "/ruok bind <auth_key> — 绑定 WebUI 账户\n"
             "/ruok reset — 重设 WebUI 密码\n"
@@ -259,7 +259,7 @@ async def _cmd_reset(bot: Bot, event: Event) -> None:
         return
 
     text = (
-        f"RuOK WebUI 用户 {result.user.username} 的一次性密码重置码:\n"
+        f"RUOK WebUI 用户 {result.user.username} 的一次性密码重置码:\n"
         f"{result.reset_key}\n"
         "请在 10 分钟内打开 /ruok/reset-password 完成重设。"
     )
@@ -271,7 +271,7 @@ async def _cmd_reset(bot: Bot, event: Event) -> None:
                 message=text,
             )
         except Exception as exc:
-            logger.warning(f"RuOK: password reset private message failed: {exc}")
+            logger.warning(f"RUOK: password reset private message failed: {exc}")
             await ruok_cmd.finish("❌ 私聊发送重置码失败，请先私聊 bot 后重试。")
             return
         await ruok_cmd.finish("✅ 重置码已通过私聊发送，请在 10 分钟内使用。")
@@ -287,7 +287,7 @@ async def _cmd_status() -> None:
 
         modules = lm(data_dir, plugin_config)
     except (OSError, ValueError, ImportError) as exc:
-        logger.warning(f"RuOK: status list_modules failed: {exc}")
+        logger.warning(f"RUOK: status list_modules failed: {exc}")
         modules = []
     except Exception as exc:
         _handle_ruok_error(exc, "_cmd_status list_modules", data_dir)
@@ -449,9 +449,9 @@ if isinstance(driver, ASGIMixin):
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
-            logger.info("RuOK CORS middleware registered")
+            logger.info("RUOK CORS middleware registered")
         except (ImportError, RuntimeError) as exc:
-            logger.warning(f"RuOK CORS setup failed: {exc}")
+            logger.warning(f"RUOK CORS setup failed: {exc}")
         except Exception as exc:
             _handle_ruok_error(exc, "CORS middleware setup", data_dir)
 
@@ -463,20 +463,20 @@ if isinstance(driver, ASGIMixin):
             secret = plugin_config.webui_secret_key or secrets.token_hex(32)
             if not plugin_config.webui_secret_key:
                 logger.warning(
-                    "RuOK: webui_secret_key not set — sessions invalidate on restart. "
+                    "RUOK: webui_secret_key not set — sessions invalidate on restart. "
                     "Set RUOK__WEBUI_SECRET_KEY in .env for persistence."
                 )
             app.add_middleware(SessionMiddleware, secret_key=secret, max_age=None)
-            logger.info("RuOK SessionMiddleware registered")
+            logger.info("RUOK SessionMiddleware registered")
         except (ImportError, RuntimeError) as exc:
-            logger.warning(f"RuOK SessionMiddleware setup failed: {exc}")
+            logger.warning(f"RUOK SessionMiddleware setup failed: {exc}")
         except Exception as exc:
             _handle_ruok_error(exc, "SessionMiddleware setup", data_dir)
 
         # ── Global ASGI exception handler ──
         # Catches any unhandled exception that escapes route-level try/except
         # (e.g. response header encoding errors, middleware failures).
-        # Creates a RuOK session so the error is tracked and visible in WebUI.
+        # Creates a RUOK session so the error is tracked and visible in WebUI.
         from fastapi.responses import JSONResponse as _JSONResponse
         from starlette.requests import Request as StarletteRequest
 
@@ -498,10 +498,10 @@ if isinstance(driver, ASGIMixin):
                 status_code=500,
             )
 
-        logger.info("RuOK global exception handler registered")
+        logger.info("RUOK global exception handler registered")
     else:
         logger.warning(
-            "RuOK: driver.server_app is not a FastAPI instance, skipping middleware"
+            "RUOK: driver.server_app is not a FastAPI instance, skipping middleware"
         )
 
 
@@ -513,7 +513,7 @@ async def _on_bot_connect(bot: Bot) -> None:
         connected=True,
         connected_at=datetime.now(timezone.utc),
     )
-    logger.info(f"RuOK: bot {bot.self_id} connected ({bot.type})")
+    logger.info(f"RUOK: bot {bot.self_id} connected ({bot.type})")
 
 
 @driver.on_bot_disconnect
@@ -522,7 +522,7 @@ async def _on_bot_disconnect(bot: Bot) -> None:
     if entry:
         entry.connected = False
         entry.disconnected_at = datetime.now(timezone.utc)
-    logger.info(f"RuOK: bot {bot.self_id} disconnected")
+    logger.info(f"RUOK: bot {bot.self_id} disconnected")
 
 
 # ────────────────────────────────
@@ -539,31 +539,31 @@ async def _startup() -> None:
         try:
             auth_router = webui_auth.create_router()
             app.include_router(auth_router)
-            logger.info("RuOK Auth routes mounted")
+            logger.info("RUOK Auth routes mounted")
         except (ImportError, RuntimeError) as exc:
-            logger.warning(f"RuOK Auth mount failed: {exc}")
+            logger.warning(f"RUOK Auth mount failed: {exc}")
         except Exception as exc:
             _handle_ruok_error(exc, "Auth routes mount", data_dir)
 
         try:
             router = create_ruok_router(plugin_config, data_dir)
             app.include_router(router)
-            logger.info("RuOK API mounted at /ruok/api/*")
+            logger.info("RUOK API mounted at /ruok/api/*")
         except (ImportError, RuntimeError) as exc:
-            logger.warning(f"RuOK API mount failed: {exc}")
+            logger.warning(f"RUOK API mount failed: {exc}")
         except Exception as exc:
             _handle_ruok_error(exc, "API routes mount", data_dir)
 
         try:
             webui_router = create_webui_router(plugin_config, data_dir, webui_auth)
             app.include_router(webui_router)
-            logger.info("RuOK WebUI SSR mounted at /ruok")
+            logger.info("RUOK WebUI SSR mounted at /ruok")
         except (ImportError, RuntimeError) as exc:
-            logger.warning(f"RuOK WebUI mount failed: {exc}")
+            logger.warning(f"RUOK WebUI mount failed: {exc}")
         except Exception as exc:
             _handle_ruok_error(exc, "WebUI routes mount", data_dir)
     else:
-        logger.info("RuOK: non-ASGI driver, skipping API/WebUI mount")
+        logger.info("RUOK: non-ASGI driver, skipping API/WebUI mount")
 
     # Start LogMonitor (works regardless of driver type)
     log_monitor.start()
@@ -579,12 +579,12 @@ async def _startup() -> None:
 
         register_summary_job(plugin_config, data_dir)
     except Exception as exc:
-        logger.warning(f"RuOK: summary job registration failed: {exc}")
+        logger.warning(f"RUOK: summary job registration failed: {exc}")
 
-    logger.info("RuOK plugin started")
+    logger.info("RUOK plugin started")
 
 
 @driver.on_shutdown
 async def _shutdown() -> None:
     log_monitor.stop()
-    logger.info("RuOK plugin stopped")
+    logger.info("RUOK plugin stopped")

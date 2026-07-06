@@ -1,4 +1,4 @@
-"""Data models for RuOK plugin — health, session, module definitions."""
+"""Data models for RUOK plugin — health, session, module definitions."""
 
 from __future__ import annotations
 

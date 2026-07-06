@@ -154,7 +154,7 @@ async def sse_event_generator(
 
                 _latest_metrics = metrics
             except Exception as exc:
-                logger.warning(f"RuOK SSE: fast metrics failed: {exc}")
+                logger.warning(f"RUOK SSE: fast metrics failed: {exc}")
 
         # ── Background status collection (also async to avoid blocking ticks) ──
         _status_task: asyncio.Task | None = None
@@ -180,7 +180,7 @@ async def sse_event_generator(
                     "status_reasons": status.status_reasons,
                 }
             except Exception as exc:
-                logger.warning(f"RuOK SSE: status collection failed: {exc}")
+                logger.warning(f"RUOK SSE: status collection failed: {exc}")
 
         while True:
             # Fire background status collection when due and not already running

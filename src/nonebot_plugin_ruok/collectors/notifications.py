@@ -179,9 +179,9 @@ async def _send_bot_dm(session: Session) -> None:
             try:
                 await bot.send_private_msg(user_id=int(uid), message=text)
             except (ValueError, RuntimeError) as exc:
-                logger.warning(f"RuOK: failed to notify superuser {uid}: {exc}")
+                logger.warning(f"RUOK: failed to notify superuser {uid}: {exc}")
     except (RuntimeError, KeyError) as exc:
-        logger.warning(f"RuOK: bot DM notification failed: {exc}")
+        logger.warning(f"RUOK: bot DM notification failed: {exc}")
 
 
 async def _send_webhook(rule: NotificationRule, session: Session) -> None:
@@ -204,10 +204,10 @@ async def _send_webhook(rule: NotificationRule, session: Session) -> None:
             )
             if resp.is_error:
                 logger.warning(
-                    f"RuOK: webhook {rule.webhook_url} returned {resp.status_code}"
+                    f"RUOK: webhook {rule.webhook_url} returned {resp.status_code}"
                 )
     except Exception as exc:
-        logger.warning(f"RuOK: webhook {rule.webhook_url} failed: {exc}")
+        logger.warning(f"RUOK: webhook {rule.webhook_url} failed: {exc}")
 
 
 # ────────────────────────────────
@@ -247,7 +247,7 @@ async def dispatch_notification(
             elif channel == "webhook":
                 tasks.append(asyncio.create_task(_send_webhook(rule, session)))
             else:
-                logger.warning(f"RuOK: unknown notification channel: {channel}")
+                logger.warning(f"RUOK: unknown notification channel: {channel}")
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -280,7 +280,7 @@ async def _send_summary(config: ScopedConfig, data_dir: Path) -> None:
             return
 
         text = (
-            f"📊 RuOK 定时汇总\nPending: {len(pending)} | Unsolved: {len(unsolved)}\n"
+            f"📊 RUOK 定时汇总\nPending: {len(pending)} | Unsolved: {len(unsolved)}\n"
         )
         if pending:
             text += "\n— Pending —\n"
@@ -305,9 +305,9 @@ async def _send_summary(config: ScopedConfig, data_dir: Path) -> None:
             try:
                 await bot.send_private_msg(user_id=int(uid), message=text)
             except Exception as exc:
-                logger.warning(f"RuOK: summary notify failed for {uid}: {exc}")
+                logger.warning(f"RUOK: summary notify failed for {uid}: {exc}")
     except Exception as exc:
-        logger.warning(f"RuOK: summary notification failed: {exc}")
+        logger.warning(f"RUOK: summary notification failed: {exc}")
 
 
 def register_summary_job(config: ScopedConfig, data_dir: Path) -> None:
@@ -318,7 +318,7 @@ def register_summary_job(config: ScopedConfig, data_dir: Path) -> None:
         require("nonebot_plugin_apscheduler")
         from nonebot_plugin_apscheduler import scheduler
     except Exception:
-        logger.info("RuOK: APScheduler not available, summary notifications disabled")
+        logger.info("RUOK: APScheduler not available, summary notifications disabled")
         return
 
     hours = config.summary_interval_hours or 4.0
@@ -327,4 +327,4 @@ def register_summary_job(config: ScopedConfig, data_dir: Path) -> None:
     async def _ruok_summary_job() -> None:
         await _send_summary(config, data_dir)
 
-    logger.info(f"RuOK: summary notification job registered (every {hours}h)")
+    logger.info(f"RUOK: summary notification job registered (every {hours}h)")

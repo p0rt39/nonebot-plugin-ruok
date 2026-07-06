@@ -1,4 +1,4 @@
-"""FastAPI routes for RuOK — health, session, module management."""
+"""FastAPI routes for RUOK — health, session, module management."""
 
 from __future__ import annotations
 
@@ -39,8 +39,8 @@ from .collector import (
 
 
 def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
-    """Build the FastAPI router for all ruok endpoints."""
-    router = APIRouter(prefix="/ruok/api", tags=["ruok"])
+    """Build the FastAPI router for all RUOK endpoints."""
+    router = APIRouter(prefix="/ruok/api", tags=["RUOK"])
 
     # Simple cache
     _cache: dict[str, Any] = {}

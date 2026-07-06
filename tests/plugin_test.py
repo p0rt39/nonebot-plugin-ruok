@@ -38,7 +38,7 @@ async def test_ruok_no_args_shows_usage(app: App) -> None:
         ctx.should_pass_permission()
         ctx.should_call_send(
             event,
-            "RuOK — 用法:\n"
+            "RUOK — 用法:\n"
             "/ruok no <模块> <描述> — 上报问题\n"
             "/ruok bind <auth_key> — 绑定 WebUI 账户\n"
             "/ruok reset — 重设 WebUI 密码\n"
@@ -135,7 +135,7 @@ async def test_ruok_reset_private_message(
         ctx.should_pass_permission()
         ctx.should_call_send(
             event,
-            "RuOK WebUI 用户 alice 的一次性密码重置码:\n"
+            "RUOK WebUI 用户 alice 的一次性密码重置码:\n"
             "fixed-reset-key\n"
             "请在 10 分钟内打开 /ruok/reset-password 完成重设。",
             result=None,
@@ -213,7 +213,7 @@ async def test_ruok_reset_group_message_sends_private_key(
 
 @pytest.mark.asyncio
 async def test_ruok_status_builtin_module(app: App) -> None:
-    """/ruok status should show built-in RuOK module."""
+    """/ruok status should show built-in RUOK module."""
     import nonebot
     from nonebot.adapters.onebot.v11 import Bot
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
@@ -232,7 +232,7 @@ async def test_ruok_status_builtin_module(app: App) -> None:
         ctx.should_pass_permission()
         ctx.should_call_send(
             event,
-            "🟢 RuOK — available",
+            "🟢 RUOK — available",
             result=None,
             bot=bot,
         )

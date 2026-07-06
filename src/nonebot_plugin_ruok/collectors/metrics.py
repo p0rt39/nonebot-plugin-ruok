@@ -278,7 +278,7 @@ async def _collect_connection_status(
 def _collect_plugin_inventory(*, skip_ruok: bool = True) -> list[PluginHealthInfo]:
     """Collect loaded / metadata / matcher info for all plugins (L1-L3).
 
-    Set *skip_ruok=False* to include the RuOK plugin itself (for module
+    Set *skip_ruok=False* to include the RUOK plugin itself (for module
     association / detail pages).
     """
     plugins: list[PluginHealthInfo] = []

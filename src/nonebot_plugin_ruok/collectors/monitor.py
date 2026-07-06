@@ -56,7 +56,7 @@ class LogMonitor:
         )
         logging.getLogger().addHandler(self._logging_handler)
 
-        logger.info("RuOK LogMonitor started (level=ERROR, loguru + stdlib)")
+        logger.info("RUOK LogMonitor started (level=ERROR, loguru + stdlib)")
 
     def stop(self) -> None:
         if self._handler_id is not None:
@@ -70,11 +70,11 @@ class LogMonitor:
 
 
 class _StdlibLogHandler(logging.Handler):
-    """Intercept Python stdlib ERROR/CRITICAL logs and create RuOK sessions.
+    """Intercept Python stdlib ERROR/CRITICAL logs and create RUOK sessions.
 
     In non-strict mode (default) only captures framework-level loggers:
     ``uvicorn``, ``starlette``, ``fastapi``, ``asyncio``, ``multipart``.
-    Set ``ruok__strict_exception_capture=true`` to capture all loggers.
+    Set ``RUOK__strict_exception_capture=true`` to capture all loggers.
     """
 
     _FRAMEWORK_PREFIXES: tuple[str, ...] = (
@@ -130,11 +130,11 @@ class _StdlibLogHandler(logging.Handler):
                 description=(f"```\n{msg_text}\n{exc_text}\n```"),
             )
             _save_session(self._data_dir, session)
-            logger.warning(f"RuOK: new session {session.session_id} for {plugin_id}")
+            logger.warning(f"RUOK: new session {session.session_id} for {plugin_id}")
         except Exception:
             # logging handler must never raise — try best-effort logging
             try:
-                logger.exception("RuOK LogMonitor: stdlib handler failed")
+                logger.exception("RUOK LogMonitor: stdlib handler failed")
             except Exception:
                 pass  # cannot even log, give up silently
 
@@ -187,7 +187,7 @@ def _make_log_sink(
             description=f"```\n{msg_text}\n{exception_str}\n```",
         )
         _save_session(data_dir, session)
-        logger.warning(f"RuOK: new session {session.session_id} for {plugin_id}")
+        logger.warning(f"RUOK: new session {session.session_id} for {plugin_id}")
         if config.notify_superusers:
             # Late import to avoid circular dependency
             from ..collector import _notify_new_session

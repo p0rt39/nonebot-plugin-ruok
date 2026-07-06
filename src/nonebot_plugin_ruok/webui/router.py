@@ -1,4 +1,4 @@
-"""SSR routes for RuOK WebUI — Jinja2 + HTMX + Pico.css."""
+"""SSR routes for RUOK WebUI — Jinja2 + HTMX + Pico.css."""
 
 from __future__ import annotations
 
@@ -233,7 +233,7 @@ def create_webui_router(
     data_dir: Path,
     auth: WebUIAuth,
 ) -> APIRouter:
-    """Build SSR router for the RuOK WebUI."""
+    """Build SSR router for the RUOK WebUI."""
     router = APIRouter(tags=["ruok-webui"])
 
     # ── SSE endpoint ──

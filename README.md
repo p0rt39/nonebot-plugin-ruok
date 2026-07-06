@@ -2,7 +2,7 @@
     <a href="https://v2.nonebot.dev/store">
     <img src="https://raw.githubusercontent.com/fllesser/nonebot-plugin-template/refs/heads/resource/.docs/NoneBotPlugin.svg" width="310" alt="logo"></a>
 
-# nonebot-plugin-ruok
+# Nonebot, RUOK? - RUOK
 
 **NoneBot2 健康监控、异常 Session 追踪与 WebUI 面板**
 
@@ -18,7 +18,7 @@
 
 ## 介绍
 
-RuOK 是一个面向 NoneBot2 的运行状态观察与异常处理插件。它会收集系统指标、Bot 连接状态、已加载插件信息，自动捕获 ERROR/CRITICAL 日志生成可追踪 Session，并提供 SSR WebUI、HTTP API、通知规则与聊天指令。
+RUOK 是一个面向 NoneBot2 的运行状态观察与异常处理插件。它会收集系统指标、Bot 连接状态、已加载插件信息，自动捕获 ERROR/CRITICAL 日志生成可追踪 Session，并提供 SSR WebUI、HTTP API、通知规则与聊天指令。
 
 它适合用来回答这些问题：
 
@@ -140,7 +140,7 @@ password: RUOK__WEBUI_ADMIN_PASSWORD
 API key 可通过任一方式传递：
 
 ```http
-X-RuOK-API-Key: your-token
+X-RUOK-API-Key: your-token
 Authorization: Bearer your-token
 ```
 
@@ -277,7 +277,7 @@ stateDiagram-v2
 所有端点前缀为 `/ruok/api`，返回 JSON。API 鉴权与 WebUI 登录态相互独立：如果配置了 `RUOK__API_KEY`，请求必须带上以下任一凭据；未配置时不校验 API key。
 
 ```http
-X-RuOK-API-Key: your-token
+X-RUOK-API-Key: your-token
 Authorization: Bearer your-token
 ```
 
@@ -398,7 +398,7 @@ DELETE /ruok/api/modules/music
 
 ## 数据文件
 
-RuOK 使用 `nonebot-plugin-localstore` 的插件数据目录。
+RUOK 使用 `nonebot-plugin-localstore` 的插件数据目录。
 
 | 文件 | 说明 |
 | :--- | :--- |

@@ -1,4 +1,4 @@
-"""RuOK plugin configuration model."""
+"""RUOK plugin configuration model."""
 
 from pydantic import BaseModel
 
@@ -6,7 +6,7 @@ from .protocol import NotificationRule
 
 
 class ScopedConfig(BaseModel):
-    """RuOK plugin config, scoped under ``ruok__`` in dotenv."""
+    """RUOK plugin config, scoped under ``RUOK__`` in dotenv."""
 
     # ── Health check ──
     check_timeout: float = 5.0

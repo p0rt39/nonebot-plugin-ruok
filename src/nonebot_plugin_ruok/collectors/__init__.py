@@ -1,4 +1,4 @@
-"""RuOK collectors subpackage — split from collector.py."""
+"""RUOK collectors subpackage — split from collector.py."""
 
 from .metrics import (
     _startup_time,

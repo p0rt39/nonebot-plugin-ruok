@@ -20,7 +20,7 @@ class TestListModules:
         assert len(modules) >= 1
         ruok_mod = next((m for m in modules if m.name == "ruok"), None)
         assert ruok_mod is not None
-        assert ruok_mod.display_name == "RuOK"
+        assert ruok_mod.display_name == "RUOK"
         assert "nonebot_plugin_ruok" in ruok_mod.plugins
 
     def test_persisted_on_disk(self, tmp_path: Path) -> None:

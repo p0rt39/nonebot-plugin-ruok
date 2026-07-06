@@ -328,7 +328,7 @@ def test_api_patch_session_accepts_affected_plugins(tmp_path: Path) -> None:
 
     response = client.patch(
         f"/ruok/api/sessions/{session.session_id}",
-        headers={"X-RuOK-API-Key": "secret"},
+        headers={"X-RUOK-API-Key": "secret"},
         json={"status": "unsolved", "affected_plugins": ["plugin_a"]},
     )
 
@@ -349,7 +349,7 @@ def test_api_patch_session_rejects_invalid_affected_plugin(tmp_path: Path) -> No
 
     response = client.patch(
         f"/ruok/api/sessions/{session.session_id}",
-        headers={"X-RuOK-API-Key": "secret"},
+        headers={"X-RUOK-API-Key": "secret"},
         json={"status": "unsolved", "affected_plugins": ["plugin_b"]},
     )
 
@@ -371,7 +371,7 @@ def test_api_patch_session_rejects_affected_plugins_without_confirm_status(
 
     response = client.patch(
         f"/ruok/api/sessions/{session.session_id}",
-        headers={"X-RuOK-API-Key": "secret"},
+        headers={"X-RUOK-API-Key": "secret"},
         json={"developer_notes": "note", "affected_plugins": ["plugin_a"]},
     )
     reloaded = get_session(tmp_path, session.session_id)
