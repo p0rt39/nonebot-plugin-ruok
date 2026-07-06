@@ -67,6 +67,11 @@ exclude_lines = [
   "except ImportError:",
 ]
 
+[tool.typos.files]
+extend-exclude = [
+  "src/nonebot_plugin_ruok/webui/static/vendor/**",
+]
+
 [tool.nonebot]
 plugins = ["nonebot_plugin_ruok"]
 
