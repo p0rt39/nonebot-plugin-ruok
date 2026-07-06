@@ -276,7 +276,167 @@ def test_webui_login_ui_is_modern_auth_shell(tmp_path: Path) -> None:
     assert 'class="auth-form"' in response.text
     assert 'class="auth-input-wrap"' in response.text
     assert 'data-password-toggle="login-password"' in response.text
+    assert 'aria-pressed="false"' in response.text
     assert 'autocomplete="username"' in response.text
+    assert 'name="remember_username"' in response.text
+    assert 'name="remember_login"' in response.text
+    assert "/ruok/reset-password" in response.text
+    assert ">显示<" not in response.text
+
+
+def test_webui_register_password_toggle_is_icon_only(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+
+    response = client.get("/ruok/register")
+
+    assert response.status_code == 200
+    assert 'data-password-toggle="register-password"' in response.text
+    assert 'data-password-toggle="register-password-confirm"' in response.text
+    assert 'class="password-toggle__icon"' in response.text
+    assert ">显示<" not in response.text
+
+
+def test_webui_remember_username_cookie(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+
+    response = client.post(
+        "/ruok/login",
+        data={
+            "username": "admin",
+            "password": ADMIN_PASSWORD,
+            "remember_username": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert client.cookies.get("ruok_login_username") == "admin"
+
+    client.get("/ruok/logout", follow_redirects=False)
+    login_page = client.get("/ruok/login")
+    assert 'value="admin"' in login_page.text
+    assert "remember_username" in login_page.text
+    assert "checked" in login_page.text
+
+
+def test_webui_remember_login_cookie_restores_session(tmp_path: Path) -> None:
+    config = _webui_config()
+    client = _client(config, tmp_path)
+
+    response = client.post(
+        "/ruok/login",
+        data={
+            "username": "admin",
+            "password": ADMIN_PASSWORD,
+            "remember_login": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    remember = client.cookies.get("ruok_remember")
+    assert remember
+
+    fresh = _client(config, tmp_path)
+    fresh.cookies.set("ruok_remember", remember)
+    restored = fresh.get("/ruok", follow_redirects=False)
+    assert restored.status_code == 200
+    assert "Overall" in restored.text
+
+
+def test_webui_remember_login_invalidated_after_password_change(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+    auth.register_user("alice", "secret")
+    client = _client(config, tmp_path)
+    response = client.post(
+        "/ruok/login",
+        data={
+            "username": "alice",
+            "password": "secret",
+            "remember_login": "1",
+        },
+        follow_redirects=False,
+    )
+    remember = client.cookies.get("ruok_remember")
+    assert response.status_code == 302
+    assert remember
+
+    auth.change_user_password("alice", "secret", "new-secret")
+
+    fresh = _client(config, tmp_path)
+    fresh.cookies.set("ruok_remember", remember)
+    restored = fresh.get("/ruok", follow_redirects=False)
+    assert restored.status_code == 401
+
+
+def test_webui_reset_password_with_key(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+    result = auth.register_user("alice", "secret")
+    auth.bind_auth_key(result.auth_key, "10001", "OneBot V11")
+    issued = auth.issue_password_reset_key("10001", "OneBot V11")
+    client = _client(config, tmp_path)
+
+    page = client.get("/ruok/reset-password")
+    assert page.status_code == 200
+    assert 'autocomplete="one-time-code"' in page.text
+
+    changed = client.post(
+        "/ruok/reset-password",
+        data={
+            "reset_key": issued.reset_key,
+            "new_password": "new-secret",
+            "new_password_confirm": "new-secret",
+        },
+    )
+
+    assert changed.status_code == 200
+    assert "密码已重设" in changed.text
+    _login_user(_client(config, tmp_path), "alice", "new-secret")
+    reused = client.post(
+        "/ruok/reset-password",
+        data={
+            "reset_key": issued.reset_key,
+            "new_password": "again",
+            "new_password_confirm": "again",
+        },
+    )
+    assert "reset key 无效" in reused.text
+
+
+def test_webui_reset_password_key_expires(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+    result = auth.register_user("alice", "secret")
+    auth.bind_auth_key(result.auth_key, "10001", "OneBot V11")
+    issued = auth.issue_password_reset_key("10001", "OneBot V11")
+    users_path = tmp_path / "webui_users.json"
+    users = json.loads(users_path.read_text("utf-8"))
+    users["users"][0]["password_reset_expires_at"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=1)
+    ).isoformat()
+    users_path.write_text(json.dumps(users), encoding="utf-8")
+    client = _client(config, tmp_path)
+
+    expired = client.post(
+        "/ruok/reset-password",
+        data={
+            "reset_key": issued.reset_key,
+            "new_password": "new-secret",
+            "new_password_confirm": "new-secret",
+        },
+    )
+
+    assert "reset key 已过期" in expired.text
 
 
 def test_webui_protected_action_requires_login(tmp_path: Path) -> None:

@@ -151,17 +151,36 @@
         .password-field input {
             padding-right: 4.7rem;
         }
+        .password-field input::-ms-reveal,
+        .password-field input::-ms-clear {
+            display: none;
+        }
+        .password-field input::-webkit-credentials-auto-fill-button {
+            visibility: hidden;
+            pointer-events: none;
+            position: absolute;
+            right: 0;
+        }
         .password-toggle {
             position: absolute;
             right: 0.55rem;
             top: 50%;
             transform: translateY(-50%);
-            width: auto;
+            display: grid;
+            place-items: center;
+            width: 2.1rem;
             min-height: 2rem;
-            padding: 0.28rem 0.55rem;
+            padding: 0;
             margin: 0;
             border-radius: var(--radius-sm) !important;
-            font-size: 0.82rem;
+            font-size: 1rem;
+            line-height: 1;
+        }
+        .password-toggle__icon::before {
+            content: "◐";
+        }
+        .password-toggle[aria-pressed="true"] .password-toggle__icon::before {
+            content: "●";
         }
         button, [role="button"], input[type="submit"] {
             border-radius: var(--radius-sm) !important;
@@ -185,6 +204,23 @@
         }
         .auth-actions a {
             white-space: nowrap;
+        }
+        .auth-options {
+            display: grid;
+            gap: 0.45rem;
+            margin-top: -0.15rem;
+        }
+        .auth-check {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            margin: 0;
+            color: var(--auth-muted);
+            font-weight: 500;
+        }
+        .auth-check input {
+            width: auto;
+            margin: 0;
         }
         .full-width {
             width: 100%;
@@ -223,7 +259,7 @@
             if (!field) return;
             var visible = field.type === 'text';
             field.type = visible ? 'password' : 'text';
-            button.textContent = visible ? '显示' : '隐藏';
+            button.setAttribute('aria-pressed', visible ? 'false' : 'true');
             button.setAttribute('aria-label', visible ? '显示密码' : '隐藏密码');
         });
     })();

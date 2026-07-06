@@ -26,16 +26,29 @@
                    autocomplete="current-password" placeholder="输入账户密码"
                    {% if error %}aria-invalid="true"{% endif %}>
             <button type="button" class="secondary outline password-toggle"
-                    data-password-toggle="login-password" aria-label="显示密码">
-                显示
+                    data-password-toggle="login-password" aria-label="显示密码"
+                    aria-pressed="false">
+                <span class="password-toggle__icon" aria-hidden="true"></span>
             </button>
         </span>
     </label>
+    <div class="auth-options">
+        <label class="auth-check">
+            <input type="checkbox" name="remember_username" value="1"
+                   {% if remember_username %}checked{% endif %}>
+            记住用户名
+        </label>
+        <label class="auth-check">
+            <input type="checkbox" name="remember_login" value="1">
+            保持登录 30 天
+        </label>
+    </div>
     <button type="submit" class="full-width" {% if not admin_configured %}disabled{% endif %}>
         登录
     </button>
 </form>
 <div class="auth-actions">
+    <a href="/ruok/reset-password">忘记密码？</a>
     <a href="/ruok/register">注册普通用户</a>
 </div>
 {% endblock %}

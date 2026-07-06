@@ -33,8 +33,9 @@
             <input id="register-password" type="password" name="password" required
                    autocomplete="new-password" {% if error %}aria-invalid="true"{% endif %}>
             <button type="button" class="secondary outline password-toggle"
-                    data-password-toggle="register-password" aria-label="显示密码">
-                显示
+                    data-password-toggle="register-password" aria-label="显示密码"
+                    aria-pressed="false">
+                <span class="password-toggle__icon" aria-hidden="true"></span>
             </button>
         </span>
     </label>
@@ -45,8 +46,9 @@
                    required autocomplete="new-password"
                    {% if error %}aria-invalid="true"{% endif %}>
             <button type="button" class="secondary outline password-toggle"
-                    data-password-toggle="register-password-confirm" aria-label="显示密码">
-                显示
+                    data-password-toggle="register-password-confirm" aria-label="显示密码"
+                    aria-pressed="false">
+                <span class="password-toggle__icon" aria-hidden="true"></span>
             </button>
         </span>
     </label>

@@ -41,6 +41,7 @@ __plugin_meta__ = PluginMetadata(
     usage=(
         "/ruok no <module> <description> — report an issue\n"
         "/ruok bind <auth_key> — bind WebUI account to current platform user\n"
+        "/ruok reset — issue a password reset key for bound WebUI user\n"
         "/ruok status — check module health\n"
         "/ruok lookup <session_id> — view session details\n"
         "/ruok confirm <session_id> — confirm issue (pending→unsolved)\n"
@@ -129,6 +130,7 @@ async def handle_ruok(
             "RuOK — 用法:\n"
             "/ruok no <模块> <描述> — 上报问题\n"
             "/ruok bind <auth_key> — 绑定 WebUI 账户\n"
+            "/ruok reset — 重设 WebUI 密码\n"
             "/ruok status — 查看状态\n"
             "/ruok list — 查看所有 session\n"
             "/ruok lookup <id> — 查看详情\n"
@@ -144,6 +146,8 @@ async def handle_ruok(
         await _cmd_no(bot, event, rest)
     elif subcmd == "bind":
         await _cmd_bind(bot, event, rest)
+    elif subcmd == "reset":
+        await _cmd_reset(bot, event)
     elif subcmd == "status":
         await _cmd_status()
     elif subcmd == "list":
@@ -155,7 +159,7 @@ async def handle_ruok(
     else:
         await ruok_cmd.finish(
             f"❓ 未知子命令: {subcmd}\n"
-            + "可用: no / bind / status / lookup / confirm / solve / ignore"
+            + "可用: no / bind / reset / status / lookup / confirm / solve / ignore"
         )
 
 
@@ -241,6 +245,37 @@ async def _cmd_bind(bot: Bot, event: Event, rest: str) -> None:
     await ruok_cmd.finish(
         f"✅ WebUI 用户 {user.username} 已绑定平台账号 {user.bound_user_id}"
     )
+
+
+async def _cmd_reset(bot: Bot, event: Event) -> None:
+    """Handle /ruok reset."""
+    try:
+        result = webui_auth.issue_password_reset_key(event.get_user_id(), bot.type)
+    except Exception as exc:
+        message = str(exc) or "无法生成重置码"
+        await ruok_cmd.finish(f"❌ {message}")
+        return
+
+    text = (
+        f"RuOK WebUI 用户 {result.user.username} 的一次性密码重置码:\n"
+        f"{result.reset_key}\n"
+        "请在 10 分钟内打开 /ruok/reset-password 完成重设。"
+    )
+    if getattr(event, "message_type", None) == "group":
+        try:
+            await bot.call_api(
+                "send_private_msg",
+                user_id=int(event.get_user_id()),
+                message=text,
+            )
+        except Exception as exc:
+            logger.warning(f"RuOK: password reset private message failed: {exc}")
+            await ruok_cmd.finish("❌ 私聊发送重置码失败，请先私聊 bot 后重试。")
+            return
+        await ruok_cmd.finish("✅ 重置码已通过私聊发送，请在 10 分钟内使用。")
+        return
+
+    await ruok_cmd.finish(text)
 
 
 async def _cmd_status() -> None:
@@ -395,7 +430,7 @@ if isinstance(driver, ASGIMixin):
                     "RuOK: webui_secret_key not set — sessions invalidate on restart. "
                     "Set RUOK__WEBUI_SECRET_KEY in .env for persistence."
                 )
-            app.add_middleware(SessionMiddleware, secret_key=secret)
+            app.add_middleware(SessionMiddleware, secret_key=secret, max_age=None)
             logger.info("RuOK SessionMiddleware registered")
         except (ImportError, RuntimeError) as exc:
             logger.warning(f"RuOK SessionMiddleware setup failed: {exc}")

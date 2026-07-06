@@ -26,6 +26,10 @@ AdminSource = Literal["builtin", "superuser"]
 
 ADMIN_USERNAME = "admin"
 AUTH_KEY_TTL = timedelta(minutes=10)
+PASSWORD_RESET_TTL = timedelta(minutes=10)
+REMEMBER_TOKEN_TTL = timedelta(days=30)
+REMEMBER_COOKIE = "ruok_remember"
+USERNAME_COOKIE = "ruok_login_username"
 PASSWORD_SCHEME = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 390_000
 
@@ -89,7 +93,20 @@ class StoredWebUIUser(BaseModel):
     auth_key_hash: str | None = None
     auth_key_expires_at: datetime | None = None
     used_auth_key_hashes: list[str] = Field(default_factory=list)
+    password_reset_key_hash: str | None = None
+    password_reset_expires_at: datetime | None = None
     created_at: datetime = Field(default_factory=_utc_now)
+
+
+class StoredRememberToken(BaseModel):
+    """Persistent WebUI long-lived login token record."""
+
+    token_id: str
+    token_hash: str
+    username: str
+    credential_stamp: str
+    created_at: datetime = Field(default_factory=_utc_now)
+    expires_at: datetime
 
 
 @dataclass(frozen=True)
@@ -118,6 +135,14 @@ class RegistrationResult:
 
     user: StoredWebUIUser
     auth_key: str
+
+
+@dataclass(frozen=True)
+class PasswordResetResult:
+    """Result returned after issuing a password reset key."""
+
+    user: StoredWebUIUser
+    reset_key: str
 
 
 class AuthKeyError(ValueError):
@@ -159,8 +184,10 @@ class WebUIAuth:
     ) -> None:
         self._config = config
         self._users_path = data_dir / "webui_users.json"
+        self._remember_tokens_path = data_dir / "webui_remember_tokens.json"
         self._session_username_key = "ruok_username"
         self._session_role_key = "ruok_role"
+        self._session_remember_token_id_key = "ruok_remember_token_id"
         self._superuser_provider = superuser_provider or (lambda: ())
 
     @property
@@ -186,7 +213,7 @@ class WebUIAuth:
         username = request.session.get(self._session_username_key)
         role = request.session.get(self._session_role_key)
         if not isinstance(username, str) or role not in ("admin", "user"):
-            return None
+            return self._current_user_from_remember_cookie(request)
 
         if username.casefold() == ADMIN_USERNAME:
             if role != "admin" or not self.admin_configured:
@@ -262,6 +289,44 @@ class WebUIAuth:
         request.session.clear()
         request.session[self._session_username_key] = user.username
         request.session[self._session_role_key] = user.role
+
+    def issue_remember_token(self, user: CurrentWebUIUser) -> str:
+        """Create a revocable long-lived login token for a user."""
+        token_id = secrets.token_urlsafe(12)
+        secret = secrets.token_urlsafe(32)
+        token_value = f"{token_id}.{secret}"
+        tokens = self._load_remember_tokens()
+        now = _utc_now()
+        tokens[token_id] = StoredRememberToken(
+            token_id=token_id,
+            token_hash=_hash_auth_key(secret),
+            username=user.username,
+            credential_stamp=self._credential_stamp(user.username),
+            created_at=now,
+            expires_at=now + REMEMBER_TOKEN_TTL,
+        )
+        self._save_remember_tokens(tokens)
+        return token_value
+
+    def revoke_remember_token_value(self, token_value: str | None) -> None:
+        """Revoke a single remember token by cookie value."""
+        token_id, _secret = self._split_remember_token(token_value)
+        if token_id is None:
+            return
+        tokens = self._load_remember_tokens()
+        if token_id in tokens:
+            tokens.pop(token_id)
+            self._save_remember_tokens(tokens)
+
+    def revoke_user_remember_tokens(self, username: str) -> None:
+        """Revoke all remember tokens for a user."""
+        key = self._user_key(username)
+        tokens = {
+            token_id: token
+            for token_id, token in self._load_remember_tokens().items()
+            if self._user_key(token.username) != key
+        }
+        self._save_remember_tokens(tokens)
 
     def register_user(self, username: str, password: str) -> RegistrationResult:
         """Create a normal user and return the one-time binding key."""
@@ -365,20 +430,81 @@ class WebUIAuth:
             raise AuthKeyAlreadyUsed("auth_key 已使用")
         raise AuthKeyInvalid("auth_key 无效")
 
+    def issue_password_reset_key(
+        self,
+        user_id: str,
+        platform: str | None = None,
+    ) -> PasswordResetResult:
+        """Generate a one-time password reset key for a bound platform user."""
+        normalized_user_id = user_id.strip()
+        normalized_platform = platform.strip() if platform else None
+        if not normalized_user_id:
+            raise UserManagementError("平台账号无效")
+
+        users = self._load_users()
+        user = self._find_bound_user(
+            users,
+            normalized_user_id,
+            normalized_platform,
+        )
+        if user is None:
+            raise UserManagementError("当前平台账号未绑定 WebUI 用户")
+
+        reset_key = secrets.token_urlsafe(24)
+        user.password_reset_key_hash = _hash_auth_key(reset_key)
+        user.password_reset_expires_at = _utc_now() + PASSWORD_RESET_TTL
+        users[self._user_key(user.username)] = user
+        self._save_users(users)
+        return PasswordResetResult(user=user, reset_key=reset_key)
+
+    def reset_password_with_key(
+        self,
+        reset_key: str,
+        new_password: str,
+    ) -> StoredWebUIUser:
+        """Reset a normal user's password with a one-time reset key."""
+        normalized_key = reset_key.strip()
+        if not normalized_key:
+            raise UserManagementError("reset key 无效")
+        if not new_password:
+            raise UserManagementError("密码不能为空")
+
+        key_hash = _hash_auth_key(normalized_key)
+        users = self._load_users()
+        matched_expired = False
+        for user in users.values():
+            if user.password_reset_key_hash != key_hash:
+                continue
+            expires_at = user.password_reset_expires_at
+            if expires_at is None or _aware_utc(expires_at) < _utc_now():
+                matched_expired = True
+                continue
+
+            user.password_hash = hash_password(new_password)
+            user.password_reset_key_hash = None
+            user.password_reset_expires_at = None
+            users[self._user_key(user.username)] = user
+            self._save_users(users)
+            self.revoke_user_remember_tokens(user.username)
+            return user
+
+        if matched_expired:
+            raise UserManagementError("reset key 已过期")
+        raise UserManagementError("reset key 无效")
+
     def is_user_bound(self, user_id: str, platform: str | None = None) -> bool:
         """Return True if any normal WebUI account is bound to this platform user."""
         normalized_user_id = user_id.strip()
         normalized_platform = platform.strip() if platform else None
         if not normalized_user_id:
             return False
-        return any(
-            user.bound_user_id == normalized_user_id
-            and (
-                normalized_platform is None
-                or user.bound_platform is None
-                or user.bound_platform == normalized_platform
+        return (
+            self._find_bound_user(
+                self._load_users(),
+                normalized_user_id,
+                normalized_platform,
             )
-            for user in self._load_users().values()
+            is not None
         )
 
     def verify_user_password(self, username: str, password: str) -> bool:
@@ -418,6 +544,10 @@ class WebUIAuth:
             user.password_hash = hash_password(new_password)
         users[new_key] = user
         self._save_users(users)
+        if new_key != old_key:
+            self.revoke_user_remember_tokens(username)
+        if new_password is not None:
+            self.revoke_user_remember_tokens(user.username)
         return user
 
     def change_user_password(
@@ -452,6 +582,7 @@ class WebUIAuth:
             raise UserManagementError("用户不存在")
         users.pop(key)
         self._save_users(users)
+        self.revoke_user_remember_tokens(username)
 
     def create_router(self) -> APIRouter:
         """Build login, registration, and logout routes."""
@@ -465,6 +596,8 @@ class WebUIAuth:
                 "login.html.jinja2",
                 request=request,
                 admin_configured=self.admin_configured,
+                username=request.cookies.get(USERNAME_COOKIE, ""),
+                remember_username=USERNAME_COOKIE in request.cookies,
             )
 
         @router.post("/ruok/login", response_model=None)
@@ -472,6 +605,8 @@ class WebUIAuth:
             request: Request,
             username: str = Form(...),
             password: str = Form(...),
+            remember_username: str = Form(""),
+            remember_login: str = Form(""),
         ) -> HTMLResponse | RedirectResponse:
             if not self.admin_configured:
                 return render(
@@ -479,6 +614,8 @@ class WebUIAuth:
                     request=request,
                     admin_configured=False,
                     error="未配置 RUOK__WEBUI_ADMIN_PASSWORD，WebUI 登录不可用",
+                    username=username.strip(),
+                    remember_username=bool(remember_username),
                 )
 
             user = self.authenticate(username, password)
@@ -489,10 +626,88 @@ class WebUIAuth:
                     admin_configured=True,
                     error="用户名或密码错误",
                     username=username.strip(),
+                    remember_username=bool(remember_username),
                 )
 
             self.login_session(request, user)
-            return RedirectResponse(url="/ruok", status_code=302)
+            response = RedirectResponse(url="/ruok", status_code=302)
+            if remember_username:
+                response.set_cookie(
+                    USERNAME_COOKIE,
+                    user.username,
+                    max_age=int(REMEMBER_TOKEN_TTL.total_seconds()),
+                    httponly=False,
+                    samesite="lax",
+                )
+            else:
+                response.delete_cookie(USERNAME_COOKIE)
+            if remember_login:
+                token_value = self.issue_remember_token(user)
+                request.session[self._session_remember_token_id_key] = (
+                    token_value.split(".", 1)[0]
+                )
+                response.set_cookie(
+                    REMEMBER_COOKIE,
+                    token_value,
+                    max_age=int(REMEMBER_TOKEN_TTL.total_seconds()),
+                    httponly=True,
+                    samesite="lax",
+                    secure=request.url.scheme == "https",
+                )
+            else:
+                response.delete_cookie(REMEMBER_COOKIE)
+            return response
+
+        @router.get(
+            "/ruok/reset-password",
+            response_class=HTMLResponse,
+            response_model=None,
+        )
+        async def reset_password_page(request: Request) -> HTMLResponse:
+            return render(
+                "reset_password.html.jinja2",
+                request=request,
+                admin_configured=self.admin_configured,
+                reset_key=request.query_params.get("reset_key", ""),
+            )
+
+        @router.post(
+            "/ruok/reset-password",
+            response_class=HTMLResponse,
+            response_model=None,
+        )
+        async def reset_password_action(
+            request: Request,
+            reset_key: str = Form(...),
+            new_password: str = Form(...),
+            new_password_confirm: str = Form(""),
+        ) -> HTMLResponse:
+            if new_password_confirm and new_password != new_password_confirm:
+                return render(
+                    "reset_password.html.jinja2",
+                    request=request,
+                    admin_configured=self.admin_configured,
+                    error="两次输入的密码不一致",
+                    reset_key=reset_key.strip(),
+                )
+            try:
+                user = self.reset_password_with_key(reset_key, new_password)
+            except UserManagementError as exc:
+                return render(
+                    "reset_password.html.jinja2",
+                    request=request,
+                    admin_configured=self.admin_configured,
+                    error=str(exc),
+                    reset_key=reset_key.strip(),
+                )
+
+            return render(
+                "reset_password.html.jinja2",
+                request=request,
+                admin_configured=self.admin_configured,
+                success=True,
+                username=user.username,
+            )
 
         @router.get("/ruok/register", response_class=HTMLResponse, response_model=None)
         async def register_page(request: Request) -> HTMLResponse:
@@ -545,8 +760,11 @@ class WebUIAuth:
 
         @router.get("/ruok/logout")
         async def logout(request: Request) -> RedirectResponse:
+            self.revoke_remember_token_value(request.cookies.get(REMEMBER_COOKIE))
             request.session.clear()
-            return RedirectResponse(url="/ruok/login", status_code=302)
+            response = RedirectResponse(url="/ruok/login", status_code=302)
+            response.delete_cookie(REMEMBER_COOKIE)
+            return response
 
         return router
 
@@ -572,6 +790,86 @@ class WebUIAuth:
             auth_key_expires_at=user.auth_key_expires_at,
             admin_source=admin_source,
         )
+
+    def _current_user_from_remember_cookie(
+        self,
+        request: Request,
+    ) -> CurrentWebUIUser | None:
+        token_value = request.cookies.get(REMEMBER_COOKIE)
+        token_id, secret = self._split_remember_token(token_value)
+        if token_id is None or secret is None:
+            return None
+
+        tokens = self._load_remember_tokens()
+        token = tokens.get(token_id)
+        if token is None:
+            return None
+        if _aware_utc(token.expires_at) < _utc_now():
+            tokens.pop(token_id)
+            self._save_remember_tokens(tokens)
+            return None
+        if not secrets.compare_digest(token.token_hash, _hash_auth_key(secret)):
+            return None
+
+        user = self._current_by_username(token.username)
+        if user is None:
+            tokens.pop(token_id)
+            self._save_remember_tokens(tokens)
+            return None
+        if token.credential_stamp != self._credential_stamp(user.username):
+            tokens.pop(token_id)
+            self._save_remember_tokens(tokens)
+            return None
+
+        self.login_session(request, user)
+        request.session[self._session_remember_token_id_key] = token_id
+        return user
+
+    def _current_by_username(self, username: str) -> CurrentWebUIUser | None:
+        if username.strip().casefold() == ADMIN_USERNAME:
+            if not self.admin_configured:
+                return None
+            return CurrentWebUIUser(
+                username=ADMIN_USERNAME,
+                role="admin",
+                admin_source="builtin",
+            )
+        user = self.get_user(username)
+        return self._current_from_stored(user) if user else None
+
+    def _credential_stamp(self, username: str) -> str:
+        normalized = username.strip()
+        if normalized.casefold() == ADMIN_USERNAME:
+            return _hash_auth_key(f"admin:{self._config.webui_admin_password}")
+        user = self.get_user(normalized)
+        if user is None:
+            return ""
+        stamp = f"user:{self._user_key(user.username)}:{user.password_hash}"
+        return _hash_auth_key(stamp)
+
+    @staticmethod
+    def _split_remember_token(token_value: str | None) -> tuple[str | None, str | None]:
+        if not token_value or "." not in token_value:
+            return None, None
+        token_id, secret = token_value.split(".", 1)
+        if not token_id or not secret:
+            return None, None
+        return token_id, secret
+
+    def _find_bound_user(
+        self,
+        users: dict[str, StoredWebUIUser],
+        user_id: str,
+        platform: str | None,
+    ) -> StoredWebUIUser | None:
+        for user in users.values():
+            if user.bound_user_id != user_id:
+                continue
+            if platform is None or user.bound_platform is None:
+                return user
+            if user.bound_platform == platform:
+                return user
+        return None
 
     def _binding_conflict(
         self,
@@ -629,6 +927,52 @@ class WebUIAuth:
             ]
         }
         self._users_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _load_remember_tokens(self) -> dict[str, StoredRememberToken]:
+        if not self._remember_tokens_path.exists():
+            return {}
+
+        try:
+            raw = json.loads(self._remember_tokens_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+        rows = raw.get("tokens", raw) if isinstance(raw, dict) else raw
+        if not isinstance(rows, list):
+            return {}
+
+        tokens: dict[str, StoredRememberToken] = {}
+        changed = False
+        now = _utc_now()
+        for row in rows:
+            try:
+                token = StoredRememberToken.model_validate(row)
+            except ValueError:
+                changed = True
+                continue
+            if _aware_utc(token.expires_at) < now:
+                changed = True
+                continue
+            tokens[token.token_id] = token
+        if changed:
+            self._save_remember_tokens(tokens)
+        return tokens
+
+    def _save_remember_tokens(self, tokens: dict[str, StoredRememberToken]) -> None:
+        self._remember_tokens_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "tokens": [
+                token.model_dump(mode="json")
+                for token in sorted(
+                    tokens.values(),
+                    key=lambda item: item.created_at,
+                )
+            ]
+        }
+        self._remember_tokens_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
