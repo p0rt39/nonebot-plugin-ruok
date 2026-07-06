@@ -123,6 +123,23 @@ def _error_html(message: str, status_code: int = 400) -> HTMLResponse:
     )
 
 
+def _filter_users(users, search: str):
+    """Filter stored WebUI users by username or bound platform identity."""
+    query = search.strip().casefold()
+    if not query:
+        return users
+
+    def _matches(user) -> bool:
+        values = (
+            user.username,
+            user.bound_user_id or "",
+            user.bound_platform or "",
+        )
+        return any(query in value.casefold() for value in values)
+
+    return [user for user in users if _matches(user)]
+
+
 def _split_session_description(description: str) -> tuple[str, str]:
     """Split a session description into prose and fenced code content."""
     marker = "```"
@@ -300,17 +317,25 @@ def create_webui_router(
     @router.get("/ruok/users", response_class=HTMLResponse)
     async def page_users(
         request: Request,
+        search: str = "",
         user: CurrentWebUIUser = Depends(_login_guard),
     ) -> HTMLResponse:
         try:
             stored_user = (
                 None if user.username == "admin" else auth.get_user(user.username)
             )
+            users = _filter_users(auth.list_users(), search) if user.is_admin else []
+            template = (
+                "_users_panel.html.jinja2"
+                if request.headers.get("hx-request") == "true"
+                else "users.html.jinja2"
+            )
             return render(
-                "users.html.jinja2",
+                template,
                 request=request,
                 current_user=user,
-                users=auth.list_users() if user.is_admin else [],
+                users=users,
+                user_search=search,
                 stored_user=stored_user,
                 auth=auth,
             )
@@ -630,13 +655,19 @@ def create_webui_router(
                 status_code=500,
             )
 
-    def _render_users_panel(request: Request, user: CurrentWebUIUser) -> HTMLResponse:
+    def _render_users_panel(
+        request: Request,
+        user: CurrentWebUIUser,
+        *,
+        search: str = "",
+    ) -> HTMLResponse:
         stored_user = None if user.username == "admin" else auth.get_user(user.username)
         return render(
             "_users_panel.html.jinja2",
             request=request,
             current_user=user,
-            users=auth.list_users() if user.is_admin else [],
+            users=_filter_users(auth.list_users(), search) if user.is_admin else [],
+            user_search=search,
             stored_user=stored_user,
             auth=auth,
         )
@@ -646,6 +677,7 @@ def create_webui_router(
         request: Request,
         username: str = Form(...),
         password: str = Form(...),
+        search: str = Form(""),
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
@@ -665,7 +697,8 @@ def create_webui_router(
             "_users_panel.html.jinja2",
             request=request,
             current_user=user,
-            users=auth.list_users(),
+            users=_filter_users(auth.list_users(), search),
+            user_search=search,
             stored_user=None,
             auth=auth,
             issued_auth_key=result.auth_key,
@@ -680,6 +713,7 @@ def create_webui_router(
         username: str = Form(...),
         new_username: str = Form(""),
         new_password: str = Form(""),
+        search: str = Form(""),
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
@@ -688,7 +722,7 @@ def create_webui_router(
                 new_username=new_username or None,
                 new_password=new_password or None,
             )
-            return _render_users_panel(request, user)
+            return _render_users_panel(request, user, search=search)
         except UserManagementError as exc:
             return _error_html(str(exc))
 
@@ -696,6 +730,7 @@ def create_webui_router(
     async def action_user_auth_key(
         request: Request,
         username: str = Form(...),
+        search: str = Form(""),
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
@@ -715,7 +750,8 @@ def create_webui_router(
             "_users_panel.html.jinja2",
             request=request,
             current_user=user,
-            users=auth.list_users(),
+            users=_filter_users(auth.list_users(), search),
+            user_search=search,
             stored_user=None,
             auth=auth,
             issued_auth_key=result.auth_key,
@@ -728,11 +764,12 @@ def create_webui_router(
     async def action_user_clear_binding(
         request: Request,
         username: str = Form(...),
+        search: str = Form(""),
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             auth.clear_binding(username)
-            return _render_users_panel(request, user)
+            return _render_users_panel(request, user, search=search)
         except UserManagementError as exc:
             return _error_html(str(exc))
 
@@ -740,11 +777,12 @@ def create_webui_router(
     async def action_user_delete(
         request: Request,
         username: str = Form(...),
+        search: str = Form(""),
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
             auth.delete_user(username)
-            return _render_users_panel(request, user)
+            return _render_users_panel(request, user, search=search)
         except UserManagementError as exc:
             return _error_html(str(exc))
 

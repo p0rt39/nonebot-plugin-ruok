@@ -13,31 +13,55 @@
 {% endif %}
 
 {% if current_user.is_admin %}
-<div class="user-admin-grid">
-    <article>
-        <h4>新增普通用户</h4>
-        <form hx-post="/ruok/_actions/user-create"
-              hx-target="#users-panel" hx-swap="outerHTML">
-            <label>
-                用户名
-                <input type="text" name="username" required autocomplete="off">
-            </label>
-            <label>
-                初始密码
-                <input type="password" name="password" required autocomplete="new-password">
-            </label>
-            <button type="submit">创建并生成绑定码</button>
-        </form>
-        <p>
-            <small>
-                内置 <code>admin</code> 账户由 <code>RUOK__WEBUI_ADMIN_PASSWORD</code> 管理。
-                绑定到 NoneBot SUPERUSERS 的普通账号会动态获得管理员权限。
-            </small>
-        </p>
-    </article>
+<div class="user-admin-layout">
+    <div class="user-toolbar">
+        <article>
+            <h4>新增普通用户</h4>
+            <form hx-post="/ruok/_actions/user-create"
+                  hx-target="#users-panel" hx-swap="outerHTML">
+                <input type="hidden" name="search" value="{{ user_search or '' }}">
+                <div class="grid">
+                    <label>
+                        用户名
+                        <input type="text" name="username" required autocomplete="off">
+                    </label>
+                    <label>
+                        初始密码
+                        <input type="password" name="password" required autocomplete="new-password">
+                    </label>
+                </div>
+                <button type="submit">创建并生成绑定码</button>
+            </form>
+        </article>
 
+        <article>
+            <h4>用户检索</h4>
+            <form class="user-search-form"
+                  hx-get="/ruok/users"
+                  hx-target="#users-panel"
+                  hx-swap="outerHTML">
+                <label>
+                    搜索用户名、平台账号或平台名
+                    <input type="search" name="search" value="{{ user_search or '' }}"
+                           placeholder="alice / 10001 / OneBot">
+                </label>
+                <button type="submit" class="secondary outline">搜索</button>
+            </form>
+            <p>
+                <small>
+                    内置 <code>admin</code> 账户由 <code>RUOK__WEBUI_ADMIN_PASSWORD</code> 管理。
+                    绑定到 NoneBot SUPERUSERS 的普通账号会动态获得管理员权限。
+                </small>
+            </p>
+        </article>
+    </div>
+
+    <p class="metric-label">
+        {% if user_search %}搜索 “{{ user_search }}” ，{% endif %}
+        显示 {{ users | length }} 个普通用户
+    </p>
     <section class="user-card-list">
-        <article class="user-card">
+        <article class="user-card user-card--readonly">
             <header class="user-card__header">
                 <div>
                     <strong>admin</strong>
@@ -50,45 +74,49 @@
 
         {% for user in users %}
         <article class="user-card">
-            <header class="user-card__header">
-                <div>
-                    <strong style="overflow-wrap:anywhere;">{{ user.username }}</strong>
-                    <p class="metric-label">
-                        创建于 {{ user.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
-                    </p>
-                </div>
-                {% if auth.is_superuser_account(user) %}
-                <span class="badge badge-ok">SUPERUSER 管理员</span>
-                {% else %}
-                <span class="badge badge-warn">普通用户</span>
-                {% endif %}
-            </header>
+            <div class="user-card__main">
+                <header class="user-card__header">
+                    <div>
+                        <strong style="overflow-wrap:anywhere;">{{ user.username }}</strong>
+                        <p class="metric-label">
+                            创建于 {{ user.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
+                        </p>
+                    </div>
+                    {% if auth.is_superuser_account(user) %}
+                    <span class="badge badge-ok">SUPERUSER 管理员</span>
+                    {% else %}
+                    <span class="badge badge-warn">普通用户</span>
+                    {% endif %}
+                </header>
 
-            <dl class="user-meta">
-                <div>
-                    <dt>绑定账号</dt>
-                    <dd>{{ user.bound_user_id or '未绑定' }}</dd>
-                </div>
-                <div>
-                    <dt>平台</dt>
-                    <dd>{{ user.bound_platform or '—' }}</dd>
-                </div>
-                <div>
-                    <dt>绑定码</dt>
-                    <dd>
-                        {% if user.auth_key_expires_at %}
-                        有效至 {{ user.auth_key_expires_at.astimezone().strftime('%m-%d %H:%M') }}
-                        {% else %}
-                        —
-                        {% endif %}
-                    </dd>
-                </div>
-            </dl>
+                <dl class="user-meta">
+                    <div>
+                        <dt>绑定账号</dt>
+                        <dd>{{ user.bound_user_id or '未绑定' }}</dd>
+                    </div>
+                    <div>
+                        <dt>平台</dt>
+                        <dd>{{ user.bound_platform or '—' }}</dd>
+                    </div>
+                    <div>
+                        <dt>绑定码</dt>
+                        <dd>
+                            {% if user.auth_key_expires_at %}
+                            有效至 {{ user.auth_key_expires_at.astimezone().strftime('%m-%d %H:%M') }}
+                            {% else %}
+                            —
+                            {% endif %}
+                        </dd>
+                    </div>
+                </dl>
+            </div>
 
             <div class="user-card__actions">
-                <form hx-post="/ruok/_actions/user-update"
+                <form class="user-edit-form"
+                      hx-post="/ruok/_actions/user-update"
                       hx-target="#users-panel" hx-swap="outerHTML">
                     <input type="hidden" name="username" value="{{ user.username }}">
+                    <input type="hidden" name="search" value="{{ user_search or '' }}">
                     <label>
                         用户名
                         <input type="text" name="new_username" value="{{ user.username }}" required>
@@ -101,26 +129,35 @@
                     <button type="submit" class="secondary outline">保存</button>
                 </form>
 
-                <form hx-post="/ruok/_actions/user-auth-key"
-                      hx-target="#users-panel" hx-swap="outerHTML">
-                    <input type="hidden" name="username" value="{{ user.username }}">
-                    <button type="submit" class="secondary outline">生成换绑码</button>
-                </form>
+                <div class="user-button-row">
+                    <form hx-post="/ruok/_actions/user-auth-key"
+                          hx-target="#users-panel" hx-swap="outerHTML">
+                        <input type="hidden" name="username" value="{{ user.username }}">
+                        <input type="hidden" name="search" value="{{ user_search or '' }}">
+                        <button type="submit" class="secondary outline">换绑码</button>
+                    </form>
 
-                <form hx-post="/ruok/_actions/user-clear-binding"
-                      hx-target="#users-panel" hx-swap="outerHTML"
-                      hx-confirm="确定清除「{{ user.username }}」的绑定？">
-                    <input type="hidden" name="username" value="{{ user.username }}">
-                    <button type="submit" class="secondary outline">清除绑定</button>
-                </form>
+                    <form hx-post="/ruok/_actions/user-clear-binding"
+                          hx-target="#users-panel" hx-swap="outerHTML"
+                          hx-confirm="确定清除「{{ user.username }}」的绑定？">
+                        <input type="hidden" name="username" value="{{ user.username }}">
+                        <input type="hidden" name="search" value="{{ user_search or '' }}">
+                        <button type="submit" class="secondary outline">清除绑定</button>
+                    </form>
 
-                <form hx-post="/ruok/_actions/user-delete"
-                      hx-target="#users-panel" hx-swap="outerHTML"
-                      hx-confirm="确定删除用户「{{ user.username }}」？">
-                    <input type="hidden" name="username" value="{{ user.username }}">
-                    <button type="submit" class="secondary outline">删除用户</button>
-                </form>
+                    <form hx-post="/ruok/_actions/user-delete"
+                          hx-target="#users-panel" hx-swap="outerHTML"
+                          hx-confirm="确定删除用户「{{ user.username }}」？">
+                        <input type="hidden" name="username" value="{{ user.username }}">
+                        <input type="hidden" name="search" value="{{ user_search or '' }}">
+                        <button type="submit" class="secondary outline">删除用户</button>
+                    </form>
+                </div>
             </div>
+        </article>
+        {% else %}
+        <article>
+            <p>没有匹配的用户。</p>
         </article>
         {% endfor %}
     </section>

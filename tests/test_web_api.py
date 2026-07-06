@@ -444,6 +444,39 @@ def test_webui_users_page_admin_can_manage_users(tmp_path: Path) -> None:
     assert users == []
 
 
+def test_webui_users_page_filters_users(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path)
+    alice = auth.register_user("alice", "secret")
+    bob = auth.register_user("bob", "secret")
+    auth.bind_auth_key(alice.auth_key, "10001", "OneBot V11")
+    auth.bind_auth_key(bob.auth_key, "20002", "Console")
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/users", params={"search": "10001"})
+
+    assert response.status_code == 200
+    assert "alice" in response.text
+    assert "bob" not in response.text
+    assert "搜索 “10001”" in response.text
+
+    partial = client.get(
+        "/ruok/users",
+        params={"search": "console"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert partial.status_code == 200
+    assert 'id="users-panel"' in partial.text
+    assert "<!DOCTYPE html>" not in partial.text
+    assert "<strong" in partial.text
+    assert ">bob</strong>" in partial.text
+    assert ">alice</strong>" not in partial.text
+
+
 def test_webui_normal_user_can_change_password_rebind_and_delete(
     tmp_path: Path,
 ) -> None:

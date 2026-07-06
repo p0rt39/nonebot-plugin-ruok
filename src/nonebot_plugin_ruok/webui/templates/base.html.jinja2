@@ -222,11 +222,30 @@
         }
 
         /* ── User management ── */
-        .user-admin-grid {
+        .user-admin-layout {
             display: grid;
-            grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.5fr);
             gap: 1rem;
-            align-items: start;
+        }
+        .user-toolbar {
+            display: grid;
+            grid-template-columns: minmax(260px, 0.75fr) minmax(280px, 1.25fr);
+            gap: 1rem;
+            align-items: stretch;
+        }
+        .user-toolbar article {
+            margin: 0;
+            height: 100%;
+        }
+        .user-search-form {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.6rem;
+            align-items: end;
+        }
+        .user-search-form label,
+        .user-search-form input,
+        .user-search-form button {
+            margin-bottom: 0;
         }
         .user-card-list {
             display: grid;
@@ -234,7 +253,17 @@
         }
         .user-card {
             display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr);
+            gap: 1rem;
+            align-items: start;
+        }
+        .user-card--readonly {
+            grid-template-columns: 1fr;
+        }
+        .user-card__main {
+            display: grid;
             gap: 0.8rem;
+            min-width: 0;
         }
         .user-card__header,
         .account-header {
@@ -264,7 +293,28 @@
         .user-card__actions {
             display: grid;
             gap: 0.6rem;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            align-content: start;
+        }
+        .user-edit-form {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+            gap: 0.55rem;
+            align-items: end;
+        }
+        .user-edit-form label,
+        .user-edit-form input,
+        .user-edit-form button {
+            margin-bottom: 0;
+        }
+        .user-button-row {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.55rem;
+        }
+        .user-button-row button {
+            width: 100%;
+            min-height: 2.55rem;
+            margin-bottom: 0;
         }
         .user-card__actions form,
         .account-actions form {
@@ -572,7 +622,13 @@
             .card-grid { grid-template-columns: 1fr; }
             .gauge-card { min-width: 100px !important; }
             .gauge-card svg { width: 90px !important; height: 90px !important; }
-            .user-admin-grid { grid-template-columns: 1fr; }
+            .user-toolbar,
+            .user-card,
+            .user-edit-form,
+            .user-search-form,
+            .user-button-row {
+                grid-template-columns: 1fr;
+            }
         }
 
         /* ── Toast notifications ── */
