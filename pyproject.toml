@@ -64,6 +64,7 @@ search = "name = \"nonebot-plugin-ruok\"\nversion = \"{current_version}\""
 replace = "name = \"nonebot-plugin-ruok\"\nversion = \"{new_version}\""
 
 [tool.coverage.report]
+fail_under = 70
 exclude_lines = [
   "raise NotImplementedError",
   "if TYPE_CHECKING:",
