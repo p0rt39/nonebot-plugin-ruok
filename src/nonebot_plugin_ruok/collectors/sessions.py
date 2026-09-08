@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import json
 import hashlib
 import secrets
@@ -48,6 +49,13 @@ def _make_signature(plugin: str, exc: str, msg: str) -> str:
 # ────────────────────────────────
 
 
+_SESSION_ID_RE = re.compile(r"^ruok-[0-9a-f]{8}$")
+# A few pre-existing installations (and old exports) contain non-canonical
+# IDs.  Keep those readable while still restricting them to a filename-safe
+# character set; newly generated IDs always use ``_SESSION_ID_RE``.
+_LEGACY_SESSION_ID_RE = re.compile(r"^ruok-[A-Za-z0-9_-]{1,64}$")
+
+
 def _sessions_dir(data_dir: Path) -> Path:
     d = data_dir / "sessions"
     d.mkdir(parents=True, exist_ok=True)
@@ -55,7 +63,20 @@ def _sessions_dir(data_dir: Path) -> Path:
 
 
 def _session_path(data_dir: Path, session_id: str) -> Path:
-    return _sessions_dir(data_dir) / f"{session_id}.json"
+    if not isinstance(session_id, str) or not (
+        _SESSION_ID_RE.fullmatch(session_id)
+        or _LEGACY_SESSION_ID_RE.fullmatch(session_id)
+    ):
+        raise ValueError("invalid session id")
+
+    sessions_dir = _sessions_dir(data_dir).resolve()
+    path = (sessions_dir / f"{session_id}.json").resolve()
+    try:
+        path.relative_to(sessions_dir)
+    except ValueError as exc:
+        # Defense in depth if the validation rules are relaxed in the future.
+        raise ValueError("session path escapes storage directory") from exc
+    return path
 
 
 def _plugin_impacts_path(data_dir: Path) -> Path:
@@ -68,7 +89,10 @@ def _save_session(data_dir: Path, session: Session) -> None:
 
 
 def _load_session(data_dir: Path, session_id: str) -> Session | None:
-    path = _session_path(data_dir, session_id)
+    try:
+        path = _session_path(data_dir, session_id)
+    except ValueError:
+        return None
     if not path.exists():
         return None
     return Session.model_validate_json(path.read_text(encoding="utf-8"))

@@ -76,6 +76,28 @@ class TestCreateAndGetSession:
 
         assert get_session(tmp_path, "ruok-nonexist") is None
 
+    def test_rejects_path_traversal_session_id(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            _session_path,
+            update_session,
+        )
+
+        outside = tmp_path / "outside.json"
+        outside.write_text('{"sentinel": true}', encoding="utf-8")
+
+        malicious_id = "../outside"
+        try:
+            _session_path(tmp_path, malicious_id)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("path traversal session ID was accepted")
+
+        assert get_session(tmp_path, malicious_id) is None
+        assert update_session(tmp_path, malicious_id, {"status": "solved"}) is None
+        assert outside.read_text(encoding="utf-8") == '{"sentinel": true}'
+
     def test_create_automatic(self, tmp_path: Path) -> None:
         from nonebot_plugin_ruok.protocol import ReporterInfo
         from nonebot_plugin_ruok.collectors.sessions import create_session
