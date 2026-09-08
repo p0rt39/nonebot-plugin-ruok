@@ -6,7 +6,6 @@ import html
 import asyncio
 from typing import Any
 from pathlib import Path
-from datetime import datetime
 from urllib.parse import quote
 from collections.abc import Callable
 
@@ -54,6 +53,7 @@ from ..collector import (
     get_linked_sessions,
     collect_all_statuses,
     collect_fast_metrics,
+    parse_filter_datetime,
     confirm_session_plugins,
     _collect_plugin_inventory,
     list_module_related_sessions,
@@ -471,8 +471,8 @@ def create_webui_router(
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            first_seen_after = datetime.fromisoformat(after) if after else None
-            first_seen_before = datetime.fromisoformat(before) if before else None
+            first_seen_after = parse_filter_datetime(after) if after else None
+            first_seen_before = parse_filter_datetime(before) if before else None
             sessions = list_sessions(
                 data_dir,
                 status=status if status else None,
@@ -502,6 +502,8 @@ def create_webui_router(
                     data_dir, config, module_name
                 ),
             )
+        except ValueError:
+            return _error_html("Invalid ISO datetime filter", status_code=400)
         except Exception as exc:
             sid = _handle_ruok_error(exc, "page_sessions", data_dir)
             return HTMLResponse(
@@ -715,8 +717,8 @@ def create_webui_router(
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            first_seen_after = datetime.fromisoformat(after) if after else None
-            first_seen_before = datetime.fromisoformat(before) if before else None
+            first_seen_after = parse_filter_datetime(after) if after else None
+            first_seen_before = parse_filter_datetime(before) if before else None
             sessions = list_sessions(
                 data_dir,
                 status=status if status else None,
@@ -736,6 +738,8 @@ def create_webui_router(
                     data_dir, config, module_name
                 ),
             )
+        except ValueError:
+            return _error_html("Invalid ISO datetime filter", status_code=400)
         except Exception as exc:
             sid = _handle_ruok_error(exc, "partial_sessions", data_dir)
             return HTMLResponse(

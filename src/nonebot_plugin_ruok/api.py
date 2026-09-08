@@ -32,6 +32,7 @@ from .collector import (
     get_linked_sessions,
     collect_all_statuses,
     dispatch_notification,
+    parse_filter_datetime,
     confirm_session_plugins,
 )
 
@@ -132,10 +133,14 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         ),
     ) -> list[dict[str, Any]]:
         """List sessions with optional filters."""
-        from datetime import datetime as dt
-
-        first_seen_after = dt.fromisoformat(after) if after else None
-        first_seen_before = dt.fromisoformat(before) if before else None
+        try:
+            first_seen_after = parse_filter_datetime(after) if after else None
+            first_seen_before = parse_filter_datetime(before) if before else None
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid ISO datetime filter",
+            ) from exc
         sessions = list_sessions(
             data_dir,
             status=status,

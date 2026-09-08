@@ -33,6 +33,24 @@ def test_sessions_stats_route_is_not_shadowed(tmp_path: Path) -> None:
     assert response.json()["total"] == 0
 
 
+def test_api_session_datetime_filters_accept_naive_utc_and_reject_invalid(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    create_session(tmp_path, "music", "issue", ReporterInfo(type="user"))
+    client = _client(ScopedConfig(), tmp_path)
+
+    valid = client.get("/ruok/api/sessions?after=2000-01-01T00:00:00")
+    invalid = client.get("/ruok/api/sessions?after=not-a-datetime")
+
+    assert valid.status_code == 200
+    assert len(valid.json()) == 1
+    assert invalid.status_code == 400
+
+
 def test_api_create_session_dispatches_rule_notification(
     tmp_path: Path,
     monkeypatch,

@@ -30,6 +30,14 @@ class SessionUpdateValidationError(ValueError):
     """Raised when requested session updates would make persisted data invalid."""
 
 
+def parse_filter_datetime(value: str) -> datetime:
+    """Parse an ISO filter timestamp and normalize it to UTC."""
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 # ────────────────────────────────
 # 1. Low-level helpers
 # ────────────────────────────────
