@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import asyncio
 import logging
-from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone
 from collections.abc import Callable
@@ -160,43 +159,48 @@ def _make_log_sink(
     def _sink(message: str) -> None:
         try:
             record: dict = json.loads(message)
-        except (json.JSONDecodeError, TypeError):
-            return
+            if not isinstance(record, dict):
+                return
 
-        level_info: dict = record.get("level", {})
-        if not isinstance(level_info, dict):
-            return
-        level_name: str = level_info.get("name", "")
-        if level_name not in ("ERROR", "CRITICAL"):
-            return
+            level_info = record.get("level", {})
+            if not isinstance(level_info, dict):
+                return
+            if level_info.get("name") not in ("ERROR", "CRITICAL"):
+                return
 
-        plugin_id: str = record["name"]
-        msg_text: str = record["message"]
-        exception: Any = record.get("exception")
-        exception_str = ""
-        if isinstance(exception, dict):
-            exception_str = exception.get("value", "")
+            plugin_id = record.get("name")
+            msg_text = record.get("message")
+            if not isinstance(plugin_id, str) or not isinstance(msg_text, str):
+                return
 
-        signature = _make_signature(plugin_id, exception_str, msg_text)
+            exception = record.get("exception")
+            exception_str = ""
+            if isinstance(exception, dict):
+                value = exception.get("value", "")
+                exception_str = value if isinstance(value, str) else str(value)
 
-        existing = _find_existing_session(data_dir, signature)
-        if existing:
-            existing.last_seen_at = datetime.now(timezone.utc)
-            _persist_automatic_session_update(data_dir, existing)
-            return
+            signature = _make_signature(plugin_id, exception_str, msg_text)
 
-        session = Session(
-            session_id=_gen_session_id(),
-            source="automatic",
-            status="pending",
-            module_name=plugin_id,
-            error_signature=signature,
-            reporter=ReporterInfo(type="automatic"),
-            description=f"```\n{msg_text}\n{exception_str}\n```",
-        )
-        _persist_automatic_session_update(data_dir, session, created=True)
-        logger.warning(f"RUOK: new session {session.session_id} for {plugin_id}")
-        _schedule_session_notification(session, config, data_dir, loop)
+            existing = _find_existing_session(data_dir, signature)
+            if existing:
+                existing.last_seen_at = datetime.now(timezone.utc)
+                _persist_automatic_session_update(data_dir, existing)
+                return
+
+            session = Session(
+                session_id=_gen_session_id(),
+                source="automatic",
+                status="pending",
+                module_name=plugin_id,
+                error_signature=signature,
+                reporter=ReporterInfo(type="automatic"),
+                description=f"```\n{msg_text}\n{exception_str}\n```",
+            )
+            _persist_automatic_session_update(data_dir, session, created=True)
+            logger.warning(f"RUOK: new session {session.session_id} for {plugin_id}")
+            _schedule_session_notification(session, config, data_dir, loop)
+        except (json.JSONDecodeError, OSError, TypeError, ValueError, KeyError) as exc:
+            logger.warning(f"RUOK LogMonitor: loguru sink failed: {exc}")
 
     return _sink
 

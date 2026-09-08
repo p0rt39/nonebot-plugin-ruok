@@ -127,6 +127,22 @@ class TestDiskRateTracker:
 
 
 class TestLogMonitor:
+    def test_loguru_sink_ignores_malformed_records(self, tmp_path) -> None:
+        import asyncio
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors.monitor import _make_log_sink
+
+        loop = asyncio.new_event_loop()
+        try:
+            sink = _make_log_sink(ScopedConfig(), tmp_path, loop)
+            sink('{"level": {"name": "ERROR"}}')
+            sink("[]")
+        finally:
+            loop.close()
+
+        assert not (tmp_path / "sessions").exists()
+
     def test_stdlib_log_session_rebuilds_impacts_and_notifies(
         self,
         tmp_path,
