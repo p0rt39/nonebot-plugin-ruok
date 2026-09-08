@@ -44,7 +44,7 @@ jobs:
         run: uv sync --locked
 
       - name: Static typing check
-        run: uvx basedpyright
+        run: uvx basedpyright==1.40.0
 
   test:
     name: Coverage
