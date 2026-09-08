@@ -242,8 +242,11 @@ def update_session(
         if k in allowed:
             data[k] = v
 
-    if "status" in updates and updates["status"] in ("solved", "ignored"):
-        data["resolved_at"] = datetime.now(timezone.utc)
+    if "status" in updates:
+        if updates["status"] in ("solved", "ignored"):
+            data["resolved_at"] = datetime.now(timezone.utc)
+        elif updates["status"] in ("pending", "unsolved"):
+            data["resolved_at"] = None
 
     try:
         session = Session.model_validate(data)

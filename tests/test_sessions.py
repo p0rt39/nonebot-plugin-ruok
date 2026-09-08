@@ -300,6 +300,31 @@ class TestUpdateSession:
         assert updated is not None
         assert updated.resolved_at is not None
 
+    def test_reopening_session_clears_resolved_at(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            update_session,
+        )
+
+        session = create_session(
+            tmp_path,
+            "mod",
+            "desc",
+            ReporterInfo(type="user"),
+        )
+        solved = update_session(tmp_path, session.session_id, {"status": "solved"})
+        reopened = update_session(
+            tmp_path,
+            session.session_id,
+            {"status": "unsolved"},
+        )
+
+        assert solved is not None
+        assert solved.resolved_at is not None
+        assert reopened is not None
+        assert reopened.resolved_at is None
+
     def test_update_notes(self, tmp_path: Path) -> None:
         from nonebot_plugin_ruok.protocol import ReporterInfo
         from nonebot_plugin_ruok.collectors.sessions import (
