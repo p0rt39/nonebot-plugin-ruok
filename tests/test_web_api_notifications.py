@@ -314,6 +314,26 @@ def test_notification_rules_are_loaded_from_webui_storage_only(
     assert [rule.name for rule in rules] == ["superusers"]
 
 
+def test_invalid_persisted_notification_rule_is_ignored(tmp_path: Path) -> None:
+    import json
+
+    from nonebot_plugin_ruok.collectors.notifications import _load_rules
+
+    (tmp_path / "notification_rules.json").write_text(
+        json.dumps(
+            [
+                {"name": "valid"},
+                {"name": "invalid", "cooldown_minutes": "not-a-number"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    rules = _load_rules(tmp_path)
+
+    assert [rule.name for rule in rules] == ["valid"]
+
+
 async def test_dispatch_notification_is_independent_from_auto_session_enabled(
     tmp_path: Path,
     monkeypatch,

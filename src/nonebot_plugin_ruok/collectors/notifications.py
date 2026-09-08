@@ -51,7 +51,15 @@ def _load_rules(data_dir: Path) -> list[NotificationRule]:
         except (json.JSONDecodeError, OSError, ValueError):
             file_rules = []
 
-    rules = [NotificationRule(**rule) for rule in file_rules]
+    rules: list[NotificationRule] = []
+    if not isinstance(file_rules, list):
+        logger.warning("RUOK: notification rules file must contain a JSON array")
+    else:
+        for rule_data in file_rules:
+            try:
+                rules.append(NotificationRule.model_validate(rule_data))
+            except (TypeError, ValueError) as exc:
+                logger.warning(f"RUOK: ignored invalid notification rule: {exc}")
 
     # Auto-create default rule if none exist
     if not rules:
