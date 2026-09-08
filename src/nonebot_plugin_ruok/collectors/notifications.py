@@ -140,6 +140,10 @@ def _is_cooling_down(
         last = datetime.fromisoformat(last_str)
     except ValueError:
         return False
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    else:
+        last = last.astimezone(timezone.utc)
     return datetime.now(timezone.utc) - last < timedelta(minutes=cooldown_minutes)
 
 

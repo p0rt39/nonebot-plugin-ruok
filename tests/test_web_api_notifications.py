@@ -334,6 +334,16 @@ def test_invalid_persisted_notification_rule_is_ignored(tmp_path: Path) -> None:
     assert [rule.name for rule in rules] == ["valid"]
 
 
+def test_naive_cooldown_timestamp_is_interpreted_as_utc() -> None:
+    from datetime import datetime, timezone
+
+    from nonebot_plugin_ruok.collectors.notifications import _is_cooling_down
+
+    cooldowns = {"rule": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}
+
+    assert _is_cooling_down("rule", 1, cooldowns) is True
+
+
 async def test_dispatch_notification_is_independent_from_auto_session_enabled(
     tmp_path: Path,
     monkeypatch,
