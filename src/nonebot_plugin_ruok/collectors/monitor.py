@@ -19,6 +19,7 @@ from .sessions import (
     _find_existing_session,
     _publish_session_event,
     rebuild_plugin_impacts,
+    _automatic_session_lock,
 )
 from ..protocol import Session, ReporterInfo
 
@@ -115,22 +116,23 @@ class _StdlibLogHandler(logging.Handler):
 
             signature = _make_signature(plugin_id, exc_text, msg_text)
 
-            existing = _find_existing_session(self._data_dir, signature)
-            if existing is not None:
-                existing.last_seen_at = datetime.now(timezone.utc)
-                _persist_automatic_session_update(self._data_dir, existing)
-                return
+            with _automatic_session_lock(self._data_dir):
+                existing = _find_existing_session(self._data_dir, signature)
+                if existing is not None:
+                    existing.last_seen_at = datetime.now(timezone.utc)
+                    _persist_automatic_session_update(self._data_dir, existing)
+                    return
 
-            session = Session(
-                session_id=_gen_session_id(),
-                source="automatic",
-                status="pending",
-                module_name=plugin_id,
-                error_signature=signature,
-                reporter=ReporterInfo(type="automatic"),
-                description=(f"```\n{msg_text}\n{exc_text}\n```"),
-            )
-            _persist_automatic_session_update(self._data_dir, session, created=True)
+                session = Session(
+                    session_id=_gen_session_id(),
+                    source="automatic",
+                    status="pending",
+                    module_name=plugin_id,
+                    error_signature=signature,
+                    reporter=ReporterInfo(type="automatic"),
+                    description=(f"```\n{msg_text}\n{exc_text}\n```"),
+                )
+                _persist_automatic_session_update(self._data_dir, session, created=True)
             logger.warning(f"RUOK: new session {session.session_id} for {plugin_id}")
             _schedule_session_notification(
                 session,
@@ -181,22 +183,23 @@ def _make_log_sink(
 
             signature = _make_signature(plugin_id, exception_str, msg_text)
 
-            existing = _find_existing_session(data_dir, signature)
-            if existing:
-                existing.last_seen_at = datetime.now(timezone.utc)
-                _persist_automatic_session_update(data_dir, existing)
-                return
+            with _automatic_session_lock(data_dir):
+                existing = _find_existing_session(data_dir, signature)
+                if existing:
+                    existing.last_seen_at = datetime.now(timezone.utc)
+                    _persist_automatic_session_update(data_dir, existing)
+                    return
 
-            session = Session(
-                session_id=_gen_session_id(),
-                source="automatic",
-                status="pending",
-                module_name=plugin_id,
-                error_signature=signature,
-                reporter=ReporterInfo(type="automatic"),
-                description=f"```\n{msg_text}\n{exception_str}\n```",
-            )
-            _persist_automatic_session_update(data_dir, session, created=True)
+                session = Session(
+                    session_id=_gen_session_id(),
+                    source="automatic",
+                    status="pending",
+                    module_name=plugin_id,
+                    error_signature=signature,
+                    reporter=ReporterInfo(type="automatic"),
+                    description=f"```\n{msg_text}\n{exception_str}\n```",
+                )
+                _persist_automatic_session_update(data_dir, session, created=True)
             logger.warning(f"RUOK: new session {session.session_id} for {plugin_id}")
             _schedule_session_notification(session, config, data_dir, loop)
         except (json.JSONDecodeError, OSError, TypeError, ValueError, KeyError) as exc:

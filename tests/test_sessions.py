@@ -633,3 +633,24 @@ class TestHandleRuokError:
         assert sid1 == sid2
         sessions = list_sessions(tmp_path, module_name="ruok")
         assert len(sessions) == 1
+
+    def test_deduplicates_concurrent_errors(self, tmp_path: Path) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            _handle_ruok_error,
+        )
+
+        def capture(_: int) -> str:
+            try:
+                raise RuntimeError("concurrent dedup test")
+            except RuntimeError as exc:
+                return _handle_ruok_error(exc, "concurrent", tmp_path)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            session_ids = list(executor.map(capture, range(32)))
+
+        sessions = list_sessions(tmp_path, module_name="ruok")
+        assert len(sessions) == 1
+        assert set(session_ids) == {sessions[0].session_id}

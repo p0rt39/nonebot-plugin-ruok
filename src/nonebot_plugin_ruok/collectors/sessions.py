@@ -6,6 +6,7 @@ import re
 import json
 import hashlib
 import secrets
+import threading
 import traceback
 from typing import Any
 from pathlib import Path
@@ -62,6 +63,23 @@ _SESSION_ID_RE = re.compile(r"^ruok-[0-9a-f]{8}$")
 # IDs.  Keep those readable while still restricting them to a filename-safe
 # character set; newly generated IDs always use ``_SESSION_ID_RE``.
 _LEGACY_SESSION_ID_RE = re.compile(r"^ruok-[A-Za-z0-9_-]{1,64}$")
+
+# Automatic sessions are deduplicated by scanning the session directory before
+# writing a new file.  Keep that check-and-write operation atomic for all
+# capture paths in this process (loguru, stdlib logging, and internal errors).
+_AUTOMATIC_SESSION_LOCKS: dict[Path, threading.RLock] = {}
+_AUTOMATIC_SESSION_LOCKS_GUARD = threading.Lock()
+
+
+def _automatic_session_lock(data_dir: Path) -> threading.RLock:
+    """Return the process-wide lock for automatic-session persistence."""
+    key = data_dir.resolve()
+    with _AUTOMATIC_SESSION_LOCKS_GUARD:
+        lock = _AUTOMATIC_SESSION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _AUTOMATIC_SESSION_LOCKS[key] = lock
+        return lock
 
 
 def _sessions_dir(data_dir: Path) -> Path:
@@ -363,40 +381,41 @@ def _handle_ruok_error(
     signature = _make_signature("ruok", type(exc).__name__, str(exc)[:100])
 
     try:
-        # ── Deduplicate: if a matching session exists, update it ──
-        existing = _find_existing_session(data_dir, signature)
-        if existing is not None:
-            existing.last_seen_at = datetime.now(timezone.utc)
-            existing.description = (
-                f"**上下文**: {context}\n"
-                f"**异常类型**: {type(exc).__name__}\n"
-                f"**异常信息**: {exc}\n\n"
-                f"```\n{tb_text}\n```"
-            )
-            existing.developer_notes = tb_text
-            _save_session(data_dir, existing)
-            rebuild_plugin_impacts(data_dir)
-            _publish_session_event("updated", existing)
-            return existing.session_id
+        with _automatic_session_lock(data_dir):
+            # ── Deduplicate: if a matching session exists, update it ──
+            existing = _find_existing_session(data_dir, signature)
+            if existing is not None:
+                existing.last_seen_at = datetime.now(timezone.utc)
+                existing.description = (
+                    f"**上下文**: {context}\n"
+                    f"**异常类型**: {type(exc).__name__}\n"
+                    f"**异常信息**: {exc}\n\n"
+                    f"```\n{tb_text}\n```"
+                )
+                existing.developer_notes = tb_text
+                _save_session(data_dir, existing)
+                rebuild_plugin_impacts(data_dir)
+                _publish_session_event("updated", existing)
+                return existing.session_id
 
-        # ── New session ──
-        session = Session(
-            session_id=_gen_session_id(),
-            source="automatic",
-            status="pending",
-            module_name="ruok",
-            error_signature=signature,
-            reporter=ReporterInfo(type="automatic"),
-            description=(
-                f"**上下文**: {context}\n"
-                f"**异常类型**: {type(exc).__name__}\n"
-                f"**异常信息**: {exc}\n\n"
-                f"```\n{tb_text}\n```"
-            ),
-            developer_notes=tb_text,
-        )
-        _save_session(data_dir, session)
-        rebuild_plugin_impacts(data_dir)
+            # ── New session ──
+            session = Session(
+                session_id=_gen_session_id(),
+                source="automatic",
+                status="pending",
+                module_name="ruok",
+                error_signature=signature,
+                reporter=ReporterInfo(type="automatic"),
+                description=(
+                    f"**上下文**: {context}\n"
+                    f"**异常类型**: {type(exc).__name__}\n"
+                    f"**异常信息**: {exc}\n\n"
+                    f"```\n{tb_text}\n```"
+                ),
+                developer_notes=tb_text,
+            )
+            _save_session(data_dir, session)
+            rebuild_plugin_impacts(data_dir)
     except Exception:
         return "N/A"
 
