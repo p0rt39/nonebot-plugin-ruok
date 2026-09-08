@@ -6,6 +6,8 @@ import json
 from typing import Any
 from pathlib import Path
 
+from nonebot import logger
+
 from ..config import ScopedConfig
 from .sessions import list_sessions, build_plugin_impacts, rebuild_plugin_impacts
 from ..protocol import Session, ModuleStatus, ModuleDefinition
@@ -23,6 +25,28 @@ def _path_write_json(path: Path, data: list[dict[str, Any]]) -> None:
     """Write JSON data to path, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_module_records(path: Path) -> list[ModuleDefinition]:
+    """Load valid module definitions without letting one bad row abort the list."""
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text("utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning(f"RUOK: failed to load module definitions: {exc}")
+        return []
+    if not isinstance(raw, list):
+        logger.warning("RUOK: modules file must contain a JSON array")
+        return []
+
+    modules: list[ModuleDefinition] = []
+    for row in raw:
+        try:
+            modules.append(ModuleDefinition.model_validate(row))
+        except (TypeError, ValueError) as exc:
+            logger.warning(f"RUOK: ignored invalid module definition: {exc}")
+    return modules
 
 
 def _builtin_module() -> ModuleDefinition:
@@ -47,15 +71,7 @@ def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]
     On first run, this module is persisted to modules.json.
     """
     path = _modules_path(data_dir)
-    modules: list[ModuleDefinition] = []
-    if path.exists():
-        try:
-            modules = [
-                ModuleDefinition.model_validate(m)
-                for m in json.loads(path.read_text("utf-8"))
-            ]
-        except (json.JSONDecodeError, TypeError):
-            modules = []
+    modules = _load_module_records(path)
 
     has_builtin = any(m.name == "ruok" for m in modules)
     if not has_builtin:
@@ -100,9 +116,7 @@ def get_module(
 
 def upsert_module(data_dir: Path, definition: ModuleDefinition) -> ModuleDefinition:
     path = _modules_path(data_dir)
-    modules: list[dict[str, Any]] = []
-    if path.exists():
-        modules = json.loads(path.read_text("utf-8"))
+    modules = [module.model_dump() for module in _load_module_records(path)]
 
     existing_idx = next(
         (i for i, m in enumerate(modules) if m["name"] == definition.name),
@@ -114,7 +128,7 @@ def upsert_module(data_dir: Path, definition: ModuleDefinition) -> ModuleDefinit
     else:
         modules.append(data)
 
-    path.write_text(json.dumps(modules, indent=2, ensure_ascii=False), encoding="utf-8")
+    _path_write_json(path, modules)
     return definition
 
 
@@ -122,13 +136,11 @@ def delete_module(data_dir: Path, name: str) -> bool:
     path = _modules_path(data_dir)
     if not path.exists():
         return False
-    modules: list[dict[str, Any]] = json.loads(path.read_text("utf-8"))
+    modules = [module.model_dump() for module in _load_module_records(path)]
     new_modules = [m for m in modules if m["name"] != name]
     if len(new_modules) == len(modules):
         return False
-    path.write_text(
-        json.dumps(new_modules, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    _path_write_json(path, new_modules)
     return True
 
 
@@ -214,15 +226,7 @@ def list_module_related_sessions(data_dir: Path, module_name: str) -> list[Sessi
 def _load_module_definitions(data_dir: Path) -> dict[str, ModuleDefinition]:
     """Load persisted module definitions without status derivation."""
     path = _modules_path(data_dir)
-    modules: list[ModuleDefinition] = []
-    if path.exists():
-        try:
-            modules = [
-                ModuleDefinition.model_validate(m)
-                for m in json.loads(path.read_text("utf-8"))
-            ]
-        except (json.JSONDecodeError, TypeError, OSError):
-            modules = []
+    modules = _load_module_records(path)
     if not any(module.name == "ruok" for module in modules):
         modules.insert(0, _builtin_module())
     return {module.name: module for module in modules}

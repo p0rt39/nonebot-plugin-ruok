@@ -53,8 +53,37 @@ class TestListModules:
         assert mod is not None
         assert mod.name == "legacy"
 
+    def test_ignores_invalid_persisted_module_rows(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors.modules import list_modules
+
+        (tmp_path / "modules.json").write_text(
+            json.dumps(
+                [
+                    {"name": "valid", "plugins": ["plugin_a"]},
+                    {"name": "invalid", "plugins": "not-a-list"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        modules = list_modules(tmp_path, ScopedConfig())
+
+        assert [module.name for module in modules] == ["ruok", "valid"]
+
 
 class TestUpsertModule:
+    def test_recovers_from_invalid_json(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+
+        (tmp_path / "modules.json").write_text("{", encoding="utf-8")
+
+        upsert_module(tmp_path, ModuleDefinition(name="weather"))
+
+        stored = json.loads((tmp_path / "modules.json").read_text("utf-8"))
+        assert [module["name"] for module in stored] == ["weather"]
+
     def test_create_new(self, tmp_path: Path) -> None:
         from nonebot_plugin_ruok.config import ScopedConfig
         from nonebot_plugin_ruok.protocol import ModuleDefinition
