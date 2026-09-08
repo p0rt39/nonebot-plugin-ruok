@@ -95,6 +95,8 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         if data is None:
             try:
                 data = await collect_all_statuses(config, data_dir)
+                _cache["status"] = data
+                _cache_time["status"] = time.time()
             except (asyncio.TimeoutError, RuntimeError, OSError):
                 return JSONResponse({"status": "unhealthy"}, status_code=503)
             except Exception as exc:

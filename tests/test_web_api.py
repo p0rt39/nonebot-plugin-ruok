@@ -33,6 +33,31 @@ def test_sessions_stats_route_is_not_shadowed(tmp_path: Path) -> None:
     assert response.json()["total"] == 0
 
 
+def test_health_endpoint_caches_successful_status_collection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import AggregatedStatus
+
+    calls = 0
+
+    async def fake_collect(config, data_dir):
+        nonlocal calls
+        calls += 1
+        return AggregatedStatus(overall="available")
+
+    monkeypatch.setattr("nonebot_plugin_ruok.api.collect_all_statuses", fake_collect)
+    client = _client(ScopedConfig(), tmp_path)
+
+    first = client.get("/ruok/api/health")
+    second = client.get("/ruok/api/health")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls == 1
+
+
 def test_api_session_datetime_filters_accept_naive_utc_and_reject_invalid(
     tmp_path: Path,
 ) -> None:
