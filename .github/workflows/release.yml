@@ -35,6 +35,12 @@ jobs:
         if: steps.version.outputs.VERSION != steps.version.outputs.TAG_VERSION
         run: exit 1
 
+      - name: Install Dependencies
+        run: uv sync --locked
+
+      - name: Run Tests
+        run: uv run poe test
+
       - name: Build 
         run: |
           uv build
