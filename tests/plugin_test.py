@@ -51,10 +51,8 @@ def _session_lookup_text(session) -> str:
 @pytest.mark.asyncio
 async def test_ruok_matcher_loads(app: App) -> None:
     """Verify ruok_cmd matcher can be imported."""
-    try:
-        from nonebot_plugin_ruok import ruok_cmd  # type: ignore[import-untyped]
-    except ImportError:
-        pytest.skip("nonebot_plugin_ruok.ruok_cmd not found")
+    from nonebot_plugin_ruok import ruok_cmd  # type: ignore[import-untyped]
+
     assert ruok_cmd is not None
 
 
@@ -66,10 +64,7 @@ async def test_ruok_no_args_shows_usage(app: App) -> None:
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     event = fake_group_message_event_v11(message="/ruok")
-    try:
-        from nonebot_plugin_ruok import ruok_cmd  # type: ignore[import-untyped]
-    except ImportError:
-        pytest.skip("nonebot_plugin_ruok.ruok_cmd not found")
+    from nonebot_plugin_ruok import ruok_cmd  # type: ignore[import-untyped]
 
     async with app.test_matcher(ruok_cmd) as ctx:
         adapter = nonebot.get_adapter(OnebotV11Adapter)
@@ -261,10 +256,7 @@ async def test_ruok_status_builtin_module(app: App) -> None:
     from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
     event = fake_group_message_event_v11(message="/ruok status")
-    try:
-        from nonebot_plugin_ruok import ruok_cmd  # type: ignore[import-untyped]
-    except ImportError:
-        pytest.skip("nonebot_plugin_ruok.ruok_cmd not found")
+    from nonebot_plugin_ruok import ruok_cmd  # type: ignore[import-untyped]
 
     async with app.test_matcher(ruok_cmd) as ctx:
         adapter = nonebot.get_adapter(OnebotV11Adapter)
