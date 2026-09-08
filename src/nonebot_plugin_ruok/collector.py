@@ -169,6 +169,10 @@ class MetricsStore:
                 try:
                     pt = MetricPoint.model_validate(rec)
                     ts = datetime.fromisoformat(pt.ts)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    else:
+                        ts = ts.astimezone(timezone.utc)
                     if ts >= cutoff:
                         points.append(pt)
                 except (ValueError, KeyError):

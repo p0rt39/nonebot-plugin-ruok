@@ -8,6 +8,30 @@ import pytest
 
 
 class TestMetricsStore:
+    def test_query_accepts_naive_timestamp(self, tmp_path) -> None:
+        import json
+        from datetime import datetime, timezone, timedelta
+
+        from nonebot_plugin_ruok.protocol import MetricPoint
+        from nonebot_plugin_ruok.collector import MetricsStore
+
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir()
+        timestamp = datetime.now(timezone.utc) - timedelta(minutes=1)
+        point = MetricPoint(
+            ts=timestamp.replace(tzinfo=None).isoformat(),
+            cpu_percent=12.0,
+        )
+        (metrics_dir / f"{timestamp.date().isoformat()}.json").write_text(
+            json.dumps([point.model_dump(mode="json")]),
+            encoding="utf-8",
+        )
+
+        points = MetricsStore.query(tmp_path, hours=1)
+
+        assert len(points) == 1
+        assert points[0].cpu_percent == 12.0
+
     def test_query_loads_more_than_two_days(self, tmp_path) -> None:
         import json
         from datetime import datetime, timezone, timedelta
