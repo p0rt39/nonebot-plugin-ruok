@@ -404,3 +404,42 @@ async def test_dispatch_notification_respects_notification_enabled(
     await dispatch_notification(session, config, tmp_path)
 
     assert calls == []
+
+
+async def test_failed_notification_does_not_start_cooldown(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import Session, ReporterInfo, NotificationRule
+    from nonebot_plugin_ruok.collectors.notifications import (
+        _save_rules,
+        dispatch_notification,
+    )
+
+    calls = []
+
+    async def failing_send_bot_dm(session):
+        calls.append(session.session_id)
+        raise RuntimeError("bot offline")
+
+    monkeypatch.setattr(
+        "nonebot_plugin_ruok.collectors.notifications._send_bot_dm",
+        failing_send_bot_dm,
+    )
+    _save_rules(
+        tmp_path,
+        [NotificationRule(name="test", channels=["bot_dm"], cooldown_minutes=60)],
+    )
+    session = Session(
+        session_id="ruok-1234abcd",
+        source="manual",
+        module_name="music",
+        reporter=ReporterInfo(type="user"),
+    )
+
+    await dispatch_notification(session, ScopedConfig(), tmp_path)
+    await dispatch_notification(session, ScopedConfig(), tmp_path)
+
+    assert calls == ["ruok-1234abcd", "ruok-1234abcd"]
+    assert not (tmp_path / "notification_cooldowns.json").exists()

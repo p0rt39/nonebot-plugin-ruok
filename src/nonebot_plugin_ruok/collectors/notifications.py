@@ -153,18 +153,18 @@ def _update_cooldown(rule_name: str, cooldowns: dict[str, str], data_dir: Path) 
 # ────────────────────────────────
 
 
-async def _send_bot_dm(session: Session) -> None:
+async def _send_bot_dm(session: Session) -> bool:
     """Send private-chat notification to all SUPERUSERS."""
     try:
         import nonebot
 
         bots = nonebot.get_bots()
         if not bots:
-            return
+            return False
         bot = next(iter(bots.values()))
         superusers = get_driver().config.superusers
         if not superusers:
-            return
+            return False
 
         text = f"🔔 新的异常事件\nSession: {session.session_id}\n来源: {session.source}"
         if session.reporter.user_id:
@@ -178,19 +178,24 @@ async def _send_bot_dm(session: Session) -> None:
             f"描述: {session.description[:200]}\n"
             f"时间: {_fmt_time(session.first_seen_at)}"
         )
+        sent = False
         for uid in superusers:
             try:
                 await bot.send_private_msg(user_id=int(uid), message=text)
-            except (ValueError, RuntimeError) as exc:
+            except Exception as exc:
                 logger.warning(f"RUOK: failed to notify superuser {uid}: {exc}")
-    except (RuntimeError, KeyError) as exc:
+            else:
+                sent = True
+        return sent
+    except Exception as exc:
         logger.warning(f"RUOK: bot DM notification failed: {exc}")
+        return False
 
 
-async def _send_webhook(rule: NotificationRule, session: Session) -> None:
+async def _send_webhook(rule: NotificationRule, session: Session) -> bool:
     """POST session info to a webhook URL."""
     if not rule.webhook_url:
-        return
+        return False
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -209,8 +214,11 @@ async def _send_webhook(rule: NotificationRule, session: Session) -> None:
                 logger.warning(
                     f"RUOK: webhook {rule.webhook_url} returned {resp.status_code}"
                 )
+                return False
+            return True
     except Exception as exc:
         logger.warning(f"RUOK: webhook {rule.webhook_url} failed: {exc}")
+        return False
 
 
 # ────────────────────────────────
@@ -237,13 +245,13 @@ async def dispatch_notification(
 
     cooldowns = _load_cooldowns(data_dir)
 
-    tasks: list[asyncio.Task[Any]] = []
+    tasks_by_rule: list[tuple[str, list[asyncio.Task[bool]]]] = []
     for rule in matching:
         cooldown_key = f"{rule.name}:{session.module_name}"
         if _is_cooling_down(cooldown_key, rule.cooldown_minutes, cooldowns):
             continue
-        _update_cooldown(cooldown_key, cooldowns, data_dir)
 
+        tasks: list[asyncio.Task[bool]] = []
         for channel in rule.channels:
             if channel == "bot_dm":
                 tasks.append(asyncio.create_task(_send_bot_dm(session)))
@@ -251,9 +259,13 @@ async def dispatch_notification(
                 tasks.append(asyncio.create_task(_send_webhook(rule, session)))
             else:
                 logger.warning(f"RUOK: unknown notification channel: {channel}")
+        if tasks:
+            tasks_by_rule.append((cooldown_key, tasks))
 
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+    for cooldown_key, tasks in tasks_by_rule:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        if any(result is True for result in results):
+            _update_cooldown(cooldown_key, cooldowns, data_dir)
 
 
 # ────────────────────────────────
