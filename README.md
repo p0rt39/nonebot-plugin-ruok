@@ -254,8 +254,15 @@ RUOK 默认依赖 `nonebot-plugin-htmlrender`，可将 `/ruok status` 和 `/ruok
 | `/ruok raise [message]` | SUPERUSER | 触发一次受控内部异常，验证 RUOK 自监控 Session 创建流程 |
 | `/ruok test [message]` | SUPERUSER | `/ruok raise [message]` 的别名|
 
-普通用户的 `list`/`lookup` 可见范围按 Session `reporter.user_id` 与当前聊天平台用户 ID
-匹配，
+普通用户的 `list`/`lookup` 可见范围按 `(platform, user_id)` 与当前聊天平台身份精确匹配；
+WebUI 普通用户手动上报也使用其已绑定的平台身份。不同平台的同名用户 ID 互不继承绑定
+权限。显式配置的 `SUPERUSERS` 和上报白名单仍按原有 ID 规则授权。
+
+旧版 `bound_qq` 或缺少平台字段的绑定记录会保留，但不再作为上报、WebUI Session 查看、
+动态管理员或密码重置的授权依据。登录 WebUI 后重新生成绑定码，并在当前聊天平台发送
+`/ruok bind <auth_key>` 即可完成迁移；忘记密码的旧账号需由管理员重设密码。
+历史上未记录平台或仅标记为 `webui` 的 Session 不会自动归属给同 ID 用户，仍可由管理员
+查看。升级前签发的重置码需重新获取，换绑或清除绑定后原重置码立即失效。
 
 `/ruok confirm` 的插件参数支持空格或逗号：
 

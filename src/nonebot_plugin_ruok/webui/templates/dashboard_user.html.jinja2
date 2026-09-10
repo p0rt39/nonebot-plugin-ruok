@@ -14,7 +14,7 @@
 {% include "_modules_table.html.jinja2" %}
 
 <h3>📝 手动上报</h3>
-{% if current_user.bound_user_id %}
+{% if current_user.is_bound %}
 <article>
     <p>
         已绑定平台账号：<code>{{ current_user.bound_user_id }}</code>
@@ -47,7 +47,11 @@
 </article>
 {% else %}
 <article>
+    {% if current_user.has_legacy_binding %}
+    <p>当前账户保留了旧版无平台绑定记录。请重新绑定当前聊天平台后使用 WebUI 上报。</p>
+    {% else %}
     <p>当前账户尚未绑定聊天平台账号，绑定后可使用 WebUI 上报。</p>
+    {% endif %}
     {% if auth_key %}
     <p>一次性绑定码：</p>
     <p style="overflow-wrap:anywhere;"><code>{{ auth_key }}</code></p>

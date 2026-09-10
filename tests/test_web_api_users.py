@@ -134,6 +134,7 @@ def test_webui_normal_user_can_change_password_rebind_and_delete(
     assert page.status_code == 200
     assert "修改密码" in page.text
     assert "新增普通用户" not in page.text
+    assert 'hx-post="/ruok/_actions/account-rebind-key"' in page.text
 
     bad_password = client.post(
         "/ruok/_actions/account-password",

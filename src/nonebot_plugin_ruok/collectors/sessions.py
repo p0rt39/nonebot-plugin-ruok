@@ -182,12 +182,14 @@ def list_sessions(
     first_seen_after: datetime | None = None,
     first_seen_before: datetime | None = None,
     plugin_name: str | None = None,
+    reporter_platform: str | None = None,
 ) -> list[Session]:
     """List sessions with optional advanced filters.
 
     Args:
         search: Full-text search across session_id, module_name, description,
                 reporter user_id, error_signature.
+        reporter_platform: Restrict reporter_user_id to the given platform.
         first_seen_after: Only sessions first seen after this time (UTC).
         first_seen_before: Only sessions first seen before this time.
         plugin_name: Only sessions whose module_name matches a ModuleDefinition
@@ -213,6 +215,8 @@ def list_sessions(
         if module_name and s.module_name != module_name:
             continue
         if reporter_user_id and s.reporter.user_id != reporter_user_id:
+            continue
+        if reporter_platform is not None and s.reporter.platform != reporter_platform:
             continue
         if first_seen_after and s.first_seen_at < first_seen_after:
             continue

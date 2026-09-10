@@ -126,7 +126,40 @@ async def test_ruok_bind_auth_key(app: App, tmp_path: Path, monkeypatch) -> None
         )
         ctx.should_finished()
 
-    assert auth.is_user_bound("12345678")
+    assert auth.is_user_bound("12345678", "OneBot V11")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["OneBot V11", "Console", None])
+async def test_ruok_report_permission_requires_matching_binding(
+    tmp_path: Path, monkeypatch, platform: str | None
+) -> None:
+    import nonebot
+    from nonebot.adapters.onebot.v11 import Bot
+    from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
+
+    import nonebot_plugin_ruok
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    config = ScopedConfig(webui_admin_password="admin-secret")
+    auth = WebUIAuth(config, tmp_path)
+    registered = auth.register_user("alice", "secret")
+    auth.bind_auth_key(registered.auth_key, "12345678", "OneBot V11")
+    users = auth._load_users()
+    users["alice"].bound_platform = platform
+    auth._save_users(users)
+    monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
+    monkeypatch.setattr(nonebot_plugin_ruok, "webui_auth", auth)
+    monkeypatch.setattr(nonebot.get_driver().config, "superusers", set())
+    bot = Bot(nonebot.get_adapter(OnebotV11Adapter), "test")
+    event = fake_private_message_event_v11(
+        user_id=12345678, message="/ruok no music issue"
+    )
+
+    assert await nonebot_plugin_ruok._can_report(bot, event) == (
+        platform == "OneBot V11"
+    )
 
 
 @pytest.mark.asyncio
@@ -445,7 +478,7 @@ async def test_ruok_list_user_shows_own_recent_sessions(
             tmp_path,
             f"own-{index}",
             f"own issue {index}",
-            ReporterInfo(type="user", user_id="12345678"),
+            ReporterInfo(type="user", user_id="12345678", platform="OneBot V11"),
         )
         update_session(
             tmp_path,
@@ -460,7 +493,7 @@ async def test_ruok_list_user_shows_own_recent_sessions(
         tmp_path,
         "other",
         "other issue",
-        ReporterInfo(type="user", user_id="99999999"),
+        ReporterInfo(type="user", user_id="12345678", platform="Console"),
     )
     update_session(
         tmp_path,
@@ -547,7 +580,7 @@ async def test_ruok_list_superuser_shows_recent_active_sessions(
         tmp_path,
         "solved",
         "not active",
-        ReporterInfo(type="user", user_id="12345678"),
+        ReporterInfo(type="user", user_id="12345678", platform="OneBot V11"),
     )
     update_session(
         tmp_path,
@@ -620,7 +653,7 @@ async def test_ruok_list_image_mode_user_uses_own_recent_sessions(
             tmp_path,
             f"own-{index}",
             f"own issue {index}",
-            ReporterInfo(type="user", user_id="12345678"),
+            ReporterInfo(type="user", user_id="12345678", platform="OneBot V11"),
         )
         update_session(
             tmp_path,
@@ -632,7 +665,7 @@ async def test_ruok_list_image_mode_user_uses_own_recent_sessions(
         tmp_path,
         "other",
         "other issue",
-        ReporterInfo(type="user", user_id="99999999"),
+        ReporterInfo(type="user", user_id="12345678", platform="Console"),
     )
     update_session(
         tmp_path,
@@ -740,7 +773,7 @@ async def test_ruok_list_image_mode_superuser_uses_active_sessions(
         tmp_path,
         "solved",
         "not active",
-        ReporterInfo(type="user", user_id="12345678"),
+        ReporterInfo(type="user", user_id="12345678", platform="OneBot V11"),
     )
     update_session(
         tmp_path,
@@ -805,10 +838,21 @@ async def test_ruok_list_image_mode_superuser_uses_active_sessions(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("other_user_id", "other_platform"),
+    [
+        ("12345678", "Console"),
+        ("12345678", None),
+        ("12345678", "webui"),
+        ("99999999", "OneBot V11"),
+    ],
+)
 async def test_ruok_lookup_user_can_only_view_own_session(
     app: App,
     tmp_path: Path,
     monkeypatch,
+    other_user_id: str,
+    other_platform: str | None,
 ) -> None:
     """/ruok lookup should hide other users' sessions from normal users."""
     import nonebot
@@ -818,7 +862,7 @@ async def test_ruok_lookup_user_can_only_view_own_session(
     import nonebot_plugin_ruok
     from nonebot_plugin_ruok.config import ScopedConfig
     from nonebot_plugin_ruok.protocol import ReporterInfo
-    from nonebot_plugin_ruok.collectors.sessions import create_session
+    from nonebot_plugin_ruok.collectors.sessions import link_sessions, create_session
 
     config = ScopedConfig()
     own = create_session(
@@ -831,8 +875,16 @@ async def test_ruok_lookup_user_can_only_view_own_session(
         tmp_path,
         "weather",
         "other issue",
-        ReporterInfo(type="user", user_id="99999999"),
+        ReporterInfo(type="user", user_id=other_user_id, platform=other_platform),
     )
+    assert link_sessions(tmp_path, own.session_id, other.session_id)
+    own_linked = create_session(
+        tmp_path,
+        "music",
+        "own linked issue",
+        ReporterInfo(type="user", user_id="12345678", platform="OneBot V11"),
+    )
+    assert link_sessions(tmp_path, own.session_id, own_linked.session_id)
     monkeypatch.setattr(nonebot_plugin_ruok, "plugin_config", config)
     monkeypatch.setattr(nonebot_plugin_ruok, "data_dir", tmp_path)
     monkeypatch.setattr(nonebot.get_driver().config, "superusers", set())
@@ -854,7 +906,7 @@ async def test_ruok_lookup_user_can_only_view_own_session(
         ctx.should_pass_permission()
         ctx.should_call_send(
             own_event,
-            _session_lookup_text(own),
+            _session_lookup_text(own) + f"\n关联 (1): {own_linked.session_id}",
             result=None,
             bot=bot,
         )

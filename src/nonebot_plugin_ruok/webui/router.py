@@ -128,9 +128,11 @@ def _account_reporter_id(user: CurrentWebUIUser) -> str | None:
     return user.bound_user_id
 
 
-def _account_reporter_platform(user: CurrentWebUIUser) -> str:
-    """Return the reporter platform marker used for WebUI manual reports."""
-    return "webui"
+def _account_reporter_platform(user: CurrentWebUIUser) -> str | None:
+    """Return the bound platform for reports, or the built-in admin marker."""
+    if user.admin_source == "builtin":
+        return "webui"
+    return user.bound_platform
 
 
 def _module_plugin_options(
@@ -158,11 +160,11 @@ def _find_bound_reporter_user(
     if not reporter.user_id:
         return None
     for user in users:
-        if user.bound_user_id != reporter.user_id:
-            continue
-        if reporter.platform in (None, "webui") or user.bound_platform is None:
-            return user
-        if user.bound_platform == reporter.platform:
+        if (
+            user.is_bound
+            and user.bound_user_id == reporter.user_id
+            and user.bound_platform == reporter.platform
+        ):
             return user
     return None
 
@@ -364,7 +366,7 @@ def create_webui_router(
             auth_key_expires_at = (
                 stored_user.auth_key_expires_at if stored_user else None
             )
-            if not user.bound_user_id:
+            if not user.is_bound:
                 if auth_key is None and not auth_key_expired:
                     issued = auth.issue_auth_key(user.username)
                     auth_key = issued.auth_key
@@ -376,8 +378,12 @@ def create_webui_router(
                 status=status,
                 modules=modules,
                 sessions=(
-                    list_sessions(data_dir, reporter_user_id=user.bound_user_id)
-                    if user.bound_user_id
+                    list_sessions(
+                        data_dir,
+                        reporter_user_id=user.bound_user_id,
+                        reporter_platform=user.bound_platform,
+                    )
+                    if user.is_bound
                     else []
                 ),
                 all_modules=modules,
@@ -772,7 +778,7 @@ def create_webui_router(
                 '<p style="color:var(--pico-del-color);">❌ 请选择或输入模块名</p>',
                 status_code=400,
             )
-        if not user.is_admin and not user.bound_user_id:
+        if not user.is_admin and not user.is_bound:
             return HTMLResponse(
                 '<p style="color:var(--pico-del-color);">'
                 "❌ 请先通过 /ruok bind <auth_key> 绑定平台账号后再提交上报</p>",
@@ -801,6 +807,7 @@ def create_webui_router(
                     sessions=list_sessions(
                         data_dir,
                         reporter_user_id=user.bound_user_id,
+                        reporter_platform=user.bound_platform,
                     ),
                     reporter_display=_reporter_display_factory(auth.list_users()),
                     headers={
@@ -1051,7 +1058,7 @@ def create_webui_router(
     ) -> HTMLResponse:
         if user.username == "admin":
             return _error_html("内置 admin 账户不支持平台绑定")
-        if user.bound_user_id:
+        if user.is_bound:
             return _error_html("已绑定账号请使用换绑流程")
         try:
             result = auth.issue_auth_key(user.username, allow_bound=False)

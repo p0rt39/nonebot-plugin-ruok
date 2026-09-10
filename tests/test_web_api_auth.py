@@ -95,19 +95,19 @@ def test_webui_auth_key_binding_expires_and_cannot_be_reused(tmp_path: Path) -> 
     )
 
     with pytest.raises(AuthKeyExpired):
-        auth.bind_auth_key(expired.auth_key, "10001")
+        auth.bind_auth_key(expired.auth_key, "10001", "OneBot V11")
     expired_user = auth.get_user("expired")
     assert expired_user is not None
     assert expired_user.auth_key_hash is None
     assert expired_user.auth_key_value is None
 
     active = auth.register_user("active", "secret")
-    bound = auth.bind_auth_key(active.auth_key, "10002")
+    bound = auth.bind_auth_key(active.auth_key, "10002", "OneBot V11")
 
     assert bound.bound_user_id == "10002"
-    assert auth.is_user_bound("10002")
+    assert auth.is_user_bound("10002", "OneBot V11")
     with pytest.raises(AuthKeyAlreadyUsed):
-        auth.bind_auth_key(active.auth_key, "10003")
+        auth.bind_auth_key(active.auth_key, "10003", "OneBot V11")
 
 
 def test_webui_auth_loads_legacy_bound_qq(tmp_path: Path) -> None:
@@ -134,6 +134,168 @@ def test_webui_auth_loads_legacy_bound_qq(tmp_path: Path) -> None:
 
     assert user is not None
     assert user.bound_user_id == "10002"
+    assert user.has_legacy_binding
+    assert not user.is_bound
+
+
+def test_webui_binding_and_reset_are_platform_scoped(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import (
+        WebUIAuth,
+        AuthKeyInvalid,
+        UserManagementError,
+    )
+
+    auth = WebUIAuth(_webui_config(), tmp_path)
+    result = auth.register_user("alice", "secret")
+    auth.bind_auth_key(result.auth_key, "10002", "OneBot V11")
+
+    assert auth.is_user_bound("10002", "OneBot V11")
+    assert not auth.is_user_bound("10002", "Console")
+    with pytest.raises(UserManagementError):
+        auth.issue_password_reset_key("10002", "Console")
+
+    other = auth.register_user("bob", "secret")
+    for missing_platform in (None, "", " "):
+        assert not auth.is_user_bound("10002", missing_platform)
+        with pytest.raises(UserManagementError):
+            auth.issue_password_reset_key("10002", missing_platform)
+        with pytest.raises(AuthKeyInvalid):
+            auth.bind_auth_key(other.auth_key, "10002", missing_platform)
+    auth.bind_auth_key(other.auth_key, "10002", "Console")
+    assert auth.is_user_bound("10002", "Console")
+    reset = auth.issue_password_reset_key("10002", "Console")
+    assert reset.user.username == "bob"
+    assert auth.reset_password_with_key(reset.reset_key, "new-secret").username == "bob"
+    assert auth.verify_user_password("alice", "secret")
+
+
+def test_webui_legacy_binding_requires_rebind_before_reset(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import (
+        WebUIAuth,
+        UserManagementError,
+        hash_password,
+    )
+
+    (tmp_path / "webui_users.json").write_text(
+        json.dumps(
+            {
+                "users": [
+                    {
+                        "username": "legacy",
+                        "password_hash": hash_password("secret"),
+                        "role": "user",
+                        "bound_qq": "10002",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    auth = WebUIAuth(_webui_config(), tmp_path)
+
+    assert not auth.is_user_bound("10002", "OneBot V11")
+    with pytest.raises(UserManagementError):
+        auth.issue_password_reset_key("10002", "OneBot V11")
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        {"bound_qq": "10002"},
+        {"bound_user_id": "10002"},
+        {"bound_user_id": "10002", "bound_platform": ""},
+        {"bound_user_id": "10002", "bound_platform": " "},
+    ],
+)
+def test_webui_rebind_migrates_legacy_identity(
+    tmp_path: Path, binding: dict[str, str]
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth, hash_password
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    users_path = tmp_path / "webui_users.json"
+    users_path.write_text(
+        json.dumps(
+            {
+                "users": [
+                    {
+                        "username": "legacy",
+                        "password_hash": hash_password("secret"),
+                        "role": "user",
+                        **binding,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = _webui_config()
+    auth = WebUIAuth(config, tmp_path, superuser_provider=lambda: {"10002"})
+    current = auth.authenticate("legacy", "secret")
+    assert current is not None
+    assert not current.is_bound
+    assert not current.is_admin
+    session = create_session(
+        tmp_path,
+        "music",
+        "private issue",
+        ReporterInfo(type="user", user_id="10002", platform="OneBot V11"),
+    )
+    client = _client(config, tmp_path, superusers={"10002"})
+    _login_user(client, "legacy", "secret")
+    dashboard = client.get("/ruok")
+    assert dashboard.status_code == 200
+    assert "重新绑定" in dashboard.text
+    assert session.session_id not in dashboard.text
+    assert 'hx-post="/ruok/_actions/session-create"' not in dashboard.text
+    assert client.get("/ruok/modules").status_code == 403
+    denied = client.post(
+        "/ruok/_actions/session-create",
+        data={"module_name": "music", "description": "denied"},
+    )
+    assert denied.status_code == 403
+    account = client.get("/ruok/users")
+    assert "需重新绑定" in account.text
+    assert 'hx-post="/ruok/_actions/account-auth-key"' in account.text
+    assert client.post("/ruok/_actions/account-auth-key").status_code == 200
+    stored = auth.get_user("legacy")
+    assert stored is not None
+    assert stored.auth_key_value
+    migrated = auth.bind_auth_key(stored.auth_key_value, "10002", "OneBot V11")
+
+    assert migrated.is_bound
+    assert not migrated.has_legacy_binding
+    assert auth.is_user_bound("10002", "OneBot V11")
+    assert auth.is_superuser_account(migrated)
+    assert client.get("/ruok/modules").status_code == 200
+    persisted = json.loads(users_path.read_text("utf-8"))["users"][0]
+    assert persisted["bound_platform"] == "OneBot V11"
+    assert "bound_qq" not in persisted
+
+
+@pytest.mark.parametrize("change", ["legacy_key", "rebind", "clear"])
+def test_webui_reset_key_rejects_previous_identity(tmp_path: Path, change: str) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth, UserManagementError
+
+    auth = WebUIAuth(_webui_config(), tmp_path)
+    result = auth.register_user("alice", "secret")
+    auth.bind_auth_key(result.auth_key, "10002", "OneBot V11")
+    reset = auth.issue_password_reset_key("10002", "OneBot V11")
+    if change == "legacy_key":
+        users_path = tmp_path / "webui_users.json"
+        users = json.loads(users_path.read_text("utf-8"))
+        users["users"][0].pop("password_reset_platform")
+        users_path.write_text(json.dumps(users), encoding="utf-8")
+    elif change == "rebind":
+        key = auth.issue_auth_key("alice", allow_bound=True)
+        auth.bind_auth_key(key.auth_key, "10002", "Console")
+    else:
+        auth.clear_binding("alice")
+
+    with pytest.raises(UserManagementError):
+        auth.reset_password_with_key(reset.reset_key, "stolen")
+    assert auth.verify_user_password("alice", "secret")
 
 
 def test_webui_auth_rejects_duplicate_platform_binding(tmp_path: Path) -> None:

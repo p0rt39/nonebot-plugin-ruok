@@ -205,6 +205,32 @@ class TestListSessions:
         result = list_sessions(tmp_path, reporter_user_id="uid-1")
         assert len(result) == 1
 
+    def test_filter_by_reporter_identity(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+        )
+
+        create_session(
+            tmp_path,
+            "mod",
+            "onebot",
+            ReporterInfo(type="user", user_id="same", platform="OneBot V11"),
+        )
+        create_session(
+            tmp_path,
+            "mod",
+            "console",
+            ReporterInfo(type="user", user_id="same", platform="Console"),
+        )
+        result = list_sessions(
+            tmp_path,
+            reporter_user_id="same",
+            reporter_platform="Console",
+        )
+        assert [session.description for session in result] == ["console"]
+
     def test_search(self, tmp_path: Path) -> None:
         from nonebot_plugin_ruok.protocol import ReporterInfo
         from nonebot_plugin_ruok.collectors.sessions import (

@@ -96,7 +96,7 @@
                     </div>
                     <div>
                         <dt>平台</dt>
-                        <dd>{{ user.bound_platform or '—' }}</dd>
+                        <dd>{{ '需重新绑定' if user.has_legacy_binding else (user.bound_platform or '—') }}</dd>
                     </div>
                     <div>
                         <dt>绑定码</dt>
@@ -173,8 +173,10 @@
             <strong>{{ current_user.username }}</strong>
             <p class="metric-label">普通用户</p>
         </div>
-        {% if current_user.bound_user_id %}
+        {% if current_user.is_bound %}
         <span class="badge badge-ok">已绑定</span>
+        {% elif current_user.has_legacy_binding %}
+        <span class="badge badge-warn">需重新绑定</span>
         {% else %}
         <span class="badge badge-warn">未绑定</span>
         {% endif %}
@@ -186,7 +188,7 @@
         </div>
         <div>
             <dt>平台</dt>
-            <dd>{{ current_user.bound_platform or '—' }}</dd>
+            <dd>{{ '需重新绑定' if current_user.has_legacy_binding else (current_user.bound_platform or '—') }}</dd>
         </div>
         <div>
             <dt>待用绑定码</dt>
@@ -230,7 +232,7 @@
 
     <article>
         <h4>换绑平台账号</h4>
-        {% if current_user.bound_user_id %}
+        {% if current_user.is_bound %}
         <p>生成新的一次性绑定码。旧绑定会保留，直到你在聊天平台完成新的 <code>/ruok bind</code>。</p>
         <form hx-post="/ruok/_actions/account-rebind-key"
               hx-target="#users-panel" hx-swap="outerHTML">
@@ -241,6 +243,9 @@
             <button type="submit" class="secondary outline">生成换绑码</button>
         </form>
         {% else %}
+        {% if current_user.has_legacy_binding %}
+        <p>旧绑定缺少平台信息，需重新绑定。</p>
+        {% endif %}
         <p>生成或刷新一次性绑定码，然后在聊天平台发送 <code>/ruok bind &lt;auth_key&gt;</code>。</p>
         <form hx-post="/ruok/_actions/account-auth-key"
               hx-target="#users-panel" hx-swap="outerHTML">

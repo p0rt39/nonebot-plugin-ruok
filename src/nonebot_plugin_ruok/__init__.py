@@ -90,7 +90,7 @@ webui_auth = WebUIAuth(
 # ────────────────────────────────
 
 
-async def _can_report(event: Event) -> bool:
+async def _can_report(bot: Bot, event: Event) -> bool:
     """Check whether a user is allowed to report issues."""
     # crisis_mode: skip all permission checks
     if plugin_config.crisis_mode:
@@ -103,7 +103,7 @@ async def _can_report(event: Event) -> bool:
         return True
 
     # WebUI users bound to this platform user can report from chat.
-    if webui_auth.is_user_bound(user_id):
+    if webui_auth.is_user_bound(user_id, bot.type):
         return True
 
     # Whitelist users
@@ -128,9 +128,12 @@ def _is_superuser(event: Event) -> bool:
     return event.get_user_id() in get_driver().config.superusers
 
 
-def _is_session_owner(session: Session, event: Event) -> bool:
+def _is_session_owner(session: Session, bot: Bot, event: Event) -> bool:
     """Return whether a session belongs to the current platform user."""
-    return session.reporter.user_id == event.get_user_id()
+    return (
+        session.reporter.user_id == event.get_user_id()
+        and session.reporter.platform == bot.type
+    )
 
 
 def _format_session_list_line(session: Session) -> str:
@@ -190,7 +193,7 @@ async def handle_ruok(
     elif subcmd == "list":
         await _cmd_list(bot, event)
     elif subcmd == "lookup":
-        await _cmd_lookup(event, rest)
+        await _cmd_lookup(bot, event, rest)
     elif subcmd in ("raise", "test"):
         await _cmd_raise(event, rest, subcmd)
     elif subcmd in ("confirm", "solve", "ignore"):
@@ -216,7 +219,7 @@ async def _cmd_no(bot: Bot, event: Event, rest: str) -> None:
         await ruok_cmd.finish("⚠️ Session 系统未启用，无法上报问题。")
         return
 
-    if not await _can_report(event):
+    if not await _can_report(bot, event):
         await ruok_cmd.finish(
             "❌ 你没有权限上报问题。需要："
             "绑定 WebUI 账号 / 群管理员 / 白名单 / SUPERUSER"
@@ -401,7 +404,11 @@ async def _cmd_list(bot: Bot, event: Event) -> None:
         )
         return
 
-    sessions = list_sessions(data_dir, reporter_user_id=event.get_user_id())
+    sessions = list_sessions(
+        data_dir,
+        reporter_user_id=event.get_user_id(),
+        reporter_platform=bot.type,
+    )
     visible = sessions[:5]
     if not visible:
         await ruok_cmd.finish("🎉 你还没有上报过 session。")
@@ -428,7 +435,7 @@ async def _cmd_list(bot: Bot, event: Event) -> None:
     )
 
 
-async def _cmd_lookup(event: Event, rest: str) -> None:
+async def _cmd_lookup(bot: Bot, event: Event, rest: str) -> None:
     """Handle /ruok lookup <session_id>"""
     sid = rest.strip()
     if not sid:
@@ -445,7 +452,7 @@ async def _cmd_lookup(event: Event, rest: str) -> None:
         )
         await ruok_cmd.finish(message)
         return
-    if not is_superuser and not _is_session_owner(session, event):
+    if not is_superuser and not _is_session_owner(session, bot, event):
         await ruok_cmd.finish(f"❌ Session `{sid}` 未找到或无权查看。")
         return
 
@@ -475,7 +482,7 @@ async def _cmd_lookup(event: Event, rest: str) -> None:
 
     linked = get_linked_sessions(data_dir, session.session_id)
     if not is_superuser:
-        linked = [s for s in linked if _is_session_owner(s, event)]
+        linked = [s for s in linked if _is_session_owner(s, bot, event)]
     if linked:
         lines.append(f"关联 ({len(linked)}): {', '.join(s.session_id for s in linked)}")
     await ruok_cmd.finish("\n".join(lines))

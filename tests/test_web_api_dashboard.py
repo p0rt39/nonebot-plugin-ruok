@@ -128,11 +128,26 @@ def test_webui_bound_user_report_uses_bound_user_id_and_sees_own_sessions(
     auth = WebUIAuth(config, tmp_path)
     result = auth.register_user("alice", "secret")
     auth.bind_auth_key(result.auth_key, "10001", "OneBot V11")
+    other = auth.register_user("bob", "secret")
+    auth.bind_auth_key(other.auth_key, "10001", "Console")
     create_session(
         tmp_path,
         "music",
         "other user issue",
-        ReporterInfo(type="user", user_id="20002"),
+        ReporterInfo(type="user", user_id="10001", platform="Console"),
+    )
+    for platform in (None, "webui"):
+        create_session(
+            tmp_path,
+            "music",
+            "legacy issue",
+            ReporterInfo(type="user", user_id="10001", platform=platform),
+        )
+    create_session(
+        tmp_path,
+        "music",
+        "own chat issue",
+        ReporterInfo(type="user", user_id="10001", platform="OneBot V11"),
     )
     client = _client(config, tmp_path)
     _login_user(client, "alice", "secret")
@@ -147,10 +162,22 @@ def test_webui_bound_user_report_uses_bound_user_id_and_sees_own_sessions(
     assert response.status_code == 200
     assert len(mine) == 1
     assert mine[0].reporter.user_id == "10001"
-    assert mine[0].reporter.platform == "webui"
+    assert mine[0].reporter.platform == "OneBot V11"
     assert "mine" in response.text
     assert "alice（OneBot V11: 10001）" in response.text
-    assert "other user issue" not in response.text
+    dashboard = client.get("/ruok")
+    assert dashboard.status_code == 200
+    for page in (response, dashboard):
+        assert "own chat issue" in page.text
+        assert "mine" in page.text
+        assert "other user issue" not in page.text
+        assert "legacy issue" not in page.text
+
+    _login_user(client, "bob", "secret")
+    other_dashboard = client.get("/ruok")
+    assert "other user issue" in other_dashboard.text
+    assert "own chat issue" not in other_dashboard.text
+    assert "mine" not in other_dashboard.text
 
 
 def test_dashboard_trends_partial_uses_webui_metrics_context(tmp_path: Path) -> None:

@@ -96,7 +96,20 @@ class StoredWebUIUser(BaseModel):
     used_auth_key_hashes: list[str] = Field(default_factory=list)
     password_reset_key_hash: str | None = None
     password_reset_expires_at: datetime | None = None
+    password_reset_platform: str | None = None
     created_at: datetime = Field(default_factory=_utc_now)
+
+    @property
+    def is_bound(self) -> bool:
+        """Return whether this account has a complete platform identity."""
+        return bool(
+            (self.bound_user_id or "").strip() and (self.bound_platform or "").strip()
+        )
+
+    @property
+    def has_legacy_binding(self) -> bool:
+        """Return whether an old unscoped binding needs migration."""
+        return bool(self.bound_user_id and not self.is_bound)
 
 
 class StoredRememberToken(BaseModel):
@@ -127,7 +140,14 @@ class CurrentWebUIUser:
 
     @property
     def is_bound(self) -> bool:
-        return bool(self.bound_user_id)
+        return bool(
+            (self.bound_user_id or "").strip() and (self.bound_platform or "").strip()
+        )
+
+    @property
+    def has_legacy_binding(self) -> bool:
+        """Return whether an old unscoped binding needs migration."""
+        return bool(self.bound_user_id and not self.is_bound)
 
 
 @dataclass(frozen=True)
@@ -259,7 +279,7 @@ class WebUIAuth:
 
     def is_superuser_account(self, user: StoredWebUIUser) -> bool:
         """Return True when a stored user is bound to a NoneBot SUPERUSER id."""
-        return bool(user.bound_user_id and user.bound_user_id in self._superusers())
+        return bool(user.is_bound and user.bound_user_id in self._superusers())
 
     def authenticate(
         self,
@@ -384,7 +404,7 @@ class WebUIAuth:
         user = users.get(self._user_key(username))
         if user is None:
             raise UserRegistrationError("用户不存在")
-        if user.bound_user_id and not allow_bound:
+        if user.is_bound and not allow_bound:
             raise UserRegistrationError("用户已绑定平台账号")
 
         auth_key = secrets.token_urlsafe(24)
@@ -405,7 +425,7 @@ class WebUIAuth:
         normalized_key = auth_key.strip()
         normalized_user_id = user_id.strip()
         normalized_platform = platform.strip() if platform else None
-        if not normalized_key or not normalized_user_id:
+        if not normalized_key or not normalized_user_id or not normalized_platform:
             raise AuthKeyInvalid("auth_key 无效")
 
         key_hash = _hash_auth_key(normalized_key)
@@ -435,6 +455,11 @@ class WebUIAuth:
                 )
             user.bound_user_id = normalized_user_id
             user.bound_platform = normalized_platform
+            # A reset key issued for an older/unscoped identity must not survive
+            # migration to a new platform identity.
+            user.password_reset_key_hash = None
+            user.password_reset_expires_at = None
+            user.password_reset_platform = None
             user.auth_key_hash = None
             user.auth_key_value = None
             user.auth_key_expires_at = None
@@ -466,6 +491,9 @@ class WebUIAuth:
             raise UserManagementError("平台账号无效")
 
         users = self._load_users()
+        if not normalized_platform:
+            raise UserManagementError("当前平台账号未绑定 WebUI 用户")
+
         user = self._find_bound_user(
             users,
             normalized_user_id,
@@ -477,6 +505,7 @@ class WebUIAuth:
         reset_key = secrets.token_urlsafe(24)
         user.password_reset_key_hash = _hash_auth_key(reset_key)
         user.password_reset_expires_at = _utc_now() + PASSWORD_RESET_TTL
+        user.password_reset_platform = normalized_platform
         users[self._user_key(user.username)] = user
         self._save_users(users)
         return PasswordResetResult(user=user, reset_key=reset_key)
@@ -499,6 +528,15 @@ class WebUIAuth:
         for user in users.values():
             if user.password_reset_key_hash != key_hash:
                 continue
+            if not user.is_bound or user.password_reset_platform != user.bound_platform:
+                # Reset keys created before platform scoping was enforced do
+                # not carry a trustworthy identity and must not be redeemed.
+                user.password_reset_key_hash = None
+                user.password_reset_expires_at = None
+                user.password_reset_platform = None
+                users[self._user_key(user.username)] = user
+                self._save_users(users)
+                raise UserManagementError("reset key 无效")
             expires_at = user.password_reset_expires_at
             if expires_at is None or _aware_utc(expires_at) < _utc_now():
                 matched_expired = True
@@ -507,6 +545,7 @@ class WebUIAuth:
             user.password_hash = hash_password(new_password)
             user.password_reset_key_hash = None
             user.password_reset_expires_at = None
+            user.password_reset_platform = None
             users[self._user_key(user.username)] = user
             self._save_users(users)
             self.revoke_user_remember_tokens(user.username)
@@ -517,10 +556,10 @@ class WebUIAuth:
         raise UserManagementError("reset key 无效")
 
     def is_user_bound(self, user_id: str, platform: str | None = None) -> bool:
-        """Return True if any normal WebUI account is bound to this platform user."""
+        """Return True only for a complete platform-scoped binding."""
         normalized_user_id = user_id.strip()
         normalized_platform = platform.strip() if platform else None
-        if not normalized_user_id:
+        if not normalized_user_id or not normalized_platform:
             return False
         return (
             self._find_bound_user(
@@ -594,6 +633,9 @@ class WebUIAuth:
             raise UserManagementError("用户不存在")
         user.bound_user_id = None
         user.bound_platform = None
+        user.password_reset_key_hash = None
+        user.password_reset_expires_at = None
+        user.password_reset_platform = None
         users[key] = user
         self._save_users(users)
         return user
@@ -886,12 +928,12 @@ class WebUIAuth:
         user_id: str,
         platform: str | None,
     ) -> StoredWebUIUser | None:
+        # Platform is part of the identity.  Unscoped legacy rows are retained
+        # for migration display, but cannot satisfy an authorization lookup.
         for user in users.values():
             if user.bound_user_id != user_id:
                 continue
-            if platform is None or user.bound_platform is None:
-                return user
-            if user.bound_platform == platform:
+            if user.is_bound and user.bound_platform == platform:
                 return user
         return None
 
@@ -907,9 +949,7 @@ class WebUIAuth:
         for key, user in users.items():
             if key == exclude_key or user.bound_user_id != user_id:
                 continue
-            if platform is None or user.bound_platform is None:
-                return user
-            if user.bound_platform == platform:
+            if user.is_bound and user.bound_platform == platform:
                 return user
         return None
 

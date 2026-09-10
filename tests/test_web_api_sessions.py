@@ -114,7 +114,7 @@ def test_webui_sessions_fallback_reporter_display_includes_platform(
     assert "上报者: OneBot V11: 10001" in response.text
 
 
-def test_webui_platform_marker_uses_bound_platform_for_display(
+def test_unscoped_webui_platform_marker_is_not_mapped_to_a_binding(
     tmp_path: Path,
 ) -> None:
     from nonebot_plugin_ruok.protocol import ReporterInfo
@@ -138,8 +138,8 @@ def test_webui_platform_marker_uses_bound_platform_for_display(
     response = client.get("/ruok/sessions")
 
     assert response.status_code == 200
-    assert "alice（OneBot V11: 10001）" in response.text
-    assert "上报者: webui: 10001" not in response.text
+    assert "上报者: webui: 10001" in response.text
+    assert "alice（OneBot V11: 10001）" not in response.text
 
 
 def test_session_detail_renders_automatic_traceback_as_code_block(
