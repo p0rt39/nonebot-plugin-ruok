@@ -62,8 +62,12 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         x_ruok_api_key: str | None = Header(None),
         authorization: str | None = Header(None),
     ) -> None:
-        if not config.api_key:
-            return
+        configured_key = config.api_key.strip()
+        if not configured_key:
+            raise HTTPException(
+                status_code=401,
+                detail="API key is not configured",
+            )
 
         token = x_ruok_api_key or ""
         if authorization:
@@ -71,7 +75,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
             if scheme.lower() == "bearer":
                 token = value
 
-        if not secrets.compare_digest(token, config.api_key):
+        if not secrets.compare_digest(token, configured_key):
             raise HTTPException(status_code=401, detail="Invalid API key")
 
     # ── Health ────────────────────
@@ -87,9 +91,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         return data.model_dump(mode="json")
 
     @router.get("/health", response_model=None)
-    async def api_health(
-        _: None = Depends(_require_api_key),
-    ) -> dict[str, Any] | JSONResponse:
+    async def api_health() -> dict[str, Any] | JSONResponse:
         """Simple health check for K8s / Docker / Uptime."""
         data = _cached("status", lambda: None)
         if data is None:

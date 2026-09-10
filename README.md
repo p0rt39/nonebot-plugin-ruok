@@ -30,7 +30,7 @@
 - WebUI：完整鉴权、实时更新、关键指标实时显示、Bot用户/Bot开发者双显示模板。
 - 账号体系：内置 admin、普通用户注册、平台账号绑定、记住登录、自助重设密码。
 - 通知规则：按状态/模块触发，支持 Bot 私聊与 Webhook，带冷却时间。
-- API：`/ruok/api/*` JSON 接口，支持可选 API key，为外接Status Page等留下空间。
+- API：`/ruok/api/*` JSON 接口，受 API key 保护，为外接 Status Page 等留下空间。
 
 
 ## 使用前的提示
@@ -79,10 +79,12 @@ plugins = ["nonebot_plugin_ruok"]
 ```dotenv
 RUOK__WEBUI_ADMIN_PASSWORD=change-me
 RUOK__WEBUI_SECRET_KEY=replace-with-a-long-random-secret
-RUOK__API_KEY=optional-api-token
+RUOK__API_KEY=replace-with-a-long-random-api-token
 ```
 
-`RUOK__API_KEY` 在您需要开放或集成 `/ruok/api/*` 时需要配置，不影响插件内部调用和WebUI使用。
+`RUOK__API_KEY` 是 HTTP API 的访问凭据。除 `/ruok/api/health` 外，所有 API
+端点都要求携带该 key；未配置 key 时这些端点会返回 `401`。这不会影响插件内部
+状态采集、聊天指令或 WebUI 使用。
 
 虽然 WebUI 和 API 挂载在Nonebot Uvicorn 上，Uvicorn 默认只监听 `localhost`，但考虑到您可能有通过 Tunnel、反向代理等方式向外暴露或者修改 Nonebot Uvicorn 的监听行为的需求，建议在安装阶段就配置 API key。
 
@@ -180,7 +182,7 @@ RUOK 设计上不绑定具体适配器，但当前主要针对 OneBot V11 做了
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `RUOK__CORS_ORIGINS` | `list[str]` | `["*"]` | API CORS 允许源 |
-| `RUOK__API_KEY` | `str` | `""` | API key；为空则 API 不校验 |
+| `RUOK__API_KEY` | `str` | `""` | HTTP API key；除 `/ruok/api/health` 外的 API 端点必须配置 |
 | `RUOK__WEBUI_ADMIN_PASSWORD` | `str` | `""` | 内置 `admin` 账户密码；为空则 WebUI 无法登录 |
 | `RUOK__WEBUI_SECRET_KEY` | `str` | `""` | WebUI session 签名密钥；为空则每次启动随机，重启后登录态/保持登录功能会失效 |
 | `RUOK__SSE_PUBLIC` | `bool` | `false` | 是否允许未登录访问 SSE |
@@ -346,7 +348,10 @@ Bot 重启后会因 session 签名密钥变化而要求重新登录。
 
 ## HTTP API
 
-所有端点前缀为 `/ruok/api`，返回 JSON。API 鉴权与 WebUI 登录态相互独立：如果配置了 `RUOK__API_KEY`，请求必须带上以下任一凭据；未配置时不校验 API key。
+所有端点前缀为 `/ruok/api`，返回 JSON。API 鉴权与 WebUI 登录态相互独立。
+除 `/ruok/api/health` 外，请求必须配置 `RUOK__API_KEY` 并带上以下任一凭据；
+未配置 key 时，受保护端点默认拒绝访问。`/ruok/api/health` 只返回简单健康结果，
+可在未配置 key 时用于容器或负载均衡探针。
 
 ```http
 X-RUOK-API-Key: your-token
@@ -463,7 +468,7 @@ DELETE /ruok/api/modules/music
 | :--- | :--- |
 | `200` | 请求成功 |
 | `400` | 请求内容不合法，例如影响插件不属于 Session 原模块 |
-| `401` | API key 缺失或错误 |
+| `401` | API key 未配置、缺失或错误 |
 | `403` | Session 系统被禁用，相关写操作不可用 |
 | `404` | Session 或模块不存在 |
 | `503` | `/health` 探针判断服务不可用 |

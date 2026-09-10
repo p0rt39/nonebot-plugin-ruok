@@ -26,8 +26,11 @@ def test_api_key_required_when_configured(tmp_path: Path) -> None:
 def test_sessions_stats_route_is_not_shadowed(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.config import ScopedConfig
 
-    client = _client(ScopedConfig(), tmp_path)
-    response = client.get("/ruok/api/sessions/stats")
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+    response = client.get(
+        "/ruok/api/sessions/stats",
+        headers={"X-RUOK-API-Key": "secret"},
+    )
 
     assert response.status_code == 200
     assert response.json()["total"] == 0
@@ -66,14 +69,35 @@ def test_api_session_datetime_filters_accept_naive_utc_and_reject_invalid(
     from nonebot_plugin_ruok.collectors.sessions import create_session
 
     create_session(tmp_path, "music", "issue", ReporterInfo(type="user"))
-    client = _client(ScopedConfig(), tmp_path)
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
 
-    valid = client.get("/ruok/api/sessions?after=2000-01-01T00:00:00")
-    invalid = client.get("/ruok/api/sessions?after=not-a-datetime")
+    headers = {"X-RUOK-API-Key": "secret"}
+    valid = client.get(
+        "/ruok/api/sessions?after=2000-01-01T00:00:00",
+        headers=headers,
+    )
+    invalid = client.get(
+        "/ruok/api/sessions?after=not-a-datetime",
+        headers=headers,
+    )
 
     assert valid.status_code == 200
     assert len(valid.json()) == 1
     assert invalid.status_code == 400
+
+
+def test_api_requires_key_by_default_but_health_probe_remains_available(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    client = _client(ScopedConfig(), tmp_path)
+
+    assert client.get("/ruok/api/status").status_code == 401
+    assert client.get("/ruok/api/sessions").status_code == 401
+    assert client.get("/ruok/api/modules").status_code == 401
+    assert client.get("/ruok/api/metrics/history").status_code == 401
+    assert client.get("/ruok/api/health").status_code in (200, 503)
 
 
 def test_api_create_session_dispatches_rule_notification(
