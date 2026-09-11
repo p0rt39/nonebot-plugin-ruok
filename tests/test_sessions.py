@@ -45,6 +45,41 @@ class TestMakeSignature:
 
 
 class TestCreateAndGetSession:
+    def test_concurrent_creation_keeps_sessions_and_impacts(
+        self, tmp_path: Path
+    ) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            create_session,
+            build_plugin_impacts,
+        )
+
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="concurrent", plugins=["plugin_concurrent"]),
+        )
+
+        def create(index: int):
+            return create_session(
+                tmp_path,
+                "concurrent",
+                f"issue {index}",
+                ReporterInfo(type="user", user_id=str(index)),
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            sessions = list(executor.map(create, range(24)))
+
+        assert len(list_sessions(tmp_path, module_name="concurrent")) == 24
+        impacts = build_plugin_impacts(tmp_path)
+        assert set(impacts["plugin_concurrent"]["pending"]) == {
+            session.session_id for session in sessions
+        }
+
     def test_create_and_retrieve(self, tmp_path: Path) -> None:
         from nonebot_plugin_ruok.protocol import ReporterInfo
         from nonebot_plugin_ruok.collectors.sessions import (

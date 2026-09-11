@@ -9,7 +9,13 @@ from pathlib import Path
 from nonebot import logger
 
 from ..config import ScopedConfig
-from .sessions import list_sessions, build_plugin_impacts, rebuild_plugin_impacts
+from .storage import locked_file, atomic_write_text
+from .sessions import (
+    list_sessions,
+    _data_dir_lock,
+    build_plugin_impacts,
+    rebuild_plugin_impacts,
+)
 from ..protocol import Session, ModuleStatus, ModuleDefinition
 
 # ────────────────────────────────
@@ -23,8 +29,8 @@ def _modules_path(data_dir: Path) -> Path:
 
 def _path_write_json(path: Path, data: list[dict[str, Any]]) -> None:
     """Write JSON data to path, creating parent directories as needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    with locked_file(path):
+        atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _load_module_records(path: Path) -> list[ModuleDefinition]:
@@ -70,38 +76,39 @@ def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]
     Always includes a built-in «ruok» module representing RUOK itself.
     On first run, this module is persisted to modules.json.
     """
-    path = _modules_path(data_dir)
-    modules = _load_module_records(path)
+    with _data_dir_lock(data_dir):
+        path = _modules_path(data_dir)
+        modules = _load_module_records(path)
 
-    has_builtin = any(m.name == "ruok" for m in modules)
-    if not has_builtin:
-        modules.insert(0, _builtin_module())
-        _path_write_json(path, [m.model_dump() for m in modules])
-    else:
-        # Migration: keep old persisted built-in defaults aligned without
-        # overwriting user-customized labels.
-        changed = False
-        for m in modules:
-            if m.name != "ruok":
-                continue
-            if not m.plugins:
-                m.plugins = ["nonebot_plugin_ruok"]
-                changed = True
-            if m.display_name in {"RuOK", "ruok"}:
-                m.display_name = "RUOK"
-                changed = True
-            if m.description == "RuOK 插件自身 — 监控系统健康状态":
-                m.description = "RUOK 插件自身 — 监控系统健康状态"
-                changed = True
-            break
-        if changed:
-            _path_write_json(path, [mod.model_dump() for mod in modules])
+        has_builtin = any(m.name == "ruok" for m in modules)
+        if not has_builtin:
+            modules.insert(0, _builtin_module())
+            _path_write_json(path, [m.model_dump() for m in modules])
+        else:
+            # Migration: keep old persisted built-in defaults aligned without
+            # overwriting user-customized labels.
+            changed = False
+            for m in modules:
+                if m.name != "ruok":
+                    continue
+                if not m.plugins:
+                    m.plugins = ["nonebot_plugin_ruok"]
+                    changed = True
+                if m.display_name in {"RuOK", "ruok"}:
+                    m.display_name = "RUOK"
+                    changed = True
+                if m.description == "RuOK 插件自身 — 监控系统健康状态":
+                    m.description = "RUOK 插件自身 — 监控系统健康状态"
+                    changed = True
+                break
+            if changed:
+                _path_write_json(path, [mod.model_dump() for mod in modules])
 
-    rebuild_plugin_impacts(data_dir)
-    for mod in modules:
-        mod.status, mod.status_reasons = derive_module_status_with_reasons(
-            data_dir, mod.name
-        )
+        rebuild_plugin_impacts(data_dir)
+        for mod in modules:
+            mod.status, mod.status_reasons = derive_module_status_with_reasons(
+                data_dir, mod.name
+            )
     return modules
 
 
@@ -116,19 +123,20 @@ def get_module(
 
 def upsert_module(data_dir: Path, definition: ModuleDefinition) -> ModuleDefinition:
     path = _modules_path(data_dir)
-    modules = [module.model_dump() for module in _load_module_records(path)]
+    with _data_dir_lock(data_dir), locked_file(path):
+        modules = [module.model_dump() for module in _load_module_records(path)]
 
-    existing_idx = next(
-        (i for i, m in enumerate(modules) if m["name"] == definition.name),
-        None,
-    )
-    data = definition.model_dump()
-    if existing_idx is not None:
-        modules[existing_idx] = data
-    else:
-        modules.append(data)
+        existing_idx = next(
+            (i for i, m in enumerate(modules) if m["name"] == definition.name),
+            None,
+        )
+        data = definition.model_dump()
+        if existing_idx is not None:
+            modules[existing_idx] = data
+        else:
+            modules.append(data)
 
-    _path_write_json(path, modules)
+        _path_write_json(path, modules)
     return definition
 
 
@@ -136,11 +144,12 @@ def delete_module(data_dir: Path, name: str) -> bool:
     path = _modules_path(data_dir)
     if not path.exists():
         return False
-    modules = [module.model_dump() for module in _load_module_records(path)]
-    new_modules = [m for m in modules if m["name"] != name]
-    if len(new_modules) == len(modules):
-        return False
-    _path_write_json(path, new_modules)
+    with _data_dir_lock(data_dir), locked_file(path):
+        modules = [module.model_dump() for module in _load_module_records(path)]
+        new_modules = [m for m in modules if m["name"] != name]
+        if len(new_modules) == len(modules):
+            return False
+        _path_write_json(path, new_modules)
     return True
 
 

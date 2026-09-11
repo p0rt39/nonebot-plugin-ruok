@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from nonebot import logger
 
 from ..config import ScopedConfig
+from .storage import locked_file, atomic_write_text
 from ..protocol import (
     Session,
     ReporterInfo,
@@ -64,22 +65,27 @@ _SESSION_ID_RE = re.compile(r"^ruok-[0-9a-f]{8}$")
 # character set; newly generated IDs always use ``_SESSION_ID_RE``.
 _LEGACY_SESSION_ID_RE = re.compile(r"^ruok-[A-Za-z0-9_-]{1,64}$")
 
-# Automatic sessions are deduplicated by scanning the session directory before
-# writing a new file.  Keep that check-and-write operation atomic for all
-# capture paths in this process (loguru, stdlib logging, and internal errors).
-_AUTOMATIC_SESSION_LOCKS: dict[Path, threading.RLock] = {}
-_AUTOMATIC_SESSION_LOCKS_GUARD = threading.Lock()
+# Session operations and derived-index rebuilds share one process-wide lock per
+# data directory.  This keeps read/modify/write sequences consistent while the
+# per-file lock in ``storage`` protects direct writes as well.
+_DATA_DIR_LOCKS: dict[Path, threading.RLock] = {}
+_DATA_DIR_LOCKS_GUARD = threading.Lock()
+
+
+def _data_dir_lock(data_dir: Path) -> threading.RLock:
+    """Return the process-wide lock for session/index persistence."""
+    key = data_dir.resolve()
+    with _DATA_DIR_LOCKS_GUARD:
+        lock = _DATA_DIR_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _DATA_DIR_LOCKS[key] = lock
+        return lock
 
 
 def _automatic_session_lock(data_dir: Path) -> threading.RLock:
-    """Return the process-wide lock for automatic-session persistence."""
-    key = data_dir.resolve()
-    with _AUTOMATIC_SESSION_LOCKS_GUARD:
-        lock = _AUTOMATIC_SESSION_LOCKS.get(key)
-        if lock is None:
-            lock = threading.RLock()
-            _AUTOMATIC_SESSION_LOCKS[key] = lock
-        return lock
+    """Compatibility alias for the automatic-capture callers."""
+    return _data_dir_lock(data_dir)
 
 
 def _sessions_dir(data_dir: Path) -> Path:
@@ -111,7 +117,8 @@ def _plugin_impacts_path(data_dir: Path) -> Path:
 
 def _save_session(data_dir: Path, session: Session) -> None:
     path = _session_path(data_dir, session.session_id)
-    path.write_text(session.model_dump_json(indent=2), encoding="utf-8")
+    with locked_file(path):
+        atomic_write_text(path, session.model_dump_json(indent=2))
 
 
 def _load_session(data_dir: Path, session_id: str) -> Session | None:
@@ -121,7 +128,10 @@ def _load_session(data_dir: Path, session_id: str) -> Session | None:
         return None
     if not path.exists():
         return None
-    return Session.model_validate_json(path.read_text(encoding="utf-8"))
+    try:
+        return Session.model_validate_json(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, ValueError):
+        return None
 
 
 def _find_existing_session(data_dir: Path, signature: str) -> Session | None:
@@ -163,8 +173,9 @@ def create_session(
         description=description,
         affected_plugins=affected_plugins or [],
     )
-    _save_session(data_dir, session)
-    rebuild_plugin_impacts(data_dir)
+    with _data_dir_lock(data_dir):
+        _save_session(data_dir, session)
+        rebuild_plugin_impacts(data_dir)
     _publish_session_event("created", session)
     return session
 
@@ -247,38 +258,40 @@ def list_sessions(
 def update_session(
     data_dir: Path, session_id: str, updates: dict[str, Any]
 ) -> Session | None:
-    session = _load_session(data_dir, session_id)
-    if session is None:
-        return None
+    with _data_dir_lock(data_dir):
+        session = _load_session(data_dir, session_id)
+        if session is None:
+            return None
 
-    allowed = {
-        "status",
-        "developer_notes",
-        "last_seen_at",
-        "link_group",
-        "affected_plugins",
-    }
-    old_status = session.status
-    data = session.model_dump()
-    for k, v in updates.items():
-        if k in allowed:
-            data[k] = v
+        allowed = {
+            "status",
+            "developer_notes",
+            "last_seen_at",
+            "link_group",
+            "affected_plugins",
+        }
+        old_status = session.status
+        data = session.model_dump()
+        for k, v in updates.items():
+            if k in allowed:
+                data[k] = v
 
-    if "status" in updates:
-        if updates["status"] in ("solved", "ignored"):
-            data["resolved_at"] = datetime.now(timezone.utc)
-        elif updates["status"] in ("pending", "unsolved"):
-            data["resolved_at"] = None
+        if "status" in updates:
+            if updates["status"] in ("solved", "ignored"):
+                data["resolved_at"] = datetime.now(timezone.utc)
+            elif updates["status"] in ("pending", "unsolved"):
+                data["resolved_at"] = None
 
-    try:
-        session = Session.model_validate(data)
-    except ValueError as exc:
-        raise SessionUpdateValidationError(str(exc)) from exc
+        try:
+            session = Session.model_validate(data)
+        except ValueError as exc:
+            raise SessionUpdateValidationError(str(exc)) from exc
 
-    _save_session(data_dir, session)
-    if "status" in updates or "affected_plugins" in updates:
-        rebuild_plugin_impacts(data_dir)
-    if "status" in updates and updates["status"] != old_status:
+        _save_session(data_dir, session)
+        if "status" in updates or "affected_plugins" in updates:
+            rebuild_plugin_impacts(data_dir)
+        changed_status = "status" in updates and updates["status"] != old_status
+    if changed_status:
         _publish_session_event("updated", session, old_status=old_status)
     return session
 
@@ -441,45 +454,47 @@ def link_sessions(data_dir: Path, session_id_a: str, session_id_b: str) -> bool:
     - Different groups → merge all sessions in group B into group A.
     - Same group → no-op (idempotent).
     """
-    sa = _load_session(data_dir, session_id_a)
-    sb = _load_session(data_dir, session_id_b)
-    if sa is None or sb is None:
-        return False
-    if sa.session_id == sb.session_id:
-        return False
+    with _data_dir_lock(data_dir):
+        sa = _load_session(data_dir, session_id_a)
+        sb = _load_session(data_dir, session_id_b)
+        if sa is None or sb is None:
+            return False
+        if sa.session_id == sb.session_id:
+            return False
 
-    ga = sa.link_group
-    gb = sb.link_group
+        ga = sa.link_group
+        gb = sb.link_group
 
-    if ga is None and gb is None:
-        gid = f"ruok-grp-{secrets.token_hex(4)}"
-        sa.link_group = gid
-        sb.link_group = gid
-        _save_session(data_dir, sa)
-        _save_session(data_dir, sb)
-    elif ga and gb is None:
-        sb.link_group = ga
-        _save_session(data_dir, sb)
-    elif ga is None and gb:
-        sa.link_group = gb
-        _save_session(data_dir, sa)
-    elif ga == gb:
-        return True
-    elif ga is not None and gb is not None:
-        _merge_link_groups(data_dir, gb, ga)
-    else:
-        return False
+        if ga is None and gb is None:
+            gid = f"ruok-grp-{secrets.token_hex(4)}"
+            sa.link_group = gid
+            sb.link_group = gid
+            _save_session(data_dir, sa)
+            _save_session(data_dir, sb)
+        elif ga and gb is None:
+            sb.link_group = ga
+            _save_session(data_dir, sb)
+        elif ga is None and gb:
+            sa.link_group = gb
+            _save_session(data_dir, sa)
+        elif ga == gb:
+            return True
+        elif ga is not None and gb is not None:
+            _merge_link_groups(data_dir, gb, ga)
+        else:
+            return False
 
     return True
 
 
 def unlink_session(data_dir: Path, session_id: str) -> bool:
     """Remove a session from its link_group."""
-    s = _load_session(data_dir, session_id)
-    if s is None or s.link_group is None:
-        return False
-    s.link_group = None
-    _save_session(data_dir, s)
+    with _data_dir_lock(data_dir):
+        s = _load_session(data_dir, session_id)
+        if s is None or s.link_group is None:
+            return False
+        s.link_group = None
+        _save_session(data_dir, s)
     return True
 
 
@@ -547,31 +562,31 @@ def build_plugin_impacts(data_dir: Path) -> dict[str, dict[str, list[str]]]:
 
     This index is derived from Session JSON and is not the authoritative state.
     """
-    module_plugin_names = _build_module_plugin_map(data_dir)
-    module_to_plugins: dict[str, set[str]] = {}
-    for plugin_name, module_names in module_plugin_names.items():
-        for module_name in module_names:
-            module_to_plugins.setdefault(module_name, set()).add(plugin_name)
+    with _data_dir_lock(data_dir):
+        module_plugin_names = _build_module_plugin_map(data_dir)
+        module_to_plugins: dict[str, set[str]] = {}
+        for plugin_name, module_names in module_plugin_names.items():
+            for module_name in module_names:
+                module_to_plugins.setdefault(module_name, set()).add(plugin_name)
 
-    impacts: dict[str, dict[str, list[str]]] = {}
-    for session in list_sessions(data_dir):
-        if session.status == "pending":
-            plugin_names = sorted(module_to_plugins.get(session.module_name, set()))
-            for plugin_name in plugin_names:
-                _append_plugin_impact(impacts, plugin_name, "pending", session)
-        elif session.status == "unsolved":
-            for plugin_name in session.affected_plugins:
-                _append_plugin_impact(impacts, plugin_name, "unsolved", session)
-    return impacts
+        impacts: dict[str, dict[str, list[str]]] = {}
+        for session in list_sessions(data_dir):
+            if session.status == "pending":
+                plugin_names = sorted(module_to_plugins.get(session.module_name, set()))
+                for plugin_name in plugin_names:
+                    _append_plugin_impact(impacts, plugin_name, "pending", session)
+            elif session.status == "unsolved":
+                for plugin_name in session.affected_plugins:
+                    _append_plugin_impact(impacts, plugin_name, "unsolved", session)
+        return impacts
 
 
 def rebuild_plugin_impacts(data_dir: Path) -> dict[str, dict[str, list[str]]]:
     """Rebuild and persist plugin impact index from active sessions."""
-    impacts = build_plugin_impacts(data_dir)
-    _plugin_impacts_path(data_dir).write_text(
-        json.dumps(impacts, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    path = _plugin_impacts_path(data_dir)
+    with _data_dir_lock(data_dir), locked_file(path):
+        impacts = build_plugin_impacts(data_dir)
+        atomic_write_text(path, json.dumps(impacts, indent=2, ensure_ascii=False))
     return impacts
 
 

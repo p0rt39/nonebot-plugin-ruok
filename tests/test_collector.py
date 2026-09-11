@@ -8,6 +8,59 @@ import pytest
 
 
 class TestMetricsStore:
+    def test_append_serializes_concurrent_updates(self, tmp_path) -> None:
+        import json
+        from datetime import datetime, timezone, timedelta
+        from concurrent.futures import ThreadPoolExecutor
+
+        from nonebot_plugin_ruok.protocol import MetricPoint
+        from nonebot_plugin_ruok.collector import MetricsStore
+
+        base = datetime.now(timezone.utc)
+
+        def append_point(index: int) -> None:
+            MetricsStore.append(
+                tmp_path,
+                MetricPoint(
+                    ts=(base + timedelta(seconds=index)).isoformat(),
+                    cpu_percent=float(index),
+                ),
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(append_point, range(32)))
+
+        metrics_file = next((tmp_path / "metrics").glob("*.json"))
+        records = json.loads(metrics_file.read_text(encoding="utf-8"))
+        assert len(records) == 32
+        assert {record["cpu_percent"] for record in records} == set(range(32))
+
+    def test_append_quarantines_corrupt_file(self, tmp_path) -> None:
+        import json
+        from datetime import datetime, timezone
+
+        from nonebot_plugin_ruok.protocol import MetricPoint
+        from nonebot_plugin_ruok.collector import MetricsStore
+
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir()
+        today = datetime.now(timezone.utc).date().isoformat()
+        metrics_file = metrics_dir / f"{today}.json"
+        metrics_file.write_text("[{", encoding="utf-8")
+
+        MetricsStore.append(
+            tmp_path,
+            MetricPoint(ts=datetime.now(timezone.utc).isoformat(), cpu_percent=42.0),
+        )
+
+        backups = list(metrics_dir.glob(f"{today}.json.corrupt-*"))
+        assert len(backups) == 1
+        assert backups[0].read_text(encoding="utf-8") == "[{"
+        assert (
+            json.loads(metrics_file.read_text(encoding="utf-8"))[0]["cpu_percent"]
+            == 42.0
+        )
+
     def test_query_accepts_naive_timestamp(self, tmp_path) -> None:
         import json
         from datetime import datetime, timezone, timedelta

@@ -6,10 +6,14 @@ the ``collectors/`` subpackage.
 
 from __future__ import annotations
 
+import os
 import json
+import time
 from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
+
+from nonebot import logger
 
 from .protocol import MetricPoint
 
@@ -56,6 +60,7 @@ from .collectors import (
     list_module_related_sessions,
     derive_module_status_with_reasons,
 )
+from .collectors.storage import locked_file, atomic_write_text
 
 __all__ = [
     "DiskRateTracker",
@@ -129,19 +134,56 @@ class MetricsStore:
     @staticmethod
     def append(data_dir: Path, point: MetricPoint, retention_days: int = 7) -> None:
         """Append one MetricPoint to today's file and clean old files."""
+        metrics_dir = MetricsStore._metrics_dir(data_dir)
         file_path = MetricsStore._today_file(data_dir)
-        records: list[dict[str, Any]] = []
-        if file_path.exists():
-            try:
-                records = json.loads(file_path.read_text("utf-8"))
-            except (json.JSONDecodeError, OSError):
-                records = []
-        records.append(point.model_dump(mode="json"))
-        file_path.write_text(
-            json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        # Clean old files
-        MetricsStore._cleanup(data_dir, retention_days)
+        with locked_file(metrics_dir), locked_file(file_path):
+            records: list[dict[str, Any]] = []
+            if file_path.exists():
+                try:
+                    raw_records = json.loads(file_path.read_text("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                    if not MetricsStore._quarantine_corrupt_file(file_path):
+                        logger.warning(
+                            f"RUOK: cannot preserve corrupt metrics file "
+                            f"{file_path}: {exc}"
+                        )
+                        return
+                    logger.warning(
+                        f"RUOK: quarantined corrupt metrics file {file_path}: {exc}"
+                    )
+                except OSError as exc:
+                    logger.warning(f"RUOK: cannot read metrics file {file_path}: {exc}")
+                    return
+                else:
+                    if not isinstance(raw_records, list):
+                        if not MetricsStore._quarantine_corrupt_file(file_path):
+                            logger.warning(
+                                f"RUOK: cannot preserve invalid metrics file "
+                                f"{file_path}"
+                            )
+                            return
+                        logger.warning(
+                            f"RUOK: quarantined invalid metrics file {file_path}"
+                        )
+                    else:
+                        records = raw_records
+            records.append(point.model_dump(mode="json"))
+            atomic_write_text(
+                file_path,
+                json.dumps(records, indent=2, ensure_ascii=False),
+            )
+            # Clean old files while the metrics directory lock is held.
+            MetricsStore._cleanup(data_dir, retention_days)
+
+    @staticmethod
+    def _quarantine_corrupt_file(path: Path) -> bool:
+        """Move a malformed JSON file aside before replacing its live path."""
+        backup = path.with_name(f"{path.name}.corrupt-{time.time_ns()}-{os.getpid()}")
+        try:
+            os.replace(path, backup)
+        except OSError:
+            return False
+        return True
 
     @staticmethod
     def query(data_dir: Path, hours: float = 24.0) -> list[MetricPoint]:
@@ -163,7 +205,14 @@ class MetricsStore:
                 continue
             try:
                 records = json.loads(fpath.read_text("utf-8"))
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                logger.warning(f"RUOK: invalid metrics file {fpath}: {exc}")
+                continue
+            except OSError as exc:
+                logger.warning(f"RUOK: cannot read metrics file {fpath}: {exc}")
+                continue
+            if not isinstance(records, list):
+                logger.warning(f"RUOK: metrics file must contain an array: {fpath}")
                 continue
             for rec in records:
                 try:
@@ -191,13 +240,15 @@ class MetricsStore:
             datetime.now(timezone.utc) - timedelta(days=retention_days)
         ).date()
         metrics_dir = MetricsStore._metrics_dir(data_dir)
-        for f in metrics_dir.glob("*.json"):
-            try:
-                file_date = datetime.strptime(f.stem, "%Y-%m-%d").date()
-            except ValueError:
-                continue
-            if file_date < cutoff_date:
+        with locked_file(metrics_dir):
+            for f in metrics_dir.glob("*.json"):
                 try:
-                    f.unlink()
-                except OSError:
-                    pass
+                    file_date = datetime.strptime(f.stem, "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                if file_date < cutoff_date:
+                    with locked_file(f):
+                        try:
+                            f.unlink()
+                        except OSError:
+                            pass
