@@ -12,6 +12,7 @@ import httpx
 from nonebot import logger, get_driver
 
 from ..config import ScopedConfig
+from .storage import locked_file, atomic_write_text
 from ..protocol import Session, NotificationRule
 
 # ────────────────────────────────
@@ -119,15 +120,15 @@ def _load_cooldowns(data_dir: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text("utf-8"))
-    except (json.JSONDecodeError, OSError):
+        cooldowns = json.loads(path.read_text("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         return {}
+    return cooldowns if isinstance(cooldowns, dict) else {}
 
 
 def _save_cooldowns(data_dir: Path, cooldowns: dict[str, str]) -> None:
     path = _cooldowns_path(data_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cooldowns, indent=2), encoding="utf-8")
+    atomic_write_text(path, json.dumps(cooldowns, indent=2, ensure_ascii=False))
 
 
 def _is_cooling_down(
@@ -138,7 +139,7 @@ def _is_cooling_down(
         return False
     try:
         last = datetime.fromisoformat(last_str)
-    except ValueError:
+    except (TypeError, ValueError):
         return False
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
@@ -147,9 +148,59 @@ def _is_cooling_down(
     return datetime.now(timezone.utc) - last < timedelta(minutes=cooldown_minutes)
 
 
-def _update_cooldown(rule_name: str, cooldowns: dict[str, str], data_dir: Path) -> None:
-    cooldowns[rule_name] = datetime.now(timezone.utc).isoformat()
-    _save_cooldowns(data_dir, cooldowns)
+def _claim_cooldown(
+    rule_name: str,
+    cooldown_minutes: float,
+    data_dir: Path,
+) -> tuple[bool, str | None]:
+    """Atomically check and reserve a rule/module cooldown slot.
+
+    The returned timestamp identifies this reservation.  It is used to avoid
+    removing a newer reservation when a failed sender releases its own claim.
+    A non-positive cooldown keeps the historical "disabled" semantics and
+    does not persist a reservation.
+    """
+    if cooldown_minutes <= 0:
+        return True, None
+
+    path = _cooldowns_path(data_dir)
+    with locked_file(path):
+        cooldowns = _load_cooldowns(data_dir)
+        if _is_cooling_down(rule_name, cooldown_minutes, cooldowns):
+            return False, None
+
+        claimed_at = datetime.now(timezone.utc).isoformat()
+        cooldowns[rule_name] = claimed_at
+        try:
+            _save_cooldowns(data_dir, cooldowns)
+        except OSError as exc:
+            logger.warning(f"RUOK: cannot claim notification cooldown: {exc}")
+            return False, None
+        return True, claimed_at
+
+
+def _release_cooldown(
+    rule_name: str,
+    claimed_at: str,
+    data_dir: Path,
+) -> None:
+    """Release a failed notification's reservation if it is still current."""
+    path = _cooldowns_path(data_dir)
+    with locked_file(path):
+        cooldowns = _load_cooldowns(data_dir)
+        if cooldowns.get(rule_name) != claimed_at:
+            return
+        cooldowns.pop(rule_name, None)
+        if cooldowns:
+            try:
+                _save_cooldowns(data_dir, cooldowns)
+            except OSError as exc:
+                logger.warning(f"RUOK: cannot release notification cooldown: {exc}")
+        else:
+            try:
+                path.unlink()
+            except OSError as exc:
+                logger.warning(f"RUOK: cannot remove notification cooldown: {exc}")
 
 
 # ────────────────────────────────
@@ -247,12 +298,15 @@ async def dispatch_notification(
     if not matching:
         return
 
-    cooldowns = _load_cooldowns(data_dir)
-
-    tasks_by_rule: list[tuple[str, list[asyncio.Task[bool]]]] = []
+    tasks_by_rule: list[tuple[str, str | None, list[asyncio.Task[bool]]]] = []
     for rule in matching:
         cooldown_key = f"{rule.name}:{session.module_name}"
-        if _is_cooling_down(cooldown_key, rule.cooldown_minutes, cooldowns):
+        claimed, claimed_at = _claim_cooldown(
+            cooldown_key,
+            rule.cooldown_minutes,
+            data_dir,
+        )
+        if not claimed:
             continue
 
         tasks: list[asyncio.Task[bool]] = []
@@ -264,12 +318,19 @@ async def dispatch_notification(
             else:
                 logger.warning(f"RUOK: unknown notification channel: {channel}")
         if tasks:
-            tasks_by_rule.append((cooldown_key, tasks))
+            tasks_by_rule.append((cooldown_key, claimed_at, tasks))
+        elif claimed_at is not None:
+            _release_cooldown(cooldown_key, claimed_at, data_dir)
 
-    for cooldown_key, tasks in tasks_by_rule:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        if any(result is True for result in results):
-            _update_cooldown(cooldown_key, cooldowns, data_dir)
+    for cooldown_key, claimed_at, tasks in tasks_by_rule:
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        except BaseException:
+            if claimed_at is not None:
+                _release_cooldown(cooldown_key, claimed_at, data_dir)
+            raise
+        if claimed_at is not None and not any(result is True for result in results):
+            _release_cooldown(cooldown_key, claimed_at, data_dir)
 
 
 # ────────────────────────────────

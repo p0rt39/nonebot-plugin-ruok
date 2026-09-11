@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from webui_test_utils import (
@@ -453,3 +454,50 @@ async def test_failed_notification_does_not_start_cooldown(
 
     assert calls == ["ruok-1234abcd", "ruok-1234abcd"]
     assert not (tmp_path / "notification_cooldowns.json").exists()
+
+
+async def test_concurrent_notifications_atomically_claim_cooldown(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import Session, ReporterInfo, NotificationRule
+    from nonebot_plugin_ruok.collectors.notifications import (
+        _save_rules,
+        dispatch_notification,
+    )
+
+    calls: list[str] = []
+    send_started = asyncio.Event()
+    release_send = asyncio.Event()
+
+    async def delayed_send(session: Session) -> bool:
+        calls.append(session.session_id)
+        send_started.set()
+        await release_send.wait()
+        return True
+
+    monkeypatch.setattr(
+        "nonebot_plugin_ruok.collectors.notifications._send_bot_dm",
+        delayed_send,
+    )
+    _save_rules(
+        tmp_path,
+        [NotificationRule(name="test", channels=["bot_dm"], cooldown_minutes=60)],
+    )
+    session = Session(
+        session_id="ruok-1234abcd",
+        source="manual",
+        module_name="music",
+        reporter=ReporterInfo(type="user"),
+    )
+
+    first = asyncio.create_task(
+        dispatch_notification(session, ScopedConfig(), tmp_path)
+    )
+    await asyncio.wait_for(send_started.wait(), timeout=1)
+    await dispatch_notification(session, ScopedConfig(), tmp_path)
+
+    assert calls == ["ruok-1234abcd"]
+    release_send.set()
+    await first

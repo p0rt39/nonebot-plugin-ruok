@@ -237,6 +237,10 @@ RUOK 默认依赖 `nonebot-plugin-htmlrender`，可将 `/ruok status` 和 `/ruok
 | `channels` | `list[str]` | `bot_dm`、`webhook` |
 | `webhook_url` | `str | null` | Webhook URL |
 
+冷却按“规则名 + 模块名”分别计算。发送前会在 data 目录的冷却文件中原子声明
+本次发送，短时间内并发到达的相同事件只会执行一次通知；所有通道都发送失败时会
+释放声明，以便后续事件重试。冷却锁为单进程锁，多进程部署需要文件锁或事务型存储。
+
 ## 聊天指令
 
 | 指令 | 权限 | 说明 |
