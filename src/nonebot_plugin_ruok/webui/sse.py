@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+from math import ceil, isfinite
 from typing import Any
 from datetime import datetime, timezone
 from collections.abc import AsyncGenerator
@@ -56,6 +57,18 @@ event_bus = EventBus()
 # ── SSE endpoint factory ──
 
 
+def _tick_count_from_ttl(config_ttl: float) -> int:
+    """Return the number of one-second ticks between full collections.
+
+    Configuration validation rejects non-finite values and values below the
+    supported lower bound. Keep this second boundary defensive because the
+    generator is also callable directly by integrations and tests.
+    """
+    if not isfinite(config_ttl):
+        raise ValueError("SSE cache_ttl must be a finite number")
+    return max(1, ceil(config_ttl))
+
+
 async def sse_event_generator(
     config_ttl: float,
     collect_status_fn,
@@ -67,12 +80,11 @@ async def sse_event_generator(
     - Lightweight tick (event: tick) every 1 second with cached timestamp.
     - Session updates (event: session_update) pushed immediately.
     """
-    session_q = event_bus_ref.subscribe("session_update")
-
     # Cached values from the last full status collection
     cached_overall: str = "unknown"
     cached_connections: dict[str, int] = {"online": 0, "total": 0}
-    tick_count = int(config_ttl)  # number of 1s ticks between full collections
+    tick_count = _tick_count_from_ttl(config_ttl)
+    session_q = event_bus_ref.subscribe("session_update")
 
     try:
         from ..collector import (
@@ -82,7 +94,6 @@ async def sse_event_generator(
             collect_process_snapshot,
         )
 
-        tick_count = int(config_ttl)
         metrics_interval = 1  # fire lightweight collection every tick
         ticks_since_metrics = 0
         _tick_index = 0  # for alternating heavy/light collection

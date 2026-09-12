@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import Field, BaseModel, FiniteFloat
 
 
 class ScopedConfig(BaseModel):
@@ -11,7 +11,10 @@ class ScopedConfig(BaseModel):
     # ── Health check ──
     check_timeout: float = 5.0
     ws_deep_check_timeout: float = 3.0
-    cache_ttl: float = 10.0
+    # The SSE loop ticks once per second and uses this value for its full
+    # status collection cadence. Keep it finite and at least half a second;
+    # the SSE consumer rounds sub-second values up to one tick.
+    cache_ttl: FiniteFloat = Field(default=10.0, ge=0.5)
     enable_deep_ws_check: bool = True
 
     # ── Session ──

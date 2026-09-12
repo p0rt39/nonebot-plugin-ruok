@@ -151,8 +151,11 @@ RUOK 设计上不绑定具体适配器，但当前主要针对 OneBot V11 做了
 | :--- | :--- | :--- | :--- |
 | `RUOK__CHECK_TIMEOUT` | `float` | `5.0` | 健康检查超时时间，单位秒 |
 | `RUOK__WS_DEEP_CHECK_TIMEOUT` | `float` | `3.0` | Bot 深度检查超时时间 |
-| `RUOK__CACHE_TTL` | `float` | `10.0` | API 聚合状态缓存时间 |
+| `RUOK__CACHE_TTL` | `float` | `10.0` | API 聚合状态缓存时间，必须为有限数且不小于 `0.5` 秒 |
 | `RUOK__ENABLE_DEEP_WS_CHECK` | `bool` | `true` | 是否调用 `bot.get_status()` 与各Bot做端到端检查 |
+
+SSE 每秒发送一次轻量 tick，并按此 TTL 触发完整状态采集；小于 1 秒的值会向上取整为 1 个 tick。
+无效或小于 `0.5` 的值会在配置加载时被拒绝。
 
 连接列表中的 `connected` 由当前 Bot 是否存在、底层 WS 是否明确关闭以及深度检查返回的
 `online` 字段共同推导。重连后会清除上一次断开的时间、错误和延迟；`ws_closed` 为 `null`
