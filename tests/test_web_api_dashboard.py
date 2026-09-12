@@ -237,3 +237,19 @@ def test_dashboard_trends_do_not_replace_canvas_with_htmx(tmp_path: Path) -> Non
     assert "/ruok/static/vendor/chartjs/chart.umd.min.js" in response.text
     assert '<div id="dashboard-trends">' in response.text
     assert "ruok:metrics" in response.text
+
+
+def test_dashboard_sse_host_metadata_uses_text_content_rendering(
+    tmp_path: Path,
+) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    assert "diskPerList.innerHTML" not in response.text
+    assert "procPanel.innerHTML" not in response.text
+    assert "diskRow.textContent" in response.text
+    assert "processRow.textContent" in response.text
+    assert "document.createElement('div')" in response.text

@@ -186,6 +186,8 @@ RUOK 设计上不绑定具体适配器，但当前主要针对 OneBot V11 做了
 | `RUOK__WEBUI_ADMIN_PASSWORD` | `str` | `""` | 内置 `admin` 账户密码；为空则 WebUI 无法登录 |
 | `RUOK__WEBUI_SECRET_KEY` | `str` | `""` | WebUI session 签名密钥；为空则每次启动随机，重启后登录态/保持登录功能会失效 |
 | `RUOK__SSE_PUBLIC` | `bool` | `false` | 是否允许未登录访问 SSE |
+仪表盘通过 SSE 更新磁盘和进程详情。主机提供的挂载点、进程名等动态值会以纯文本写入页面，
+不会作为 HTML 执行。
 
 API key 可通过任一方式传递：
 

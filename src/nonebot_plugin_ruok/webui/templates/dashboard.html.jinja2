@@ -244,18 +244,22 @@
             // Per-disk expand
             var diskPerList = el('disk-per-list');
             if (diskPerList && m.disk_per) {
-                var html = '';
+                while (diskPerList.firstChild) diskPerList.removeChild(diskPerList.firstChild);
                 var keys = Object.keys(m.disk_per);
                 if (keys.length === 0) {
-                    html = '<div style="color:var(--pico-muted-color);">无磁盘 I/O 数据</div>';
+                    var emptyDisk = document.createElement('div');
+                    emptyDisk.style.color = 'var(--pico-muted-color)';
+                    emptyDisk.textContent = '无磁盘 I/O 数据';
+                    diskPerList.appendChild(emptyDisk);
                 } else {
                     keys.forEach(function(name) {
                         var d = m.disk_per[name];
-                        html += '<div>' + name + ': 读 ' + fmtBytes(d.read_bytes_per_sec || 0) +
-                                '/s | 写 ' + fmtBytes(d.write_bytes_per_sec || 0) + '/s</div>';
+                        var diskRow = document.createElement('div');
+                        diskRow.textContent = name + ': 读 ' + fmtBytes(d.read_bytes_per_sec || 0) +
+                                '/s | 写 ' + fmtBytes(d.write_bytes_per_sec || 0) + '/s';
+                        diskPerList.appendChild(diskRow);
                     });
                 }
-                diskPerList.innerHTML = html;
             }
 
             // --- Process tile ---
@@ -265,18 +269,30 @@
             if (botRssEl) botRssEl.textContent = 'Bot: ' + fmtBytes(m.bot_rss || 0);
             var procPanel = el('proc-detail-panel');
             if (procPanel) {
-                var h = '<div><strong>Bot 进程:</strong> RSS ' + fmtBytes(m.bot_rss || 0) +
+                while (procPanel.firstChild) procPanel.removeChild(procPanel.firstChild);
+                var botDetails = document.createElement('div');
+                var botLabel = document.createElement('strong');
+                botLabel.textContent = 'Bot 进程:';
+                botDetails.appendChild(botLabel);
+                botDetails.appendChild(document.createTextNode(' RSS ' + fmtBytes(m.bot_rss || 0) +
                         ' | VMS ' + fmtBytes(m.bot_vms || 0) +
                         ' | 线程 ' + (m.bot_threads || 0) +
-                        ' | CPU ' + (m.bot_cpu || 0).toFixed(1) + '%</div>';
+                        ' | CPU ' + (m.bot_cpu || 0).toFixed(1) + '%'));
+                procPanel.appendChild(botDetails);
                 if (m.top_processes && m.top_processes.length) {
-                    h += '<div style="margin-top:0.4rem;"><strong>Top 进程 (CPU):</strong></div>';
+                    var topLabel = document.createElement('div');
+                    topLabel.style.marginTop = '0.4rem';
+                    var topStrong = document.createElement('strong');
+                    topStrong.textContent = 'Top 进程 (CPU):';
+                    topLabel.appendChild(topStrong);
+                    procPanel.appendChild(topLabel);
                     m.top_processes.forEach(function(p) {
-                        h += '<div>' + p.name + ' (PID ' + p.pid + '): CPU ' +
-                             p.cpu_percent.toFixed(1) + '% | RSS ' + fmtBytes(p.mem_rss) + '</div>';
+                        var processRow = document.createElement('div');
+                        processRow.textContent = p.name + ' (PID ' + p.pid + '): CPU ' +
+                             p.cpu_percent.toFixed(1) + '% | RSS ' + fmtBytes(p.mem_rss);
+                        procPanel.appendChild(processRow);
                     });
                 }
-                procPanel.innerHTML = h;
             }
 
             // --- Uptime tile ---
