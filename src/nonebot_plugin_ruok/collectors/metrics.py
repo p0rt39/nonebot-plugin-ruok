@@ -9,6 +9,7 @@ import asyncio
 from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone
+from collections.abc import Mapping
 
 import nonebot
 from nonebot import get_driver
@@ -211,7 +212,14 @@ _connection_history: dict[str, BotConnectionStatus] = {}
 async def _collect_connection_status(
     config: ScopedConfig,
 ) -> list[BotConnectionStatus]:
-    """Collect WS connection health for all known bots."""
+    """Collect connection health for all known bots.
+
+    ``get_bots()`` is the source for adapter-level presence.  A WS adapter can
+    still expose a Bot while its underlying connection is closed, and the
+    optional ``get_status()`` call can explicitly report that the Bot is
+    offline.  Only explicit negative signals mark a present Bot disconnected;
+    a missing deep-check result remains an unknown signal.
+    """
     bots = nonebot.get_bots()
     result: list[BotConnectionStatus] = []
 
@@ -220,6 +228,7 @@ async def _collect_connection_status(
     for self_id, bot in bots.items():
         entry = _connection_history.get(self_id)
         if entry is None:
+            was_connected = True
             entry = BotConnectionStatus(
                 self_id=self_id,
                 adapter=bot.type,
@@ -228,26 +237,49 @@ async def _collect_connection_status(
             )
             _connection_history[self_id] = entry
         else:
+            # A Bot reappearing after a disconnect starts a fresh connection
+            # interval.  Clear fields that describe the previous failure
+            # before applying this collection's signals.
+            was_connected = entry.connected and entry.disconnected_at is None
+            entry.adapter = bot.type
             entry.connected = True
+            entry.error = None
+            entry.latency_ms = None
 
         # OneBot WS-level check
+        ws_closed: bool | None = None
         try:
             for adapter in getattr(get_driver(), "_adapters", {}).values():
                 conns = getattr(adapter, "connections", None)
                 if conns is not None and self_id in conns:
-                    entry.ws_closed = conns[self_id].closed
+                    closed = getattr(conns[self_id], "closed", None)
+                    if isinstance(closed, bool):
+                        ws_closed = closed
                     break
         except (AttributeError, KeyError):
             pass
+        entry.ws_closed = ws_closed
+
+        # Keep the adapter-presence signal separate from the deep-check
+        # result.  A response without an ``online`` field, or a failed check,
+        # leaves the e2e signal unknown; an explicit ``online: false`` response
+        # is a confirmed disconnect.
+        e2e_online: bool | None = None
 
         # Deep e2e check
         if config.enable_deep_ws_check:
             try:
                 t0 = time.monotonic()
-                await asyncio.wait_for(
+                status = await asyncio.wait_for(
                     bot.get_status(), timeout=config.ws_deep_check_timeout
                 )
                 entry.latency_ms = (time.monotonic() - t0) * 1000
+                if isinstance(status, Mapping):
+                    online = status.get("online")
+                else:
+                    online = getattr(status, "online", None)
+                if isinstance(online, bool):
+                    e2e_online = online
             except asyncio.TimeoutError:
                 entry.latency_ms = None
                 entry.error = "get_status() timed out"
@@ -257,14 +289,29 @@ async def _collect_connection_status(
                 entry.latency_ms = None
                 entry.error = f"{type(exc).__name__}: {exc}"
 
+        # Derive the public state from all signals collected above.  ``None``
+        # means that a signal is unavailable and must not be treated as a
+        # confirmed disconnect.
+        entry.connected = ws_closed is not True and e2e_online is not False
+        if not entry.connected:
+            if entry.disconnected_at is None:
+                entry.disconnected_at = datetime.now(timezone.utc)
+        else:
+            if not was_connected:
+                entry.connected_at = datetime.now(timezone.utc)
+            entry.disconnected_at = None
+
         result.append(entry)
 
     # Mark disconnected bots
     for self_id, entry in _connection_history.items():
-        if self_id not in online_ids and entry.connected:
-            entry.connected = False
-            entry.disconnected_at = datetime.now(timezone.utc)
         if self_id not in online_ids:
+            if entry.connected:
+                entry.connected = False
+            if entry.disconnected_at is None:
+                entry.disconnected_at = datetime.now(timezone.utc)
+            entry.ws_closed = None
+            entry.latency_ms = None
             result.append(entry)
 
     return result

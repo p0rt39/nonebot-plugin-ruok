@@ -154,6 +154,11 @@ RUOK 设计上不绑定具体适配器，但当前主要针对 OneBot V11 做了
 | `RUOK__CACHE_TTL` | `float` | `10.0` | API 聚合状态缓存时间 |
 | `RUOK__ENABLE_DEEP_WS_CHECK` | `bool` | `true` | 是否调用 `bot.get_status()` 与各Bot做端到端检查 |
 
+连接列表中的 `connected` 由当前 Bot 是否存在、底层 WS 是否明确关闭以及深度检查返回的
+`online` 字段共同推导。重连后会清除上一次断开的时间、错误和延迟；`ws_closed` 为 `null`
+表示当前适配器没有提供 WS 状态，不能据此判定断开。深度检查返回 `online=false` 或 WS
+明确关闭时连接显示为离线；检查异常会保留当前错误并将端到端状态视为未知。
+
 ### Session 与上报
 
 | 配置项 | 类型 | 默认值 | 说明 |

@@ -151,6 +151,120 @@ class TestCollectFastMetrics:
             assert 0 <= fm.cpu_temp <= 120
 
 
+class TestCollectConnectionStatus:
+    @pytest.mark.asyncio
+    async def test_recovery_clears_previous_failure_metadata(self, monkeypatch) -> None:
+        from datetime import datetime, timezone, timedelta
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import BotConnectionStatus
+        from nonebot_plugin_ruok.collectors import metrics
+
+        class FakeBot:
+            self_id = "bot-1"
+            type = "fake"
+
+            async def get_status(self):
+                return {"online": True, "good": True}
+
+        old_disconnect = datetime.now(timezone.utc) - timedelta(minutes=1)
+        metrics._connection_history.clear()
+        metrics._connection_history["bot-1"] = BotConnectionStatus(
+            self_id="bot-1",
+            adapter="fake",
+            connected=False,
+            connected_at=old_disconnect - timedelta(minutes=5),
+            disconnected_at=old_disconnect,
+            ws_closed=True,
+            latency_ms=12.0,
+            error="previous failure",
+        )
+        monkeypatch.setattr(metrics.nonebot, "get_bots", lambda: {"bot-1": FakeBot()})
+        monkeypatch.setattr(metrics, "get_driver", lambda: type("Driver", (), {})())
+
+        try:
+            result = await metrics._collect_connection_status(ScopedConfig())
+        finally:
+            metrics._connection_history.clear()
+
+        entry = result[0]
+        assert entry.connected is True
+        assert entry.connected_at is not None
+        assert entry.connected_at > old_disconnect
+        assert entry.disconnected_at is None
+        assert entry.ws_closed is None
+        assert entry.latency_ms is not None
+        assert entry.error is None
+
+    @pytest.mark.asyncio
+    async def test_closed_ws_marks_present_bot_disconnected(self, monkeypatch) -> None:
+        from typing import ClassVar
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors import metrics
+
+        class FakeBot:
+            self_id = "bot-1"
+            type = "fake"
+
+            async def get_status(self):
+                raise AssertionError("deep check is disabled")
+
+        class FakeConnection:
+            closed = True
+
+        class FakeAdapter:
+            connections: ClassVar = {"bot-1": FakeConnection()}
+
+        class FakeDriver:
+            _adapters: ClassVar = {"fake": FakeAdapter()}
+
+        metrics._connection_history.clear()
+        monkeypatch.setattr(metrics.nonebot, "get_bots", lambda: {"bot-1": FakeBot()})
+        monkeypatch.setattr(metrics, "get_driver", lambda: FakeDriver())
+
+        try:
+            result = await metrics._collect_connection_status(
+                ScopedConfig(enable_deep_ws_check=False)
+            )
+        finally:
+            metrics._connection_history.clear()
+
+        entry = result[0]
+        assert entry.connected is False
+        assert entry.ws_closed is True
+        assert entry.disconnected_at is not None
+
+    @pytest.mark.asyncio
+    async def test_offline_status_payload_marks_present_bot_disconnected(
+        self, monkeypatch
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors import metrics
+
+        class FakeBot:
+            self_id = "bot-1"
+            type = "fake"
+
+            async def get_status(self):
+                return {"online": False, "good": False}
+
+        metrics._connection_history.clear()
+        monkeypatch.setattr(metrics.nonebot, "get_bots", lambda: {"bot-1": FakeBot()})
+        monkeypatch.setattr(metrics, "get_driver", lambda: type("Driver", (), {})())
+
+        try:
+            result = await metrics._collect_connection_status(ScopedConfig())
+        finally:
+            metrics._connection_history.clear()
+
+        entry = result[0]
+        assert entry.connected is False
+        assert entry.ws_closed is None
+        assert entry.error is None
+        assert entry.disconnected_at is not None
+
+
 class TestCollectProcessSnapshot:
     @pytest.mark.asyncio
     async def test_returns_valid_snapshot(self) -> None:
