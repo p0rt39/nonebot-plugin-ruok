@@ -90,6 +90,10 @@ RUOK__API_KEY=replace-with-a-long-random-api-token
 
 如果`RUOK__WEBUI_ADMIN_PASSWORD`未配置，WebUI将**不可用**。
 
+WebUI 签名 session 默认 3600 秒后过期。可通过 `RUOK__WEBUI_SESSION_TTL`（正整数秒）
+调整登录 session 的有效期；这不会改变“保持登录” token 的 30 天期限。WebUI 可以通过
+本地 Uvicorn、Tunnel 或反向代理访问，请根据实际入口配置 HTTPS 终止和转发策略。
+
 如果没有配置 `RUOK__WEBUI_SECRET_KEY`，WebUI session 会使用启动时随机密钥。这不会影响本次运行内的登录、注册、绑定等功能，但 Bot 重启后旧登录态和“保持登录”cookie 无法继续校验，用户需要重新登录。
 
 ### 4. 启动并访问 WebUI
@@ -193,6 +197,7 @@ SSE 每秒发送一次轻量 tick，并按此 TTL 触发完整状态采集；小
 | `RUOK__API_KEY` | `str` | `""` | HTTP API key；除 `/ruok/api/health` 外的 API 端点必须配置 |
 | `RUOK__WEBUI_ADMIN_PASSWORD` | `str` | `""` | 内置 `admin` 账户密码；为空则 WebUI 无法登录 |
 | `RUOK__WEBUI_SECRET_KEY` | `str` | `""` | WebUI session 签名密钥；为空则每次启动随机，重启后登录态/保持登录功能会失效 |
+| `RUOK__WEBUI_SESSION_TTL` | `int` | `3600` | WebUI 签名登录 session 的有效期（秒，必须为正整数） |
 | `RUOK__SSE_PUBLIC` | `bool` | `false` | 是否允许未登录访问 SSE |
 
 仪表盘通过 SSE 更新磁盘和进程详情。主机提供的挂载点、进程名等动态值会以纯文本写入页面，

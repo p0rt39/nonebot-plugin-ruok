@@ -601,7 +601,12 @@ if isinstance(driver, ASGIMixin):
                     "RUOK: webui_secret_key not set — sessions invalidate on restart. "
                     "Set RUOK__WEBUI_SECRET_KEY in .env for persistence."
                 )
-            app.add_middleware(SessionMiddleware, secret_key=secret, max_age=None)
+            app.add_middleware(
+                SessionMiddleware,
+                secret_key=secret,
+                max_age=plugin_config.webui_session_ttl,
+                same_site="lax",
+            )
             logger.info("RUOK SessionMiddleware registered")
         except (ImportError, RuntimeError) as exc:
             logger.warning(f"RUOK SessionMiddleware setup failed: {exc}")

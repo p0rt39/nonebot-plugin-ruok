@@ -27,6 +27,29 @@ def test_webui_admin_password_login(tmp_path: Path) -> None:
     assert response.headers["location"] == "/ruok"
 
 
+def test_webui_session_cookie_has_configured_ttl_and_default_flags(
+    tmp_path: Path,
+) -> None:
+    client = _client(_webui_config(webui_session_ttl=600), tmp_path)
+
+    response = client.post(
+        "/ruok/login",
+        data={"username": "admin", "password": ADMIN_PASSWORD},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    session_cookie = next(
+        value
+        for value in response.headers.get_list("set-cookie")
+        if value.lower().startswith("session=")
+    ).lower()
+    assert "max-age=600" in session_cookie
+    assert "httponly" in session_cookie
+    assert "samesite=lax" in session_cookie
+    assert "secure" not in session_cookie
+
+
 def test_webui_without_admin_password_cannot_login(tmp_path: Path) -> None:
     from nonebot_plugin_ruok.config import ScopedConfig
 

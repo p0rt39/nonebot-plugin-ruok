@@ -34,6 +34,8 @@ class ScopedConfig(BaseModel):
     api_key: str = ""
     webui_admin_password: str = ""  # WebUI 内置 admin 账户密码
     webui_secret_key: str = ""  # SessionMiddleware 密钥（空=每次重启随机生成）
+    # Signed sessions expire independently from the 30-day remember token.
+    webui_session_ttl: int = Field(default=3600, gt=0)
     sse_public: bool = False  # True 时 SSE 端点不需要登录
 
     # ── Time-series metrics ──

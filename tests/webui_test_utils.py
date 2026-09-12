@@ -22,7 +22,12 @@ def _client(
     from nonebot_plugin_ruok.webui.router import create_webui_router
 
     app = FastAPI()
-    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key="test-secret",
+        max_age=config.webui_session_ttl,
+        same_site="lax",
+    )
     auth = WebUIAuth(config, data_dir, superuser_provider=lambda: superusers)
     app.include_router(auth.create_router())
     app.include_router(create_ruok_router(config, data_dir))
