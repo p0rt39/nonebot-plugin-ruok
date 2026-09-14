@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-ruok"
-version = "0.2.1"
+version = "0.3.0"
 description = "Bot health monitoring, session tracking, and WebUI for NoneBot2"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -53,7 +53,7 @@ build-backend = "uv_build"
 
 
 [tool.bumpversion]
-current_version = "0.2.1"
+current_version = "0.3.0"
 commit = true
 message = "release: bump vesion from {current_version} to {new_version}"
 tag = true
