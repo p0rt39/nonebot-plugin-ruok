@@ -706,12 +706,20 @@ async def _startup() -> None:
         logger.info("RUOK: non-ASGI driver, skipping API/WebUI mount")
 
     # Start LogMonitor (works regardless of driver type)
-    log_monitor.start()
+    try:
+        log_monitor.start()
+    except Exception as exc:
+        # Monitoring is best-effort and must never prevent the bot from
+        # completing startup.
+        logger.warning(f"RUOK: LogMonitor startup failed: {exc}")
 
     # Ensure notification rules are initialized on first run
     from .collectors.notifications import _load_rules
 
-    _load_rules(data_dir)
+    try:
+        _load_rules(data_dir)
+    except Exception as exc:
+        logger.warning(f"RUOK: notification rule initialization failed: {exc}")
 
     # Register summary notification job (best-effort, APScheduler optional)
     try:
@@ -726,5 +734,8 @@ async def _startup() -> None:
 
 @driver.on_shutdown
 async def _shutdown() -> None:
-    log_monitor.stop()
+    try:
+        log_monitor.stop()
+    except Exception as exc:
+        logger.warning(f"RUOK: LogMonitor shutdown failed: {exc}")
     logger.info("RUOK plugin stopped")

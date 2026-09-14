@@ -22,7 +22,7 @@ class ScopedConfig(BaseModel):
     auto_session_enabled: bool = True
     strict_exception_capture: bool = False
     # False: stdlib logging handler only captures framework logs
-    #   (uvicorn, starlette, fastapi, asyncio).
+    #   (uvicorn, starlette, fastapi, asyncio, multipart).
     # True: captures ALL stdlib ERROR/CRITICAL from any logger.
     report_whitelist_users: list[str] = []
     report_whitelist_groups: list[str] = []

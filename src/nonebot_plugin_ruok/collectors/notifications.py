@@ -92,15 +92,25 @@ def _save_rules(data_dir: Path, rules: list[NotificationRule]) -> None:
 def evaluate_rules(
     session: Session,
     rules: list[NotificationRule],
+    data_dir: Path | None = None,
 ) -> list[NotificationRule]:
     """Return rules that match the given session."""
+    module_names = {session.module_name}
+    if data_dir is not None:
+        try:
+            from .modules import resolve_log_source
+
+            _, matched_modules = resolve_log_source(data_dir, session.module_name)
+            module_names.update(matched_modules)
+        except Exception:
+            pass
     matching: list[NotificationRule] = []
     for rule in rules:
         if not rule.enabled:
             continue
         if session.status not in rule.on_status:
             continue
-        if rule.on_module and session.module_name not in rule.on_module:
+        if rule.on_module and not module_names.intersection(rule.on_module):
             continue
         matching.append(rule)
     return matching
@@ -294,7 +304,7 @@ async def dispatch_notification(
         return
 
     rules = _load_rules(data_dir)
-    matching = evaluate_rules(session, rules)
+    matching = evaluate_rules(session, rules, data_dir)
     if not matching:
         return
 

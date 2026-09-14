@@ -235,8 +235,10 @@ def list_sessions(
             continue
         if plugin_name and module_plugin_names:
             allowed_modules = module_plugin_names.get(plugin_name, set())
-            if s.module_name not in allowed_modules and plugin_name not in (
-                s.affected_plugins
+            if (
+                s.module_name not in allowed_modules
+                and s.module_name != plugin_name
+                and plugin_name not in s.affected_plugins
             ):
                 continue
         if search:
@@ -346,7 +348,24 @@ def _module_plugins(
     from .modules import get_module
 
     module = get_module(data_dir, config, module_name)
-    return module.plugins if module else []
+    if module:
+        return module.plugins
+
+    # Ambiguous log sources are persisted under their plugin ID.  Allow
+    # confirmation against the union of plugins on all modules that reference
+    # that source, while preserving the explicit plugin selection in the
+    # Session itself.
+    from .modules import _load_module_definitions
+
+    modules = _load_module_definitions(data_dir)
+    plugins: list[str] = []
+    for definition in modules.values():
+        if module_name not in definition.plugins:
+            continue
+        for plugin in definition.plugins:
+            if plugin not in plugins:
+                plugins.append(plugin)
+    return plugins
 
 
 def _publish_session_event(
@@ -393,7 +412,12 @@ def _handle_ruok_error(
     """
     tb_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
-    logger.error(f"RUOK 内部异常 [{context}]: {type(exc).__name__}: {exc}\n{tb_text}")
+    # Keep the traceback visible in the normal log while marking it as an
+    # internal RUOK event.  LogMonitor retains the explicit ``ruok`` Session
+    # below and skips this mirrored log record to avoid self-duplication.
+    logger.bind(ruok_internal=True).error(
+        f"RUOK 内部异常 [{context}]: {type(exc).__name__}: {exc}\n{tb_text}"
+    )
 
     signature = _make_signature("ruok", type(exc).__name__, str(exc)[:100])
 
@@ -543,17 +567,25 @@ def _build_module_plugin_map(data_dir: Path) -> dict[str, set[str]]:
     """Build mapping: plugin_name → set of module_names that reference it."""
     mapping: dict[str, set[str]] = {}
     modules_path = data_dir / "modules.json"
-    if not modules_path.exists():
-        return mapping
-    try:
-        modules_data = json.loads(modules_path.read_text("utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return mapping
-    for m in modules_data:
-        mod_name = m.get("name", "")
-        plugins = m.get("plugins", [])
-        for p in plugins:
-            mapping.setdefault(p, set()).add(mod_name)
+    if modules_path.exists():
+        try:
+            modules_data = json.loads(modules_path.read_text("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            modules_data = []
+        if isinstance(modules_data, list):
+            for m in modules_data:
+                if not isinstance(m, dict):
+                    continue
+                mod_name = m.get("name", "")
+                plugins = m.get("plugins", [])
+                if not isinstance(mod_name, str) or not isinstance(plugins, list):
+                    continue
+                for p in plugins:
+                    if isinstance(p, str):
+                        mapping.setdefault(p, set()).add(mod_name)
+    # The built-in module is always available, even before modules.json has
+    # been initialized by the normal startup path.
+    mapping.setdefault("nonebot_plugin_ruok", set()).add("ruok")
     return mapping
 
 
@@ -572,8 +604,12 @@ def build_plugin_impacts(data_dir: Path) -> dict[str, dict[str, list[str]]]:
         impacts: dict[str, dict[str, list[str]]] = {}
         for session in list_sessions(data_dir):
             if session.status == "pending":
-                plugin_names = sorted(module_to_plugins.get(session.module_name, set()))
-                for plugin_name in plugin_names:
+                plugin_names = set(module_to_plugins.get(session.module_name, set()))
+                # A shared/ambiguous log source is stored under its plugin ID
+                # rather than silently choosing one configured module.
+                if session.module_name in module_plugin_names:
+                    plugin_names.add(session.module_name)
+                for plugin_name in sorted(plugin_names):
                     _append_plugin_impact(impacts, plugin_name, "pending", session)
             elif session.status == "unsolved":
                 for plugin_name in session.affected_plugins:

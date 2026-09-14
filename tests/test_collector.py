@@ -318,6 +318,161 @@ class TestDiskRateTracker:
 
 
 class TestLogMonitor:
+    def test_loguru_message_record_creates_mapped_session(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        import asyncio
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+        from nonebot_plugin_ruok.collectors.monitor import _make_log_sink
+        from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+        class _Message(str):
+            record: dict
+
+            def __new__(cls, record):
+                obj = str.__new__(cls, "rendered error")
+                obj.record = record
+                return obj
+
+        monkeypatch.setattr(
+            "nonebot_plugin_ruok.collectors.monitor._schedule_session_notification",
+            lambda *args: None,
+        )
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="music", plugins=["nonebot_plugin_music"]),
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            sink = _make_log_sink(ScopedConfig(), tmp_path, loop)
+            sink(
+                _Message(
+                    {
+                        "level": {"name": "ERROR"},
+                        "name": "nonebot_plugin_music",
+                        "message": "production boom",
+                        "exception": None,
+                        "extra": {},
+                    }
+                )
+            )
+        finally:
+            loop.close()
+
+        sessions = list_sessions(tmp_path)
+        assert len(sessions) == 1
+        assert sessions[0].module_name == "music"
+        assert "日志来源: nonebot_plugin_music" in sessions[0].description
+
+    def test_loguru_exception_keeps_traceback(self, tmp_path, monkeypatch) -> None:
+        import sys
+        import asyncio
+        from types import SimpleNamespace
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors.monitor import _make_log_sink
+        from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+        class _Message(str):
+            record: dict
+
+            def __new__(cls, record):
+                obj = str.__new__(cls, "rendered exception")
+                obj.record = record
+                return obj
+
+        monkeypatch.setattr(
+            "nonebot_plugin_ruok.collectors.monitor._schedule_session_notification",
+            lambda *args: None,
+        )
+        try:
+            raise ZeroDivisionError("boom")
+        except ZeroDivisionError:
+            exc_type, exc_value, tb = sys.exc_info()
+
+        loop = asyncio.new_event_loop()
+        try:
+            sink = _make_log_sink(ScopedConfig(), tmp_path, loop)
+            sink(
+                _Message(
+                    {
+                        "level": {"name": "ERROR"},
+                        "name": "worker",
+                        "message": "calculation failed",
+                        "exception": SimpleNamespace(
+                            type=exc_type,
+                            value=exc_value,
+                            traceback=tb,
+                        ),
+                        "extra": {},
+                    }
+                )
+            )
+        finally:
+            loop.close()
+
+        session = list_sessions(tmp_path)[0]
+        assert "ZeroDivisionError" in session.description
+        assert "calculation failed" in session.description
+
+    def test_loguru_and_stdlib_bridge_event_is_deduplicated(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        import asyncio
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors.monitor import _capture_log_event
+        from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+        monkeypatch.setattr(
+            "nonebot_plugin_ruok.collectors.monitor._schedule_session_notification",
+            lambda *args: None,
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            config = ScopedConfig()
+            _capture_log_event(config, tmp_path, loop, "worker", "same boom", "")
+            _capture_log_event(config, tmp_path, loop, "uvicorn.error", "same boom", "")
+        finally:
+            loop.close()
+
+        assert len(list_sessions(tmp_path)) == 1
+
+    def test_closed_loop_does_not_leak_notification_coroutine(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import asyncio
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import Session, ReporterInfo
+        from nonebot_plugin_ruok.collectors.monitor import (
+            _schedule_session_notification,
+        )
+
+        async def _dispatch(session, config, data_dir):
+            return None
+
+        monkeypatch.setattr(
+            "nonebot_plugin_ruok.collectors.notifications.dispatch_notification",
+            _dispatch,
+        )
+        loop = asyncio.new_event_loop()
+        loop.close()
+        session = Session(
+            session_id="ruok-12345678",
+            source="automatic",
+            module_name="worker",
+            reporter=ReporterInfo(type="automatic"),
+        )
+        _schedule_session_notification(session, ScopedConfig(), tmp_path, loop)
+
     def test_loguru_sink_ignores_malformed_records(self, tmp_path) -> None:
         import asyncio
 
@@ -333,6 +488,42 @@ class TestLogMonitor:
             loop.close()
 
         assert not (tmp_path / "sessions").exists()
+
+    def test_serialized_loguru_envelope_keeps_rendered_text(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import json
+        import asyncio
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors.monitor import _make_log_sink
+        from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+        monkeypatch.setattr(
+            "nonebot_plugin_ruok.collectors.monitor._schedule_session_notification",
+            lambda *args: None,
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            sink = _make_log_sink(ScopedConfig(), tmp_path, loop)
+            sink(
+                json.dumps(
+                    {
+                        "text": "rendered traceback line",
+                        "record": {
+                            "level": {"name": "ERROR"},
+                            "name": "worker",
+                            "message": "serialized boom",
+                            "exception": {"value": "boom"},
+                            "extra": {},
+                        },
+                    }
+                )
+            )
+        finally:
+            loop.close()
+
+        assert "rendered traceback line" in list_sessions(tmp_path)[0].description
 
     def test_stdlib_log_session_rebuilds_impacts_and_notifies(
         self,
@@ -375,7 +566,9 @@ class TestLogMonitor:
             ModuleDefinition(name="uvicorn.error", plugins=["uvicorn_plugin"]),
         )
         loop = asyncio.new_event_loop()
+        original_is_running = loop.is_running
         try:
+            monkeypatch.setattr(loop, "is_running", lambda: True)
             handler = _StdlibLogHandler(ScopedConfig(), tmp_path, loop=loop)
             record = logging.LogRecord(
                 name="uvicorn.error",
@@ -389,6 +582,7 @@ class TestLogMonitor:
 
             handler.emit(record)
         finally:
+            loop.is_running = original_is_running
             loop.close()
 
         sessions = list_sessions(tmp_path, module_name="uvicorn.error")

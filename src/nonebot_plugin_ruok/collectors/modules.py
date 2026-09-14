@@ -209,6 +209,10 @@ def list_module_related_sessions(data_dir: Path, module_name: str) -> list[Sessi
     modules_by_name = _load_module_definitions(data_dir)
     module = modules_by_name.get(module_name)
     module_plugins = set(module.plugins if module else [])
+    plugin_to_modules: dict[str, set[str]] = {}
+    for definition in modules_by_name.values():
+        for plugin in definition.plugins:
+            plugin_to_modules.setdefault(plugin, set()).add(definition.name)
     related: list[Session] = []
     seen: set[str] = set()
     for session in sessions:
@@ -219,6 +223,12 @@ def list_module_related_sessions(data_dir: Path, module_name: str) -> list[Sessi
         if session.status == "pending":
             source_module = modules_by_name.get(session.module_name)
             source_plugins = set(source_module.plugins if source_module else [])
+            if not source_plugins:
+                source_plugins = (
+                    {session.module_name}
+                    if session.module_name in plugin_to_modules
+                    else set()
+                )
             if module_plugins.intersection(source_plugins):
                 related.append(session)
                 seen.add(session.session_id)
@@ -239,6 +249,28 @@ def _load_module_definitions(data_dir: Path) -> dict[str, ModuleDefinition]:
     if not any(module.name == "ruok" for module in modules):
         modules.insert(0, _builtin_module())
     return {module.name: module for module in modules}
+
+
+def resolve_log_source(data_dir: Path, plugin_id: str) -> tuple[str, tuple[str, ...]]:
+    """Resolve a Loguru/stdout logger name to a configured module.
+
+    Exact module names take precedence.  A plugin ID maps to its sole module
+    when possible.  Shared plugin IDs remain represented by the plugin ID so
+    that the ambiguity is visible in the Session; impact propagation can then
+    apply to every module that references that plugin.
+    """
+    modules = _load_module_definitions(data_dir)
+    if plugin_id in modules:
+        return plugin_id, (plugin_id,)
+
+    matches = tuple(
+        sorted(
+            module.name for module in modules.values() if plugin_id in module.plugins
+        )
+    )
+    if len(matches) == 1:
+        return matches[0], matches
+    return plugin_id, matches
 
 
 # ────────────────────────────────

@@ -555,3 +555,56 @@ class TestResolveModuleDisplay:
 
         resolved = resolve_module_display("unknown", tmp_path, ScopedConfig())
         assert resolved is None
+
+
+class TestResolveLogSource:
+    def test_plugin_id_maps_to_unique_module(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            upsert_module,
+            resolve_log_source,
+        )
+
+        upsert_module(
+            tmp_path,
+            ModuleDefinition(name="music", plugins=["nonebot_plugin_music"]),
+        )
+
+        module_name, matches = resolve_log_source(tmp_path, "nonebot_plugin_music")
+
+        assert module_name == "music"
+        assert matches == ("music",)
+
+    def test_shared_plugin_remains_visible_as_ambiguous_source(
+        self, tmp_path: Path
+    ) -> None:
+        from nonebot_plugin_ruok.protocol import ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            upsert_module,
+            resolve_log_source,
+        )
+
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["shared"]))
+        upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["shared"]))
+
+        module_name, matches = resolve_log_source(tmp_path, "shared")
+
+        assert module_name == "shared"
+        assert matches == ("lyrics", "music")
+
+    def test_shared_plugin_pending_session_degrades_all_referencing_modules(
+        self, tmp_path: Path
+    ) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            upsert_module,
+            derive_module_status,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import create_session
+
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["shared"]))
+        upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["shared"]))
+        create_session(tmp_path, "shared", "log error", ReporterInfo(type="automatic"))
+
+        assert derive_module_status(tmp_path, "music") == "degraded"
+        assert derive_module_status(tmp_path, "lyrics") == "degraded"
