@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import html
+import json
 import asyncio
 from typing import Any
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from collections.abc import Callable
 
 from fastapi import Form, Query, Depends, Request, APIRouter, HTTPException
@@ -25,9 +26,10 @@ from .auth import (
     UserManagementError,
     UserRegistrationError,
 )
-from .jinja import render
+from .jinja import render, parse_session_summary, split_session_description
 from ..config import ScopedConfig
 from ..protocol import (
+    Session,
     NetworkRate,
     ReporterInfo,
     ModuleDefinition,
@@ -99,6 +101,11 @@ def _parse_form_values(selected: list[str], raw: str) -> list[str]:
 def _parse_module_plugins(selected: list[str], raw: str) -> list[str]:
     """Parse selected and manually typed plugin names."""
     return _parse_form_values(selected, raw)
+
+
+def _split_multi_values(values: list[str]) -> list[str]:
+    """Flatten checkbox values and legacy comma-separated strings."""
+    return _parse_form_values(values, "")
 
 
 def _extra_notification_modules(
@@ -219,35 +226,36 @@ def _filter_users(users, search: str):
 
 def _split_session_description(description: str) -> tuple[str, str]:
     """Split a session description into prose and fenced code content."""
-    marker = "```"
-    start = description.find(marker)
-    if start == -1:
-        return description.strip(), ""
-
-    end = description.find(marker, start + len(marker))
-    if end == -1:
-        return description.strip(), ""
-
-    prose = description[:start].strip()
-    code = description[start + len(marker) : end].strip()
-    return prose, code
+    return split_session_description(description)
 
 
 def _parse_session_summary(description: str) -> dict[str, str]:
     """Parse RUOK automatic summary markdown into display fields."""
-    summary: dict[str, str] = {}
-    for line in description.splitlines():
-        stripped = line.strip()
-        if not stripped or not stripped.startswith("**"):
-            continue
-        label_end = stripped.find("**", 2)
-        if label_end == -1:
-            continue
-        label = stripped[2:label_end].strip()
-        value = stripped[label_end + 2 :].lstrip(":：").strip()
-        if label and value:
-            summary[label] = value
-    return summary
+    return parse_session_summary(description)
+
+
+SESSION_PAGE_SIZE_DEFAULT = 20
+SESSION_PAGE_SIZE_MIN = 10
+SESSION_PAGE_SIZE_MAX = 100
+
+
+def _paginate(items: list[Any], page: int, page_size: int) -> dict[str, Any]:
+    """Clamp paging input and return the visible slice plus paging metadata."""
+    size = max(SESSION_PAGE_SIZE_MIN, min(SESSION_PAGE_SIZE_MAX, page_size))
+    total = len(items)
+    total_pages = max(1, -(-total // size))
+    current = max(1, min(total_pages, page))
+    start = (current - 1) * size
+    visible = items[start : start + size]
+    return {
+        "sessions": visible,
+        "total": total,
+        "page": current,
+        "page_size": size,
+        "total_pages": total_pages,
+        "range_start": start + 1 if visible else 0,
+        "range_end": start + len(visible),
+    }
 
 
 def create_webui_router(
@@ -297,6 +305,105 @@ def create_webui_router(
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
             },
+        )
+
+    # ── Shared render contexts ──
+
+    def _session_plugin_options(module_name: str) -> list[str]:
+        return _module_plugin_options(data_dir, config, module_name)
+
+    def _session_list_context(
+        *,
+        status: str = "",
+        search: str = "",
+        module: str = "",
+        plugin: str = "",
+        after: str = "",
+        before: str = "",
+        page: int = 1,
+        page_size: int = SESSION_PAGE_SIZE_DEFAULT,
+    ) -> dict[str, Any]:
+        """Build the Session list context; raises ValueError on bad dates."""
+        first_seen_after = parse_filter_datetime(after) if after else None
+        first_seen_before = parse_filter_datetime(before) if before else None
+        sessions = list_sessions(
+            data_dir,
+            status=status or None,
+            module_name=module or None,
+            search=search or None,
+            first_seen_after=first_seen_after,
+            first_seen_before=first_seen_before,
+            plugin_name=plugin or None,
+        )
+        filters = {
+            "status": status,
+            "search": search,
+            "module": module,
+            "plugin": plugin,
+            "after": after,
+            "before": before,
+        }
+        paging = _paginate(sessions, page, page_size)
+
+        def query_for(**overrides: Any) -> str:
+            """Encode the active filters plus overrides, dropping empty values."""
+            params: dict[str, Any] = {**filters, **overrides}
+            if paging["page_size"] != SESSION_PAGE_SIZE_DEFAULT:
+                params.setdefault("page_size", paging["page_size"])
+            if params.get("page") == 1:
+                params.pop("page")
+            return urlencode({k: v for k, v in params.items() if v not in ("", None)})
+
+        return {
+            **paging,
+            "stats": get_session_stats(data_dir),
+            "filters": filters,
+            "query_for": query_for,
+            "current_status": status,
+            "current_search": search,
+            "current_module": module,
+            "current_plugin": plugin,
+            "current_after": after,
+            "current_before": before,
+            "reporter_display": _reporter_display_factory(auth.list_users()),
+            "session_plugin_options": _session_plugin_options,
+        }
+
+    def _session_detail_context(session: Session) -> dict[str, Any]:
+        session_description, session_traceback = _split_session_description(
+            session.description
+        )
+        return {
+            "session": session,
+            "session_description": session_description,
+            "session_summary_fields": (
+                _parse_session_summary(session_description)
+                if session.source == "automatic"
+                else {}
+            ),
+            "session_traceback": session_traceback,
+            "linked_sessions": get_linked_sessions(data_dir, session.session_id),
+            "reporter_display": _reporter_display_factory(auth.list_users()),
+            "session_plugin_options": _session_plugin_options,
+        }
+
+    def _render_session_action(
+        session: Session, view: str, toast: str, toast_type: str
+    ) -> HTMLResponse:
+        """Render the fragment matching the element that issued the action."""
+        headers = {"HX-Trigger": json.dumps({"toast": toast, "toastType": toast_type})}
+        if view == "detail":
+            return render(
+                "_session_detail_content.html.jinja2",
+                **_session_detail_context(session),
+                headers=headers,
+            )
+        return render(
+            "_session_card.html.jinja2",
+            s=session,
+            reporter_display=_reporter_display_factory(auth.list_users()),
+            session_plugin_options=_session_plugin_options,
+            headers=headers,
         )
 
     # ── Auth guard dependencies ──
@@ -474,39 +581,28 @@ def create_webui_router(
         plugin: str = "",
         after: str = "",
         before: str = "",
+        page: int = 1,
+        page_size: int = SESSION_PAGE_SIZE_DEFAULT,
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            first_seen_after = parse_filter_datetime(after) if after else None
-            first_seen_before = parse_filter_datetime(before) if before else None
-            sessions = list_sessions(
-                data_dir,
-                status=status if status else None,
-                module_name=module if module else None,
-                search=search if search else None,
-                first_seen_after=first_seen_after,
-                first_seen_before=first_seen_before,
-                plugin_name=plugin if plugin else None,
+            context = _session_list_context(
+                status=status,
+                search=search,
+                module=module,
+                plugin=plugin,
+                after=after,
+                before=before,
+                page=page,
+                page_size=page_size,
             )
-            stats = get_session_stats(data_dir)
             all_modules = list_modules(data_dir, config)
             return render(
                 "sessions.html.jinja2",
                 request=request,
                 current_user=user,
-                sessions=sessions,
-                stats=stats,
                 all_modules=all_modules,
-                current_status=status,
-                current_search=search,
-                current_module=module,
-                current_plugin=plugin,
-                current_after=after,
-                current_before=before,
-                reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                **context,
             )
         except ValueError:
             return _error_html("Invalid ISO datetime filter", status_code=400)
@@ -528,28 +624,11 @@ def create_webui_router(
             session = get_session(data_dir, session_id)
             if session is None:
                 return HTMLResponse("<p>Session not found</p>", status_code=404)
-            linked = get_linked_sessions(data_dir, session_id)
-            session_description, session_traceback = _split_session_description(
-                session.description
-            )
-            session_summary_fields = (
-                _parse_session_summary(session_description)
-                if session.source == "automatic"
-                else {}
-            )
             return render(
                 "sessions_detail.html.jinja2",
                 request=request,
                 current_user=user,
-                session=session,
-                session_description=session_description,
-                session_summary_fields=session_summary_fields,
-                session_traceback=session_traceback,
-                linked_sessions=linked,
-                reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                **_session_detail_context(session),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"page_session_detail {session_id}", data_dir)
@@ -720,29 +799,28 @@ def create_webui_router(
         plugin: str = "",
         after: str = "",
         before: str = "",
+        page: int = 1,
+        page_size: int = SESSION_PAGE_SIZE_DEFAULT,
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            first_seen_after = parse_filter_datetime(after) if after else None
-            first_seen_before = parse_filter_datetime(before) if before else None
-            sessions = list_sessions(
-                data_dir,
-                status=status if status else None,
-                module_name=module if module else None,
-                search=search if search else None,
-                first_seen_after=first_seen_after,
-                first_seen_before=first_seen_before,
-                plugin_name=plugin if plugin else None,
+            context = _session_list_context(
+                status=status,
+                search=search,
+                module=module,
+                plugin=plugin,
+                after=after,
+                before=before,
+                page=page,
+                page_size=page_size,
             )
-            stats = get_session_stats(data_dir)
+            query = context["query_for"](page=context["page"])
+            # Keep the address bar in sync so reload/back restore filters and page.
+            push_url = "/ruok/sessions" + (f"?{query}" if query else "")
             return render(
                 "_session_container.html.jinja2",
-                sessions=sessions,
-                stats=stats,
-                reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                **context,
+                headers={"HX-Push-Url": push_url},
             )
         except ValueError:
             return _error_html("Invalid ISO datetime filter", status_code=400)
@@ -817,17 +895,11 @@ def create_webui_router(
                     },
                 )
             # Refresh session list
-            sessions = list_sessions(data_dir)
-            stats = get_session_stats(data_dir)
+            context = _session_list_context()
             # Return session-content partial (stats + count + list)
             return render(
                 "_session_container.html.jinja2",
-                sessions=sessions,
-                stats=stats,
-                reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                **context,
                 headers={
                     "HX-Trigger": ('{"toast":"Session created","toastType":"success"}')
                 },
@@ -1115,6 +1187,7 @@ def create_webui_router(
     async def action_confirm(
         session_id: str,
         affected_plugins: list[str] = Form(default_factory=list),
+        view: str = Query(""),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
@@ -1133,21 +1206,12 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        return render(
-            "_session_card.html.jinja2",
-            s=s,
-            reporter_display=_reporter_display_factory(auth.list_users()),
-            session_plugin_options=lambda module_name: _module_plugin_options(
-                data_dir, config, module_name
-            ),
-            headers={
-                "HX-Trigger": ('{"toast":"Session confirmed","toastType":"success"}')
-            },
-        )
+        return _render_session_action(s, view, "Session confirmed", "success")
 
     @router.post("/ruok/_actions/solve/{session_id}")
     async def action_solve(
         session_id: str,
+        view: str = Query(""),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
@@ -1164,21 +1228,12 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        return render(
-            "_session_card.html.jinja2",
-            s=s,
-            reporter_display=_reporter_display_factory(auth.list_users()),
-            session_plugin_options=lambda module_name: _module_plugin_options(
-                data_dir, config, module_name
-            ),
-            headers={
-                "HX-Trigger": ('{"toast":"Session resolved","toastType":"success"}')
-            },
-        )
+        return _render_session_action(s, view, "Session resolved", "success")
 
     @router.post("/ruok/_actions/ignore/{session_id}")
     async def action_ignore(
         session_id: str,
+        view: str = Query(""),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
@@ -1195,15 +1250,7 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        return render(
-            "_session_card.html.jinja2",
-            s=s,
-            reporter_display=_reporter_display_factory(auth.list_users()),
-            session_plugin_options=lambda module_name: _module_plugin_options(
-                data_dir, config, module_name
-            ),
-            headers={"HX-Trigger": ('{"toast":"Session ignored","toastType":"info"}')},
-        )
+        return _render_session_action(s, view, "Session ignored", "info")
 
     @router.post("/ruok/_actions/session-note/{session_id}")
     async def action_session_note(
@@ -1440,16 +1487,22 @@ def create_webui_router(
         name: str = Form(...),
         original_name: str = Form(""),
         enabled: bool = Form(False),
-        on_status: str = Form("pending,unsolved"),
+        on_status: list[str] = Form(default_factory=list),
         on_module: str = Form(""),
         selected_modules: list[str] = Form(default_factory=list),
         cooldown_minutes: float = Form(60.0),
-        channels: str = Form("bot_dm"),
+        channels: list[str] = Form(default_factory=list),
         webhook_url: str = Form(""),
         return_to_detail: bool = Form(False),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse | JSONResponse:
         """Create or update a notification rule."""
+        statuses = _split_multi_values(on_status)
+        channel_list = _split_multi_values(channels)
+        if not statuses:
+            return _error_html("请至少选择一个触发状态")
+        if not channel_list:
+            return _error_html("请至少选择一个通知通道")
         try:
             rules = _load_notification_rules()
             normalized_name = name.strip()
@@ -1469,10 +1522,10 @@ def create_webui_router(
             rule = NotificationRule(
                 name=normalized_name,
                 enabled=enabled,
-                on_status=[s.strip() for s in on_status.split(",") if s.strip()],
+                on_status=statuses,
                 on_module=_parse_form_values(selected_modules, on_module),
                 cooldown_minutes=cooldown_minutes,
-                channels=[c.strip() for c in channels.split(",") if c.strip()],
+                channels=channel_list,
                 webhook_url=webhook_url or None,
             )
             replace_name = normalized_original or normalized_name

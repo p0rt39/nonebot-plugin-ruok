@@ -1,53 +1,40 @@
-<!-- HTMX partial: single session card (used for action responses) -->
-<article id="session-{{ s.session_id }}" class="animate-in">
-    <header>
-        <span class="status-dot status-{{ s.status }}"></span>
-        <strong>{{ s.session_id }}</strong>
-        <small style="margin-left: auto;">
-            {{ s.source }} · {{ s.first_seen_at.astimezone().strftime('%m-%d %H:%M') }}
-        </small>
-    </header>
-
-    <div class="grid">
-        <div>
-            <p><strong>模块:</strong> {{ s.module_name }}</p>
-            <p><strong>状态:</strong>
-                <span class="badge badge-{% if s.status == 'solved' %}ok{% elif s.status in ('pending','unsolved') %}warn{% else %}error{% endif %}">
-                    {{ s.status | _status_label }}
-                </span>
-            </p>
+<!-- HTMX partial: one Session row (list rendering and list action responses) -->
+{% set summary = s.description | _session_summary %}
+<div id="session-{{ s.session_id }}" class="session-row">
+    <div class="session-row__status">
+        <span class="badge badge-{{ s.status | _status_tone }}">{{ s.status | _status_label }}</span>
+    </div>
+    <div class="session-row__id">
+        <a href="/ruok/sessions/{{ s.session_id }}" title="查看详情">{{ s.session_id }}</a>
+    </div>
+    <div class="session-row__module" title="{{ s.module_name }}">{{ s.module_name }}</div>
+    <div class="session-row__summary">
+        <span class="session-row__text" title="{{ summary }}">{{ summary or '（无描述）' }}</span>
+        {% if s.reporter.user_id or s.affected_plugins or s.link_group %}
+        <span class="session-row__meta">
             {% if s.reporter.user_id %}
             {% set reporter_label = reporter_display(s.reporter) if reporter_display is defined else s.reporter.user_id %}
-            <p><small>上报者: {{ reporter_label }}{% if s.reporter.group_id %} (群: {{ s.reporter.group_id }}){% endif %}</small></p>
+            上报者: {{ reporter_label }}{% if s.reporter.group_id %} (群: {{ s.reporter.group_id }}){% endif %}
             {% endif %}
-        </div>
-        <div>
-            <p>{{ s.description[:300] }}{% if s.description|length > 300 %}...{% endif %}</p>
-            {% if s.affected_plugins %}
-            <p><small>影响插件: {{ s.affected_plugins | join(', ') }}</small></p>
-            {% endif %}
-        </div>
+            {% if s.affected_plugins %}{% if s.reporter.user_id %} · {% endif %}影响插件: {{ s.affected_plugins | join(', ') }}{% endif %}
+            {% if s.link_group %} · 关联组 <code>{{ s.link_group }}</code>{% endif %}
+        </span>
+        {% endif %}
     </div>
-
-    {% if s.link_group %}
-    <p><small>👥 关联组: <code>{{ s.link_group }}</code></small></p>
-    {% endif %}
-
-    {% if s.status in ('pending', 'unsolved') %}
-    <footer>
+    <div class="session-row__time">
+        {{ s.last_seen_at.astimezone().strftime('%m-%d %H:%M') }}<br>
+        <small>{{ s.source }}</small>
+    </div>
+    <div class="session-row__actions">{% if s.status in ('pending', 'unsolved') %}
         <div class="ruok-button-row--grid">
-            <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline ruok-button">
-                📋 详情
-            </a>
             {% set plugin_options = session_plugin_options(s.module_name) if session_plugin_options is defined else [] %}
             {% if s.status == 'pending' or plugin_options or s.affected_plugins %}
             <form hx-post="/ruok/_actions/confirm/{{ s.session_id }}"
                   hx-target="#session-{{ s.session_id }}"
-                  hx-swap="outerHTML"
-                  style="margin:0;">
+                  hx-swap="outerHTML">
                 {% if plugin_options %}
                 <details class="confirm-plugin-picker">
-                    <summary class="secondary outline ruok-button">
+                    <summary role="button" class="secondary outline">
                         {% if s.status == 'pending' %}✅ 确认{% else %}🧩 修改插件{% endif %}
                     </summary>
                     <div class="confirm-plugin-options">
@@ -64,7 +51,7 @@
                     </div>
                 </details>
                 {% elif s.status == 'unsolved' and s.affected_plugins %}
-                <button type="submit" class="secondary outline">🧹 清空插件关联</button>
+                <button type="submit" class="secondary outline">🧹 清空插件</button>
                 {% else %}
                 <button type="submit" class="secondary outline">✅ 确认</button>
                 {% endif %}
@@ -74,21 +61,15 @@
                     hx-post="/ruok/_actions/solve/{{ s.session_id }}"
                     hx-target="#session-{{ s.session_id }}"
                     hx-swap="outerHTML">
-                🟢 解决
+                解决
             </button>
             <button class="secondary outline ruok-button-danger"
                     hx-post="/ruok/_actions/ignore/{{ s.session_id }}"
                     hx-target="#session-{{ s.session_id }}"
-                    hx-swap="outerHTML">
-                ⚪ 忽略
+                    hx-swap="outerHTML"
+                    hx-confirm="确定将 {{ s.session_id }} 标记为误报并忽略？">
+                忽略
             </button>
         </div>
-    </footer>
-    {% else %}
-    <footer>
-        <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline ruok-button ruok-button-full">
-            📋 查看详情
-        </a>
-    </footer>
-    {% endif %}
-</article>
+    {% endif %}</div>
+</div>

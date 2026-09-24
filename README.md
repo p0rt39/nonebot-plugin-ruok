@@ -333,13 +333,16 @@ stateDiagram-v2
 | 页面 | 路由 | 说明 |
 | :--- | :--- | :--- |
 | 总览 | `/ruok` | 系统指标、连接、插件、模块、趋势、Session 统计 |
-| Sessions | `/ruok/sessions` | 搜索、筛选、确认、解决、忽略、关联、备注 |
-| Session 详情 | `/ruok/sessions/{id}` | 完整信息、用户说明、Traceback、关联 Session、影响插件 |
+| Sessions | `/ruok/sessions` | 按状态、模块、插件、时间筛选和搜索，每页 20 条；支持确认、解决、忽略 |
+| Session 详情 | `/ruok/sessions/{id}` | 完整信息、用户说明、Traceback、关联 Session、影响插件、备注 |
 | 模块 | `/ruok/modules` | 模块列表与创建 |
 | 模块详情 | `/ruok/modules/{name}` | 编辑名称、显示名、描述、关联插件、删除 |
 | 通知 | `/ruok/notifications` | 通知规则列表与创建 |
 | 通知详情 | `/ruok/notifications/{name}` | 编辑规则、触发状态、模块、冷却、通道、删除 |
 | 用户 | `/ruok/users` | 用户搜索、创建、改名、重置密码、绑定码、清除绑定、删除 |
+
+Sessions 列表的筛选条件和页码会同步到地址栏（例如 `/ruok/sessions?status=pending&page=2`），
+刷新或后退时会保留当前视图；可用 `page_size` 调整每页条数（10–100）。
 
 ### 普通用户
 

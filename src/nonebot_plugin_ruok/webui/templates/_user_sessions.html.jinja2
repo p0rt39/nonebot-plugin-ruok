@@ -16,7 +16,7 @@
             <p><strong>模块:</strong> {{ s.module_name }}</p>
             <p>
                 <strong>状态:</strong>
-                <span class="badge badge-{% if s.status == 'solved' %}ok{% elif s.status in ('pending','unsolved') %}warn{% else %}error{% endif %}">
+                <span class="badge badge-{{ s.status | _status_tone }}">
                     {{ s.status | _status_label }}
                 </span>
             </p>
@@ -24,7 +24,7 @@
             {% set reporter_label = reporter_display(s.reporter) if reporter_display is defined else s.reporter.user_id %}
             <p><small>上报者: {{ reporter_label }}</small></p>
             {% endif %}
-            <p>{{ s.description[:260] }}{% if s.description|length > 260 %}...{% endif %}</p>
+            <p>{{ s.description | _session_summary }}</p>
         </article>
         {% endfor %}
     </div>

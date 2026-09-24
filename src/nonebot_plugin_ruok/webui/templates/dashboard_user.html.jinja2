@@ -9,11 +9,11 @@
     {% include "_dashboard_hero.html.jinja2" %}
 </div>
 
-<h3>📦 模块状态</h3>
+<h3>模块状态</h3>
 {% set module_links = false %}
 {% include "_modules_table.html.jinja2" %}
 
-<h3>📝 手动上报</h3>
+<h3>手动上报</h3>
 {% if current_user.is_bound %}
 <article>
     <p>
@@ -68,7 +68,7 @@
 </article>
 {% endif %}
 
-<h3>📋 我的上报</h3>
+<h3>我的上报</h3>
 {% include "_user_sessions.html.jinja2" %}
 
 {% endblock %}

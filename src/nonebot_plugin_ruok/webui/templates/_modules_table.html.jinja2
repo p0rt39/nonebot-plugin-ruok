@@ -1,12 +1,13 @@
 <!-- HTMX partial: auto-refreshing module status table -->
 <div id="module-list">
 {% if modules %}
+<div class="table-scroll">
 <table class="striped">
     <thead>
         <tr>
             <th>状态</th>
-            <th>模块名</th>
-            <th>显示名</th>
+            <th>模块</th>
+            <th>内部名</th>
             <th>插件数</th>
             <th>描述</th>
         </tr>
@@ -14,14 +15,10 @@
     <tbody>
         {% for m in modules %}
         <tr>
-            <td>
-                {% if m.status == 'available' %}🟢
-                {% elif m.status == 'degraded' %}🟡
-                {% elif m.status == 'unavailable' %}🔴
-                {% else %}⚪{% endif %}
-                {{ m.status | _status_label }}
+            <td class="cell-nowrap">
+                <span class="badge badge-{{ m.status | _status_tone }}">{{ m.status | _status_label }}</span>
             </td>
-            <td>
+            <td class="cell-name">
                 <strong>
                     {% if module_links is defined and not module_links %}
                     {{ m.display_name or m.name }}
@@ -30,21 +27,22 @@
                     {% endif %}
                 </strong>
             </td>
-            <td>{{ m.display_name }}</td>
+            <td class="cell-muted cell-name">{{ m.name }}</td>
             <td>{{ m.plugins | length }}</td>
-            <td>
+            <td class="cell-desc">
                 {{ m.description or '—' }}
                 {% if m.status_reasons %}
-                <br><small>{{ m.status_reasons[0] }}</small>
+                <br><small class="muted-text">{{ m.status_reasons[0] }}</small>
                 {% endif %}
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
+</div>
 {% else %}
 <article>
-    <p>⚠️ 暂无功能模块定义。使用 <code>PUT /ruok/api/modules/{name}</code> 添加。</p>
+    <p>暂无功能模块定义。使用 <code>PUT /ruok/api/modules/{name}</code> 或上方表单添加。</p>
 </article>
 {% endif %}
 </div>

@@ -501,3 +501,89 @@ async def test_concurrent_notifications_atomically_claim_cooldown(
     assert calls == ["ruok-1234abcd"]
     release_send.set()
     await first
+
+
+def test_notification_form_uses_status_and_channel_checkboxes(tmp_path: Path) -> None:
+    import re
+
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = _webui_config()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [
+            NotificationRule(
+                name="hooked",
+                on_status=["solved"],
+                channels=["webhook"],
+                webhook_url="https://example.com/hook",
+            )
+        ],
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    new_form = client.get("/ruok/notifications")
+    edit_form = client.get("/ruok/notifications/hooked")
+
+    assert re.search(r'name="on_status" value="pending"\s+checked', new_form.text)
+    assert re.search(r'name="on_status" value="unsolved"\s+checked', new_form.text)
+    assert re.search(r'name="channels" value="bot_dm"\s+checked', new_form.text)
+    assert "<label data-webhook-field hidden>" in new_form.text
+    assert '<details class="form-panel">' in new_form.text
+    assert re.search(r'name="on_status" value="solved"\s+checked', edit_form.text)
+    assert not re.search(r'name="on_status" value="pending"\s+checked', edit_form.text)
+    assert re.search(r'name="channels" value="webhook"\s+checked', edit_form.text)
+    assert "<label data-webhook-field >" in edit_form.text
+    assert '<details class="form-panel" open>' in edit_form.text
+    assert 'hx-target="#notification-edit-result"' in edit_form.text
+    assert 'id="notification-edit-result"' in edit_form.text
+    assert 'hx-target="#notification-edit-result"' not in new_form.text
+
+
+def test_notification_upsert_accepts_checkbox_values(tmp_path: Path) -> None:
+    config = _webui_config()
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={
+            "name": "checkbox rule",
+            "enabled": "on",
+            "on_status": ["pending", "ignored"],
+            "cooldown_minutes": "5",
+            "channels": ["bot_dm", "webhook"],
+            "webhook_url": "https://example.com/hook",
+        },
+    )
+
+    rules = _load_notification_rules(config, tmp_path)
+    rule = next(rule for rule in rules if rule.name == "checkbox rule")
+    assert response.status_code == 200
+    assert rule.on_status == ["pending", "ignored"]
+    assert rule.channels == ["bot_dm", "webhook"]
+
+
+def test_notification_upsert_requires_status_and_channel(tmp_path: Path) -> None:
+    config = _webui_config()
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    no_status = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={"name": "empty status", "enabled": "on", "channels": "bot_dm"},
+    )
+    no_channel = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={"name": "empty channel", "enabled": "on", "on_status": "pending"},
+    )
+
+    names = [rule.name for rule in _load_notification_rules(config, tmp_path)]
+    assert no_status.status_code == 400
+    assert "请至少选择一个触发状态" in no_status.text
+    assert no_channel.status_code == 400
+    assert "请至少选择一个通知通道" in no_channel.text
+    assert "empty status" not in names
+    assert "empty channel" not in names

@@ -85,7 +85,7 @@
                     {% if auth.is_superuser_account(user) %}
                     <span class="badge badge-ok">SUPERUSER 管理员</span>
                     {% else %}
-                    <span class="badge badge-warn">普通用户</span>
+                    <span class="badge badge-muted">普通用户</span>
                     {% endif %}
                 </header>
 
@@ -154,7 +154,7 @@
                           hx-confirm="确定删除用户「{{ user.username }}」？">
                         <input type="hidden" name="username" value="{{ user.username }}">
                         <input type="hidden" name="search" value="{{ user_search or '' }}">
-                        <button type="submit" class="secondary outline">删除用户</button>
+                        <button type="submit" class="secondary outline ruok-button-danger">删除用户</button>
                     </form>
                 </div>
             </div>
@@ -268,7 +268,7 @@
                 <input type="text" name="confirm_username" required autocomplete="off"
                        placeholder="{{ current_user.username }}">
             </label>
-            <button type="submit" class="secondary outline">注销账号</button>
+            <button type="submit" class="secondary outline ruok-button-danger">注销账号</button>
         </form>
     </article>
 </div>

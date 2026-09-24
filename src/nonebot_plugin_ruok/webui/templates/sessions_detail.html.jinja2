@@ -2,213 +2,59 @@
 {% set active_page = "sessions" %}
 {% block title %}Session: {{ session.session_id }}{% endblock %}
 
-{% block content %}
-
-<!-- Actions -->
-<div class="ruok-button-row" style="margin-bottom:1.5rem;">
-    <a href="/ruok/sessions" role="button" class="secondary outline ruok-button">← 返回 Session 列表</a>
-</div>
-
-<div id="session-detail-content">
-<!-- Basic Info Card -->
-<article>
-    <header>
-        <span class="status-dot status-{{ session.status }}"></span>
-        <strong>{{ session.session_id }}</strong>
-        <span class="badge badge-{% if session.status == 'solved' %}ok{% elif session.status in ('pending','unsolved') %}warn{% elif session.status == 'ignored' %}error{% else %}ok{% endif %}" style="margin-left: 1rem;">
-            {{ session.status | _status_label }}
-        </span>
-    </header>
-
-    <div class="grid">
-        <div>
-            <h4>基本信息</h4>
-            <table>
-                <tr><td><strong>来源</strong></td><td>{{ session.source }}</td></tr>
-                <tr><td><strong>模块</strong></td><td>{{ session.module_name }}</td></tr>
-                <tr><td><strong>影响插件</strong></td><td>{{ session.affected_plugins | join(', ') if session.affected_plugins else '—' }}</td></tr>
-                <tr><td><strong>签名</strong></td><td><code>{{ session.error_signature or '—' }}</code></td></tr>
-            </table>
-        </div>
-        <div>
-            <h4>上报者</h4>
-            <table>
-                {% set reporter_label = reporter_display(session.reporter) if reporter_display is defined else session.reporter.user_id %}
-                <tr><td><strong>类型</strong></td><td>{{ session.reporter.type }}</td></tr>
-                <tr><td><strong>用户</strong></td><td>{{ reporter_label or '—' }}</td></tr>
-                <tr><td><strong>群组</strong></td><td>{{ session.reporter.group_id or '—' }}</td></tr>
-                <tr><td><strong>平台</strong></td><td>{{ session.reporter.platform or '—' }}</td></tr>
-            </table>
-        </div>
-    </div>
-</article>
-
-<!-- Submitted Description / Automatic Error Summary -->
-<article>
-    <h4>{% if session.source == 'manual' %}🧾 用户提交说明{% else %}🧾 异常摘要{% endif %}</h4>
-    {% if session.source == 'automatic' and session_summary_fields %}
-    <div class="session-summary-grid">
-        {% for label, value in session_summary_fields.items() %}
-        <div class="session-summary-item">
-            <span>{{ label }}</span>
-            <strong>{{ value }}</strong>
-        </div>
-        {% endfor %}
-    </div>
-    {% elif session_description %}
-    <pre class="session-description-block">{{ session_description }}</pre>
-    {% else %}
-    <p style="opacity:0.6;">暂无说明</p>
-    {% endif %}
-</article>
-
-{% if session_traceback %}
-<article>
-    <h4>🧵 Traceback</h4>
-    <pre class="session-traceback"><code>{{ session_traceback }}</code></pre>
-</article>
-{% endif %}
-
-<!-- Timeline -->
-<article>
-    <h4>⏱️ 时间线</h4>
-    <div class="timeline">
-        <div class="timeline-item">
-            <span class="status-dot status-pending"></span>
-            <strong>首次发现</strong>: {{ session.first_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
-        </div>
-        <div class="timeline-item">
-            <span class="status-dot status-{{ session.status }}"></span>
-            <strong>最近更新</strong>: {{ session.last_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
-        </div>
-        {% if session.resolved_at %}
-        <div class="timeline-item">
-            <span class="status-dot status-solved"></span>
-            <strong>解决时间</strong>: {{ session.resolved_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
-        </div>
-        {% endif %}
-    </div>
-</article>
-
-<!-- Developer Notes (HTMX inline edit) -->
-<article>
-    <h4>📝 开发者备注</h4>
-    <div id="notes-area">
-        <form hx-post="/ruok/_actions/session-note/{{ session.session_id }}"
-              hx-target="#notes-area" hx-swap="outerHTML">
-            <textarea name="developer_notes" rows="3" style="width: 100%;"
-                      placeholder="添加备注...">{{ session.developer_notes or '' }}</textarea>
-            <button type="submit">保存备注</button>
-        </form>
-    </div>
-</article>
-
-<!-- Linked Sessions -->
-<article>
-    <h4>🔗 关联 Sessions {% if session.link_group %}<code style="font-size:0.7em;">{{ session.link_group }}</code>{% endif %}</h4>
-    <div id="linked-container">
-        {% include "_linked_list.html.jinja2" %}
-    </div>
-    <form hx-post="/ruok/_actions/link/{{ session.session_id }}"
-          hx-target="#linked-container" hx-swap="outerHTML"
-          style="margin-top:1rem; display:flex; gap:0.5rem;">
-        <input type="text" name="other_id" placeholder="输入 Session ID" required style="margin-bottom:0;">
-        <button type="submit" class="secondary outline ruok-button">关联</button>
-    </form>
-    {% if session.link_group %}
-    <form hx-post="/ruok/_actions/unlink/{{ session.session_id }}"
-          hx-target="#linked-container" hx-swap="outerHTML"
-          style="margin-top:0.5rem;">
-        <button type="submit" class="secondary outline ruok-button-danger">🔓 退出关联组</button>
-    </form>
-    {% endif %}
-</article>
-
-<!-- Actions -->
-{% if session.status in ('pending', 'unsolved') %}
-<article>
-    <h4>⚡ 操作</h4>
-    <div class="ruok-button-row--grid">
-        {% set plugin_options = session_plugin_options(session.module_name) if session_plugin_options is defined else [] %}
-        {% if session.status == 'pending' or plugin_options or session.affected_plugins %}
-        <form hx-post="/ruok/_actions/confirm/{{ session.session_id }}"
-              hx-target="#session-detail-content"
-              hx-swap="outerHTML"
-              hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})"
-              style="margin:0;">
-            {% if plugin_options %}
-            <details class="confirm-plugin-picker">
-                <summary class="secondary outline ruok-button">
-                    {% if session.status == 'pending' %}✅ 确认为未解决{% else %}🧩 修改影响插件{% endif %}
-                </summary>
-                <div class="confirm-plugin-options">
-                    {% for plugin in plugin_options %}
-                    <label>
-                        <input type="checkbox" name="affected_plugins" value="{{ plugin }}"
-                               {% if plugin in session.affected_plugins %}checked{% endif %}>
-                        {{ plugin }}
-                    </label>
-                    {% endfor %}
-                    <button type="submit" class="secondary outline ruok-button">
-                        {% if session.status == 'pending' %}确认 Session{% else %}保存插件关联{% endif %}
-                    </button>
-                </div>
-            </details>
-            {% elif session.status == 'unsolved' and session.affected_plugins %}
-            <button type="submit" class="secondary outline">🧹 清空插件关联</button>
-            {% else %}
-            <button type="submit" class="secondary outline">✅ 确认为未解决</button>
-            {% endif %}
-        </form>
-        {% endif %}
-        <button class="secondary outline"
-                hx-post="/ruok/_actions/solve/{{ session.session_id }}"
-                hx-target="#session-detail-content"
-                hx-swap="outerHTML"
-                hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
-            🟢 解决
-        </button>
-        <button class="secondary outline ruok-button-danger"
-                hx-post="/ruok/_actions/ignore/{{ session.session_id }}"
-                hx-target="#session-detail-content"
-                hx-swap="outerHTML"
-                hx-on::after-request="htmx.ajax('GET', '/ruok/sessions/{{ session.session_id }}', {target:'#session-detail-content', swap:'outerHTML'})">
-            ⚪ 忽略误报
-        </button>
-    </div>
-</article>
-{% endif %}
-</div><!-- /#session-detail-content -->
-
+{% block head %}
 <style>
+    .detail-header {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+    }
+    .detail-header__id {
+        font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+    }
+    .kv-table {
+        margin-bottom: 0;
+    }
+    .kv-table th {
+        width: 7rem;
+        color: var(--ruok-text-muted);
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    .kv-table td {
+        overflow-wrap: anywhere;
+    }
     .timeline {
         display: flex;
         flex-direction: column;
-        gap: 0.75rem;
     }
     .timeline-item {
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        padding: 0.5rem 0;
-        border-bottom: 1px solid rgba(0,0,0,0.06);
+        padding: 0.4rem 0;
+        border-bottom: 1px solid var(--ruok-border);
+    }
+    .timeline-item:last-child {
+        border-bottom: none;
     }
     .session-summary-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 0.6rem;
     }
     .session-summary-item {
-        padding: 0.8rem;
-        border: 1px solid rgba(0,0,0,0.08);
+        padding: 0.6rem 0.75rem;
+        border: 1px solid var(--ruok-border);
         border-radius: var(--radius-sm);
-        background: rgba(0,0,0,0.025);
+        background: var(--ruok-surface-2);
     }
     .session-summary-item span {
         display: block;
-        margin-bottom: 0.25rem;
-        font-size: 0.85em;
-        opacity: 0.65;
+        margin-bottom: 0.2rem;
+        font-size: 0.82em;
+        color: var(--ruok-text-muted);
     }
     .session-summary-item strong {
         overflow-wrap: anywhere;
@@ -218,17 +64,41 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         margin: 0;
-        padding: 0.85rem;
+        padding: 0.75rem;
         border-radius: var(--radius-sm);
-        background: rgba(0,0,0,0.04);
+        background: var(--ruok-surface-2);
+        font-size: 0.85em;
     }
     .session-traceback {
-        max-height: 520px;
+        max-height: 480px;
         overflow: auto;
     }
     .session-traceback code {
         white-space: inherit;
+        background: none;
+        padding: 0;
+    }
+    .link-form {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+    }
+    .link-form input, .link-form button {
+        margin-bottom: 0;
+    }
+    .link-form button {
+        width: auto;
+        flex: none;
     }
 </style>
+{% endblock %}
+
+{% block content %}
+
+<div class="ruok-button-row" style="margin-bottom:0.9rem;">
+    <a href="/ruok/sessions" role="button" class="secondary outline ruok-button-compact">← 返回 Session 列表</a>
+</div>
+
+{% include "_session_detail_content.html.jinja2" %}
 
 {% endblock %}

@@ -1,18 +1,48 @@
-<!-- Stats overview -->
-<article style="padding: 1rem;">
-    <div class="grid" style="text-align: center;">
-        <div><span class="status-dot status-pending"></span> 待确认: <strong>{{ stats.pending }}</strong></div>
-        <div><span class="status-dot status-unsolved"></span> 未解决: <strong>{{ stats.unsolved }}</strong></div>
-        <div><span class="status-dot status-solved"></span> 已解决: <strong>{{ stats.solved }}</strong></div>
-        <div><span class="status-dot status-ignored"></span> 已忽略: <strong>{{ stats.ignored }}</strong></div>
+<!-- HTMX partial: Session status filters, result range, list and pagination -->
+{% set status_filters = [
+    ('', '全部', stats.total),
+    ('pending', '待确认', stats.pending),
+    ('unsolved', '未解决', stats.unsolved),
+    ('solved', '已解决', stats.solved),
+    ('ignored', '已忽略', stats.ignored),
+] %}
+<div class="session-toolbar">
+    <div class="status-chips" role="toolbar" aria-label="按状态筛选">
+        {% for value, label, count in status_filters %}
+        <button type="button"
+                class="status-chip{% if (current_status or '') == value %} is-active{% endif %}"
+                data-status-filter="{{ value }}"
+                aria-pressed="{{ 'true' if (current_status or '') == value else 'false' }}">
+            {% if value %}<span class="status-dot status-{{ value }}"></span>{% endif %}
+            {{ label }} <strong>{{ count }}</strong>
+        </button>
+        {% endfor %}
     </div>
-</article>
-
-<!-- Results count -->
-<div class="results-count">
-    共 {{ sessions | length }} 条结果
+    <div class="results-count">
+        {% if total %}第 {{ range_start }}–{{ range_end }} 条 / 共 {{ total }} 条{% else %}共 0 条{% endif %}
+    </div>
 </div>
 
-<!-- Session List -->
 {% include "_sessions_list.html.jinja2" %}
 
+{% if total_pages > 1 %}
+<nav class="pagination" aria-label="Session 分页">
+    {% if page > 1 %}
+    <a href="/ruok/sessions?{{ query_for(page=page - 1) }}"
+       hx-get="/ruok/_partials/sessions?{{ query_for(page=page - 1) }}"
+       hx-target="#session-content"
+       role="button" class="secondary outline ruok-button-compact">上一页</a>
+    {% else %}
+    <span role="button" class="secondary outline ruok-button-compact" aria-disabled="true">上一页</span>
+    {% endif %}
+    <span class="pagination__info">第 {{ page }} / {{ total_pages }} 页</span>
+    {% if page < total_pages %}
+    <a href="/ruok/sessions?{{ query_for(page=page + 1) }}"
+       hx-get="/ruok/_partials/sessions?{{ query_for(page=page + 1) }}"
+       hx-target="#session-content"
+       role="button" class="secondary outline ruok-button-compact">下一页</a>
+    {% else %}
+    <span role="button" class="secondary outline ruok-button-compact" aria-disabled="true">下一页</span>
+    {% endif %}
+</nav>
+{% endif %}

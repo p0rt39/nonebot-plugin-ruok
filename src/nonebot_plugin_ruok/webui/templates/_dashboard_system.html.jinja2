@@ -1,5 +1,5 @@
 {# Unified system overview: merges gauges + info row into modern tile dashboard #}
-<h3>🖥️ 系统概览</h3>
+<h3>系统概览</h3>
 
 <div class="sys-grid">
     {# ── Row 1: Ring gauges (CPU / Memory / Swap) ── #}
@@ -9,7 +9,7 @@
         <div class="sys-tile__face">
             <svg viewBox="0 0 120 120" class="sys-gauge" id="gauge-cpu">
                 <circle cx="60" cy="60" r="50" fill="none"
-                        stroke="rgba(0,0,0,0.08)" stroke-width="10"/>
+                        class="sys-gauge__track" stroke-width="10"/>
                 <circle id="gauge-cpu-arc" cx="60" cy="60" r="50" fill="none"
                         stroke="{% if metrics.cpu_percent < 70 %}#2ecc40{% elif metrics.cpu_percent < 90 %}#ffdc00{% else %}#ff4136{% endif %}"
                         stroke-width="10" stroke-linecap="round"
@@ -38,7 +38,7 @@
         <div class="sys-tile__face">
             <svg viewBox="0 0 120 120" class="sys-gauge" id="gauge-mem">
                 <circle cx="60" cy="60" r="50" fill="none"
-                        stroke="rgba(0,0,0,0.08)" stroke-width="10"/>
+                        class="sys-gauge__track" stroke-width="10"/>
                 <circle id="gauge-mem-arc" cx="60" cy="60" r="50" fill="none"
                         stroke="{% if metrics.memory_percent < 70 %}#2ecc40{% elif metrics.memory_percent < 90 %}#ffdc00{% else %}#ff4136{% endif %}"
                         stroke-width="10" stroke-linecap="round"
@@ -72,7 +72,7 @@
         <div class="sys-tile__face">
             <svg viewBox="0 0 120 120" class="sys-gauge" id="gauge-swap">
                 <circle cx="60" cy="60" r="50" fill="none"
-                        stroke="rgba(0,0,0,0.08)" stroke-width="10"/>
+                        class="sys-gauge__track" stroke-width="10"/>
                 <circle id="gauge-swap-arc" cx="60" cy="60" r="50" fill="none"
                         stroke="{% if metrics.swap_percent < 70 %}#2ecc40{% elif metrics.swap_percent < 90 %}#ffdc00{% else %}#ff4136{% endif %}"
                         stroke-width="10" stroke-linecap="round"
@@ -130,7 +130,7 @@
             </div>
             <div class="sys-tile__label">网络速率</div>
             <svg class="sys-sparkline" id="spark-net" viewBox="0 0 120 36" preserveAspectRatio="none">
-                <rect x="0" y="0" width="120" height="36" fill="rgba(0,0,0,0.03)" rx="2"/>
+                <line x1="0" y1="30" x2="120" y2="30" stroke="currentColor" stroke-opacity="0.35" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
                 <polyline id="spark-net-up" fill="none" stroke="#2ecc40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 <polyline id="spark-net-down" fill="none" stroke="#3498db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
@@ -155,7 +155,7 @@
             </div>
             <div class="sys-tile__label">磁盘 I/O</div>
             <svg class="sys-sparkline" id="spark-disk" viewBox="0 0 120 36" preserveAspectRatio="none">
-                <rect x="0" y="0" width="120" height="36" fill="rgba(0,0,0,0.03)" rx="2"/>
+                <line x1="0" y1="30" x2="120" y2="30" stroke="currentColor" stroke-opacity="0.35" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
                 <polyline id="spark-disk-read" fill="none" stroke="#2ecc40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 <polyline id="spark-disk-write" fill="none" stroke="#e74c3c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
