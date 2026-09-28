@@ -173,7 +173,10 @@ def test_session_detail_renders_automatic_traceback_as_code_block(
     assert "<span>异常信息</span>" in response.text
     assert "<strong>boom</strong>" in response.text
     assert "Traceback" in response.text
-    assert '<pre class="session-traceback"><code>Traceback line 1' in response.text
+    # The traceback renders inside a fold whose id the copy control targets.
+    assert 'id="session-traceback-text"' in response.text
+    assert 'data-copy-target="session-traceback-text"' in response.text
+    assert ">Traceback line 1" in response.text
     assert "RuntimeError: boom" in response.text
     assert '<pre class="session-description-block">' not in response.text
 
@@ -668,3 +671,82 @@ def test_webui_session_note_and_unlink_still_succeed_for_existing_session(
     assert reloaded is not None
     assert reloaded.developer_notes == "kept"
     assert reloaded.link_group is None
+
+
+def test_session_detail_folds_long_traceback_with_copy_control(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    traceback_text = "\n".join(f"line {i}" for i in range(80))
+    session = create_session(
+        tmp_path,
+        module_name="ruok",
+        description="**异常类型**: RuntimeError\n\n```\n" + traceback_text + "\n```\n",
+        reporter=ReporterInfo(type="automatic"),
+        source="automatic",
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get(f"/ruok/sessions/{session.session_id}")
+
+    assert response.status_code == 200
+    assert 'class="detail-fold" open' in response.text
+    assert 'data-copy-target="session-traceback-text"' in response.text
+    assert 'id="session-traceback-text"' in response.text
+    assert "共 80 行" in response.text
+    assert "复制" in response.text
+    # The fold must not duplicate Pico's disclosure marker.
+    assert "summary::before" not in response.text
+
+
+def test_session_detail_keeps_short_description_inline(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    session = create_session(
+        tmp_path,
+        module_name="ruok",
+        description="短说明",
+        reporter=ReporterInfo(type="user", user_id="1", platform="webui"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get(f"/ruok/sessions/{session.session_id}")
+
+    assert response.status_code == 200
+    # A short description stays visible rather than hiding behind a fold.
+    assert '<pre class="session-description-block">短说明</pre>' in response.text
+
+
+def test_detail_actions_still_return_the_detail_fragment(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    session = create_session(
+        tmp_path,
+        module_name="ruok",
+        description="**异常类型**: RuntimeError\n\n```\nboom\n```\n",
+        reporter=ReporterInfo(type="automatic"),
+        source="automatic",
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    page = client.get(f"/ruok/sessions/{session.session_id}")
+    response = client.post(
+        f"/ruok/_actions/solve/{session.session_id}?view=detail",
+    )
+
+    assert page.status_code == 200
+    assert response.status_code == 200
+    assert response.text.count('id="session-detail-content"') == 1
+    assert 'class="timeline"' in response.text
+    assert 'id="notes-area"' in response.text
+    assert 'id="linked-container"' in response.text

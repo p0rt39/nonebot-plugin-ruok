@@ -78,6 +78,24 @@
         background: none;
         padding: 0;
     }
+    /* Collapsible long content. Pico already draws the disclosure chevron on
+       the summary, so only the layout and the trailing action need rules. */
+    .detail-fold {
+        margin: 0;
+    }
+    .detail-fold > summary {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        font-weight: 600;
+        color: var(--ruok-text-muted);
+        font-size: 0.9em;
+        margin-bottom: 0.4rem;
+    }
+    .detail-fold > summary > [data-copy-target] {
+        margin: 0 0 0 auto;
+    }
     .link-form {
         display: flex;
         gap: 0.5rem;

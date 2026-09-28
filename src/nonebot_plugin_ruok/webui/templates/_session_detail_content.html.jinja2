@@ -96,16 +96,32 @@
         {% endfor %}
     </div>
     {% elif session_description %}
+    {% if session_description | length > 600 %}
+    <details class="detail-fold">
+        <summary>展开完整说明（{{ session_description | length }} 字符）</summary>
+        <pre class="session-description-block">{{ session_description }}</pre>
+    </details>
+    {% else %}
     <pre class="session-description-block">{{ session_description }}</pre>
+    {% endif %}
     {% else %}
     <p class="muted-text">暂无说明</p>
     {% endif %}
 </article>
 
 {% if session_traceback %}
+{% set traceback_title = '日志内容' if (session.source == 'automatic' and not session_summary_fields) else 'Traceback' %}
 <article>
-    <h4>{% if session.source == 'automatic' and not session_summary_fields %}日志内容{% else %}Traceback{% endif %}</h4>
-    <pre class="session-traceback"><code>{{ session_traceback }}</code></pre>
+    <h4>{{ traceback_title }}</h4>
+    <details class="detail-fold" open>
+        <summary>
+            <span>共 {{ session_traceback.splitlines() | length }} 行</span>
+            <button type="button" class="secondary outline ruok-button-compact"
+                    data-copy-target="session-traceback-text"
+                    aria-label="复制{{ traceback_title }}到剪贴板">复制</button>
+        </summary>
+        <pre class="session-traceback"><code id="session-traceback-text">{{ session_traceback }}</code></pre>
+    </details>
 </article>
 {% endif %}
 

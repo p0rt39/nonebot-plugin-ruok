@@ -1509,6 +1509,40 @@
     document.body.addEventListener('htmx:sendError', function() {
         showToast('无法连接服务器，请稍后重试', 'error');
     });
+
+    // ── Copy-to-clipboard ──
+    document.body.addEventListener('click', function(e) {
+        var btn = e.target.closest('[data-copy-target]');
+        if (!btn) return;
+        var source = document.getElementById(btn.getAttribute('data-copy-target'));
+        if (!source) return;
+        e.preventDefault();
+        var text = source.textContent || '';
+        function done(ok) {
+            showToast(ok ? '已复制到剪贴板' : '复制失败，请手动选择文本', ok ? 'success' : 'error');
+        }
+        function fallback() {
+            try {
+                var range = document.createRange();
+                range.selectNodeContents(source);
+                var selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                done(document.execCommand('copy'));
+                selection.removeAllRanges();
+            } catch (_) {
+                done(false);
+            }
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(
+                function() { done(true); },
+                fallback
+            );
+        } else {
+            fallback();
+        }
+    });
 })();
 </script>
 <script>
