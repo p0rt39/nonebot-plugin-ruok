@@ -5,9 +5,10 @@ from __future__ import annotations
 import html
 import json
 import asyncio
+import posixpath
 from typing import Any
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlsplit, urlencode, urlunsplit
 from collections.abc import Callable
 
 from fastapi import Form, Query, Depends, Request, APIRouter, HTTPException
@@ -126,6 +127,27 @@ def _module_detail_url(name: str) -> str:
 def _notification_detail_url(name: str) -> str:
     """Build a WebUI notification detail URL for arbitrary rule names."""
     return f"/ruok/notifications/{quote(name, safe='')}"
+
+
+def _safe_redirect_target(value: str, default: str) -> str:
+    """Return a local WebUI path for ``HX-Redirect``, or *default*.
+
+    ``redirect_to`` is submitted by the browser, so an attacker-supplied value
+    must not be able to send an authenticated client off-site.  Only same-site
+    ``/ruok`` paths are accepted; absolute URLs, protocol-relative URLs,
+    scheme-prefixed values and paths that escape the prefix after normalization
+    fall back to *default*.
+    """
+    candidate = value.strip()
+    if not candidate or candidate.startswith("//"):
+        return default
+    parts = urlsplit(candidate)
+    if parts.scheme or parts.netloc:
+        return default
+    normalized = posixpath.normpath(parts.path)
+    if normalized != "/ruok" and not normalized.startswith("/ruok/"):
+        return default
+    return urlunsplit(("", "", normalized, parts.query, parts.fragment))
 
 
 def _account_reporter_id(user: CurrentWebUIUser) -> str | None:
@@ -1426,11 +1448,12 @@ def create_webui_router(
                 f"❌ 删除失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        if redirect_to:
+        if redirect_to.strip():
             return JSONResponse(
                 {"ok": True},
                 headers={
-                    "HX-Redirect": redirect_to,
+                    "HX-Redirect": _safe_redirect_target(redirect_to, "/ruok/modules")
+                    or "/ruok/modules",
                     "HX-Trigger": '{"toast":"Module deleted","toastType":"info"}',
                 },
             )
@@ -1580,11 +1603,14 @@ def create_webui_router(
                 f"❌ 删除失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        if redirect_to:
+        if redirect_to.strip():
             return JSONResponse(
                 {"ok": True},
                 headers={
-                    "HX-Redirect": redirect_to,
+                    "HX-Redirect": _safe_redirect_target(
+                        redirect_to, "/ruok/notifications"
+                    )
+                    or "/ruok/notifications",
                     "HX-Trigger": '{"toast":"Rule deleted","toastType":"info"}',
                 },
             )

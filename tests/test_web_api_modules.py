@@ -189,3 +189,40 @@ def test_module_delete_accepts_special_character_name(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert module_name not in names
     assert "keep" in names
+
+
+def test_module_delete_rejects_external_redirect_target(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = _webui_config()
+    _upsert_module(tmp_path, ModuleDefinition(name="victim"))
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    for hostile in (
+        "https://evil.example/x",
+        "//evil.example",
+        "/ruok/../evil",
+        "javascript:alert(1)",
+    ):
+        response = client.post(
+            "/ruok/_actions/module-delete",
+            data={"name": "victim", "redirect_to": hostile},
+        )
+        assert response.status_code == 200
+        assert response.headers["HX-Redirect"] == "/ruok/modules"
+        _upsert_module(tmp_path, ModuleDefinition(name="victim"))
+
+
+def test_module_delete_without_redirect_target_uses_default(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = _webui_config()
+    _upsert_module(tmp_path, ModuleDefinition(name="victim"))
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post("/ruok/_actions/module-delete", data={"name": "victim"})
+
+    assert response.status_code == 200
+    assert response.headers["HX-Redirect"] == "/ruok/modules"

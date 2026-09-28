@@ -341,6 +341,9 @@ stateDiagram-v2
 | 通知详情 | `/ruok/notifications/{name}` | 编辑规则、触发状态、模块、冷却、通道、删除 |
 | 用户 | `/ruok/users` | 用户搜索、创建、改名、重置密码、绑定码、清除绑定、删除 |
 
+模块和通知规则的删除按钮通过 `redirect_to` 指定返回页面；该值只接受本站 `/ruok`
+路径，外部 URL 或越出 `/ruok` 前缀的值会被忽略并回退到对应列表页。
+
 Sessions 列表的筛选条件和页码会同步到地址栏（例如 `/ruok/sessions?status=pending&page=2`），
 刷新或后退时会保留当前视图；可用 `page_size` 调整每页条数（10–100）。
 

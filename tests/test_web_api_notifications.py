@@ -296,6 +296,52 @@ def test_notification_detail_delete_redirects_to_list(tmp_path: Path) -> None:
     assert [rule.name for rule in rules] == ["keep"]
 
 
+def test_notification_delete_rejects_external_redirect_target(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = _webui_config()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [NotificationRule(name="victim"), NotificationRule(name="keep")],
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/notification-delete",
+        data={"name": "victim", "redirect_to": "https://evil.example/x"},
+    )
+
+    rules = _load_notification_rules(config, tmp_path)
+    assert response.status_code == 200
+    assert response.headers["HX-Redirect"] == "/ruok/notifications"
+    assert [rule.name for rule in rules] == ["keep"]
+
+
+def test_notification_delete_without_redirect_target_renders_list(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = _webui_config()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [NotificationRule(name="victim"), NotificationRule(name="keep")],
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/notification-delete",
+        data={"name": "victim"},
+    )
+
+    assert response.status_code == 200
+    assert "HX-Redirect" not in response.headers
+
+
 def test_notification_rules_are_loaded_from_webui_storage_only(
     tmp_path: Path,
 ) -> None:
