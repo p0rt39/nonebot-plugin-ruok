@@ -8,6 +8,7 @@ import asyncio
 import posixpath
 from typing import Any
 from pathlib import Path
+from datetime import datetime, timezone
 from urllib.parse import quote, urlsplit, urlencode, urlunsplit
 from collections.abc import Callable
 
@@ -31,6 +32,7 @@ from .jinja import render, parse_session_summary, split_session_description
 from ..config import ScopedConfig
 from ..protocol import (
     Session,
+    MetricPoint,
     NetworkRate,
     ReporterInfo,
     ModuleDefinition,
@@ -64,13 +66,92 @@ from ..collector import (
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Ranges a dashboard trend chart may request.  Long ranges are still bounded by
+# the daily file reader in ``MetricsStore.query``, which only walks whole days.
+TREND_HOURS_MIN = 1.0
+TREND_HOURS_MAX = 168.0
+# Upper bound on points returned after downsampling.  A browser canvas cannot
+# resolve more, and an unbounded series is exactly what made day-plus ranges
+# unusable before the bucketing step existed.
+TREND_MAX_POINTS = 360
+
+
+def _bucket_timestamp(moment: datetime, step_seconds: float) -> str:
+    """Snap *moment* down to the start of its *step_seconds* bucket."""
+    epoch = int(moment.timestamp())
+    bucket = int(epoch // step_seconds) * int(step_seconds)
+    return datetime.fromtimestamp(bucket, tz=timezone.utc).isoformat()
+
+
+def _downsample_metrics(
+    points: list[MetricPoint],
+    hours: float,
+    *,
+    max_points: int = TREND_MAX_POINTS,
+) -> list[dict[str, Any]]:
+    """Return chart-ready metrics, averaged into fixed time buckets.
+
+    ``MetricsStore.query`` can return several thousand points for a multi-day
+    range; sending them all produces an unreadable chart.  Buckets keep the
+    series aligned to wall-clock time instead of array position, and the
+    session/connection counters are carry-forward counts rather than rates, so
+    each bucket reports the newest sample it contains.
+    """
+    serialized = [point.model_dump(mode="json") for point in points]
+    if len(serialized) <= max_points or not serialized:
+        return serialized
+
+    step_seconds = max(float(hours) * 3600.0 / max_points, 1.0)
+    counter_fields = (
+        "sessions_total",
+        "sessions_pending",
+        "sessions_unsolved",
+        "connections_total",
+        "connections_online",
+    )
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    order: list[str] = []
+
+    for record in serialized:
+        raw_ts = record.get("ts")
+        if not isinstance(raw_ts, str):
+            continue
+        try:
+            moment = datetime.fromisoformat(raw_ts)
+        except ValueError:
+            continue
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        key = _bucket_timestamp(moment, step_seconds)
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(record)
+
+    averaged: list[dict[str, Any]] = []
+    for key in sorted(order):
+        members = buckets[key]
+        representative = dict(members[-1])
+        representative["ts"] = key
+        for field in ("cpu_percent", "memory_percent", "disk_percent"):
+            samples = [
+                member[field]
+                for member in members
+                if isinstance(member.get(field), (int, float))
+            ]
+            representative[field] = (
+                round(sum(samples) / len(samples), 2) if samples else None
+            )
+        for field in counter_fields:
+            representative[field] = members[-1].get(field, 0)
+        averaged.append(representative)
+
+    return averaged
+
 
 def _query_metrics_history(data_dir: Path, hours: float = 1.0) -> list[dict[str, Any]]:
     """Return serialized historical metrics for WebUI chart rendering."""
-    return [
-        point.model_dump(mode="json")
-        for point in MetricsStore.query(data_dir, hours=hours)
-    ]
+    return _downsample_metrics(MetricsStore.query(data_dir, hours=hours), hours)
 
 
 def _plugin_names() -> list[str]:
@@ -476,6 +557,9 @@ def create_webui_router(
     async def page_dashboard(
         request: Request,
         _partial: str = "",
+        trend_hours: int = Query(
+            int(TREND_HOURS_MIN), ge=int(TREND_HOURS_MIN), le=int(TREND_HOURS_MAX)
+        ),
         user: CurrentWebUIUser = Depends(_login_guard),
     ) -> HTMLResponse:
         try:
@@ -544,7 +628,8 @@ def create_webui_router(
         if _partial == "dashboard-trends":
             return render(
                 "_dashboard_trends.html.jinja2",
-                metrics_history=_query_metrics_history(data_dir),
+                metrics_history=_query_metrics_history(data_dir, hours=trend_hours),
+                metrics_history_hours=trend_hours,
             )
 
         # Initial data for full page render
@@ -566,7 +651,8 @@ def create_webui_router(
             modules=modules,
             stats=stats,
             metrics=metrics_snap,
-            metrics_history=_query_metrics_history(data_dir),
+            metrics_history=_query_metrics_history(data_dir, hours=trend_hours),
+            metrics_history_hours=trend_hours,
             net_up=net_rate.bytes_sent_per_sec,
             net_down=net_rate.bytes_recv_per_sec,
         )
@@ -812,7 +898,7 @@ def create_webui_router(
 
     @router.get("/ruok/_partials/dashboard-trends-data")
     async def partial_dashboard_trends_data(
-        hours: float = Query(1.0, ge=0.5, le=168.0),
+        hours: float = Query(1.0, ge=TREND_HOURS_MIN, le=TREND_HOURS_MAX),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> list[dict[str, Any]]:
         """JSON data for dashboard trend charts.
