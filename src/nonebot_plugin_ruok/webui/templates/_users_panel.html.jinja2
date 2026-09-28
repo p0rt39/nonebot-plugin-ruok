@@ -31,6 +31,7 @@
                     </label>
                 </div>
                 <button type="submit">创建并生成绑定码</button>
+                <p class="ruok-form-status" data-form-status role="status" aria-live="polite"></p>
             </form>
         </article>
 
@@ -227,6 +228,7 @@
                 <input type="password" name="new_password_confirm" required autocomplete="new-password">
             </label>
             <button type="submit">保存密码</button>
+            <p class="ruok-form-status" data-form-status role="status" aria-live="polite"></p>
         </form>
     </article>
 
@@ -241,6 +243,7 @@
                 <input type="password" name="current_password" required autocomplete="current-password">
             </label>
             <button type="submit" class="secondary outline">生成换绑码</button>
+            <p class="ruok-form-status" data-form-status role="status" aria-live="polite"></p>
         </form>
         {% else %}
         {% if current_user.has_legacy_binding %}
@@ -250,6 +253,7 @@
         <form hx-post="/ruok/_actions/account-auth-key"
               hx-target="#users-panel" hx-swap="outerHTML">
             <button type="submit" class="secondary outline">生成绑定码</button>
+            <p class="ruok-form-status" data-form-status role="status" aria-live="polite"></p>
         </form>
         {% endif %}
     </article>

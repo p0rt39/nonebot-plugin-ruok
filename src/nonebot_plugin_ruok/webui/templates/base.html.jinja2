@@ -1140,6 +1140,40 @@
             pointer-events: none;
         }
 
+        /* ── Form feedback ── */
+        .ruok-form-status {
+            display: none;
+            align-items: center;
+            gap: 0.4rem;
+            margin: 0.5rem 0 0;
+            padding: 0.45rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.88em;
+        }
+        .ruok-form-status[data-state] {
+            display: flex;
+        }
+        .ruok-form-status[data-state="busy"] {
+            border-left: 3px solid var(--ruok-muted-fill);
+            background: var(--ruok-muted-bg);
+            color: var(--ruok-muted);
+        }
+        .ruok-form-status[data-state="error"] {
+            border-left: 3px solid var(--ruok-err-fill);
+            background: var(--ruok-err-bg);
+            color: var(--ruok-err);
+        }
+        .ruok-form-status[data-state="success"] {
+            border-left: 3px solid var(--ruok-ok-fill);
+            background: var(--ruok-ok-bg);
+            color: var(--ruok-ok);
+        }
+        /* ── Focus visibility ── */
+        :where(a, button, input, select, textarea, summary, [role="button"]):focus-visible {
+            outline: 2px solid var(--pico-primary);
+            outline-offset: 2px;
+        }
+
         /* ── Footer ── */
         footer.ruok-footer {
             margin-top: 2rem;
@@ -1378,15 +1412,14 @@
     });
 
     // htmx does not swap 4xx/5xx bodies; surface the server's message instead.
+    // Forms that render the failure inline skip the toast to avoid saying the
+    // same thing twice.
     document.body.addEventListener('htmx:responseError', function(e) {
-        var xhr = e.detail.xhr;
-        var text = '';
-        try {
-            var doc = new DOMParser().parseFromString(xhr.responseText || '', 'text/html');
-            text = (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
-        } catch(_) {}
-        if (text.length > 200) text = text.slice(0, 199) + '…';
-        showToast(text || ('请求失败 (' + xhr.status + ')'), 'error');
+        var elt = e.detail.elt;
+        var form = elt && (elt.tagName === 'FORM'
+            ? elt : (elt.closest ? elt.closest('form') : null));
+        if (form && form.querySelector('[data-form-status]')) return;
+        showToast(window.ruokErrorMessage(e.detail.xhr), 'error');
     });
     document.body.addEventListener('htmx:sendError', function() {
         showToast('无法连接服务器，请稍后重试', 'error');
@@ -1394,8 +1427,10 @@
 })();
 </script>
 <script>
-// ── HTMX button feedback ──
+// ── HTMX form feedback ──
 (function() {
+    var regionSeq = 0;
+
     function submitterFromEvent(event) {
         var elt = event.detail && event.detail.elt;
         if (!elt) return null;
@@ -1406,12 +1441,102 @@
         return elt.closest('button, [role="button"], input[type="submit"]');
     }
 
+    // The region lives inside the form so it survives a target swap that
+    // replaces the surrounding list or container. Compact Session list rows
+    // keep their tight grid and rely on the error toast instead.
+    function regionFor(elt) {
+        if (!elt) return null;
+        var form = elt.tagName === 'FORM' ? elt : elt.closest('form');
+        if (!form || form.closest('.session-row')) return null;
+        var region = form.querySelector('[data-form-status]');
+        if (region) return region;
+        region = document.createElement('p');
+        region.className = 'ruok-form-status';
+        region.id = 'ruok-form-status-' + (++regionSeq);
+        region.setAttribute('data-form-status', '');
+        region.setAttribute('role', 'status');
+        region.setAttribute('aria-live', 'polite');
+        form.appendChild(region);
+        return region;
+    }
+
+    function setState(region, state, message) {
+        if (!region) return;
+        if (!state) {
+            region.removeAttribute('data-state');
+            region.textContent = '';
+            return;
+        }
+        region.setAttribute('data-state', state);
+        region.textContent = message;
+    }
+
+    var FIELD_LABELS = {
+        name: '名称', original_name: '原名称', display_name: '显示名',
+        description: '描述', module_name: '模块名', user_id: '上报用户',
+        status: '状态', affected_plugins: '影响插件', username: '用户名',
+        password: '密码', current_password: '当前密码',
+        new_password: '新密码', new_password_confirm: '确认新密码',
+        confirm_username: '确认用户名', cooldown_minutes: '冷却时间',
+        on_status: '触发状态', channels: '通知通道', webhook_url: 'Webhook URL',
+        developer_notes: '开发者备注', other_id: 'Session ID',
+    };
+
+    function fieldLabel(field) {
+        if (!field) return '字段';
+        return FIELD_LABELS[field] || field;
+    }
+
+    // FastAPI's own form validation answers 422 with a JSON `detail` list.
+    // Rendering that raw would show the user a Python-shaped payload.
+    function describeValidationError(details) {
+        var missing = [];
+        var other = [];
+        details.forEach(function(item) {
+            if (!item || typeof item !== 'object') return;
+            var field = (item.loc || []).filter(function(part) {
+                return part !== 'body' && part !== 'query' && part !== 'path';
+            }).pop();
+            if (item.type === 'missing') missing.push(fieldLabel(field));
+            else other.push(fieldLabel(field));
+        });
+        if (missing.length) return '请填写：' + missing.join('、');
+        if (other.length) return '请检查：' + other.join('、');
+        return '提交的内容不合法，请检查后重试';
+    }
+
+    function messageFromXhr(xhr) {
+        var body = xhr.responseText || '';
+        try {
+            var data = JSON.parse(body);
+            if (data && typeof data.detail === 'string') return data.detail;
+            if (data && Array.isArray(data.detail)) {
+                return describeValidationError(data.detail);
+            }
+            if (data && data.detail) return '请求失败 (' + xhr.status + ')';
+        } catch(_) {}
+        var text = '';
+        try {
+            var doc = new DOMParser().parseFromString(body, 'text/html');
+            text = (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+        } catch(_) {}
+        if (text.length > 200) text = text.slice(0, 199) + '…';
+        return text || ('请求失败 (' + xhr.status + ')');
+    }
+
+    // Shared with the toast handler and the HTMX-error listener below.
+    window.ruokErrorMessage = messageFromXhr;
+
     document.body.addEventListener('htmx:beforeRequest', function(event) {
+        var elt = event.detail && event.detail.elt;
         var button = submitterFromEvent(event);
-        if (!button) return;
-        button.classList.add('htmx-busy');
-        button.setAttribute('aria-busy', 'true');
-        button.dataset.ruokBusy = 'true';
+        if (button) {
+            button.classList.add('htmx-busy');
+            button.setAttribute('aria-busy', 'true');
+            button.dataset.ruokBusy = 'true';
+        }
+        var region = regionFor(elt);
+        if (region) setState(region, 'busy', '正在提交…');
     });
 
     document.body.addEventListener('htmx:afterRequest', function(event) {
@@ -1420,6 +1545,17 @@
             button.removeAttribute('aria-busy');
             delete button.dataset.ruokBusy;
         });
+        var elt = event.detail && event.detail.elt;
+        var region = regionFor(elt);
+        if (!region) return;
+        var xhr = event.detail.xhr;
+        if (event.detail.successful) {
+            // Success is usually followed by a swap or redirect; keep a short
+            // confirmation for the swaps that leave the form in place.
+            setState(region, 'success', '已保存');
+            return;
+        }
+        setState(region, 'error', messageFromXhr(xhr));
     });
 })();
 </script>

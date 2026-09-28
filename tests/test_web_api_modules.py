@@ -273,3 +273,56 @@ def test_module_table_wraps_rows_in_scroll_container(tmp_path: Path) -> None:
     assert 'id="module-list"' in response.text
     assert "status-table-scroll" in response.text
     assert "module-table" not in response.text
+
+
+def test_module_form_has_inline_status_region(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    assert "data-form-status" in response.text
+    assert 'id="module-edit-result" class="ruok-form-status"' in response.text
+    assert 'aria-live="polite"' in response.text
+
+
+def test_shared_page_script_describes_validation_errors(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    # FastAPI's 422 payload must be turned into a readable message, and an
+    # inline region must suppress the duplicate error toast.
+    assert "describeValidationError" in response.text
+    assert "请填写：" in response.text
+    assert "window.ruokErrorMessage = messageFromXhr" in response.text
+    assert "form.querySelector('[data-form-status]')" in response.text
+    # Busy state stays announced on the submitting control.
+    assert "aria-busy" in response.text
+    assert "正在提交…" in response.text
+
+
+def test_session_rows_keep_the_compact_grid(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    create_session(
+        tmp_path,
+        module_name="ruok",
+        description="row layout check",
+        reporter=ReporterInfo(type="user", user_id="1", platform="webui"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert response.status_code == 200
+    # Row-level action forms must not reserve space for a status region; the
+    # shared script skips them so the compact grid is preserved.
+    assert "form.closest('.session-row')" in client.get("/ruok/modules").text
+    assert ".session-row [data-form-status]" not in response.text
