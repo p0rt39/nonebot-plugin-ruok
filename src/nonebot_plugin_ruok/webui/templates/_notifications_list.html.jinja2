@@ -1,7 +1,7 @@
 <div id="notifications-container">
 {% if rules %}
-<div class="table-scroll">
-<table class="striped">
+<div class="table-scroll status-table-scroll">
+<table class="striped status-table">
     <thead>
         <tr>
             <th>规则</th>
@@ -15,26 +15,26 @@
     <tbody>
         {% for rule in rules %}
         <tr class="notification-card">
-            <td>
+            <td data-label="规则">
                 <strong>
                     <a href="/ruok/notifications/{{ rule.name | _path_quote }}">{{ rule.name }}</a>
                 </strong>
             </td>
-            <td class="cell-nowrap">
+            <td class="cell-nowrap" data-label="状态">
                 <span class="badge badge-{{ 'ok' if rule.enabled else 'muted' }}">
                     {{ '启用' if rule.enabled else '禁用' }}
                 </span>
             </td>
-            <td>
+            <td data-label="触发状态">
                 {% for s in rule.on_status %}
                 <span class="badge badge-{{ s | _status_tone }}">{{ s | _status_label }}</span>
                 {% endfor %}
             </td>
-            <td style="overflow-wrap:anywhere;">
+            <td class="cell-name" data-label="适用模块">
                 {{ rule.on_module | join(', ') if rule.on_module else '全部' }}
             </td>
-            <td class="cell-nowrap">{{ rule.cooldown_minutes | round(1) }} 分钟</td>
-            <td style="overflow-wrap:anywhere;">
+            <td class="cell-nowrap" data-label="冷却">{{ rule.cooldown_minutes | round(1) }} 分钟</td>
+            <td class="cell-name" data-label="通道">
                 {{ rule.channels | join(', ') }}
                 {% if rule.webhook_url %}<br><small class="muted-text">{{ rule.webhook_url }}</small>{% endif %}
             </td>

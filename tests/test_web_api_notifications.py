@@ -670,3 +670,35 @@ def test_notification_upsert_requires_status_and_channel(tmp_path: Path) -> None
     assert "请至少选择一个通知通道" in no_channel.text
     assert "empty status" not in names
     assert "empty channel" not in names
+
+
+def test_notification_table_provides_mobile_card_labels(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = _webui_config()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [
+            NotificationRule(
+                name="card rule",
+                enabled=True,
+                on_status=["pending"],
+                channels=["bot_dm"],
+                cooldown_minutes=30,
+            )
+        ],
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/notifications")
+
+    assert response.status_code == 200
+    assert 'class="table-scroll status-table-scroll"' in response.text
+    assert 'class="striped status-table"' in response.text
+    for label in ("规则", "状态", "触发状态", "适用模块", "冷却", "通道"):
+        assert f'data-label="{label}"' in response.text
+    assert "<thead>" in response.text
+    assert "<tbody>" in response.text
+    assert "card rule" in response.text

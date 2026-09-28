@@ -1,8 +1,8 @@
 <!-- HTMX partial: auto-refreshing module status table -->
 <div id="module-list">
 {% if modules %}
-<div class="table-scroll">
-<table class="striped">
+<div class="table-scroll status-table-scroll">
+<table class="striped status-table">
     <thead>
         <tr>
             <th>状态</th>
@@ -15,10 +15,10 @@
     <tbody>
         {% for m in modules %}
         <tr>
-            <td class="cell-nowrap">
+            <td class="cell-nowrap" data-label="状态">
                 <span class="badge badge-{{ m.status | _status_tone }}">{{ m.status | _status_label }}</span>
             </td>
-            <td class="cell-name">
+            <td class="cell-name" data-label="模块">
                 <strong>
                     {% if module_links is defined and not module_links %}
                     {{ m.display_name or m.name }}
@@ -27,9 +27,9 @@
                     {% endif %}
                 </strong>
             </td>
-            <td class="cell-muted cell-name">{{ m.name }}</td>
-            <td>{{ m.plugins | length }}</td>
-            <td class="cell-desc">
+            <td class="cell-muted cell-name" data-label="内部名">{{ m.name }}</td>
+            <td data-label="插件数">{{ m.plugins | length }}</td>
+            <td class="cell-desc" data-label="描述">
                 {{ m.description or '—' }}
                 {% if m.status_reasons %}
                 <br><small class="muted-text">{{ m.status_reasons[0] }}</small>

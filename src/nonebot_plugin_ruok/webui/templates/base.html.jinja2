@@ -311,10 +311,66 @@
         .table-scroll table {
             margin: 0;
         }
-        @media (max-width: 768px) {
-            /* Scroll wide tables inside their frame instead of crushing columns. */
+        @media (min-width: 601px) and (max-width: 768px) {
+            /* Medium widths keep a bounded inner scroll instead of crushing
+               columns. Below that the card layout takes over. */
             .table-scroll table {
                 min-width: 40rem;
+            }
+        }
+
+        /* ── Status tables: stacked cards on phones ── */
+        @media (max-width: 600px) {
+            .status-table-scroll {
+                overflow-x: visible;
+                border: none;
+                background: none;
+            }
+            .status-table,
+            .status-table tbody,
+            .status-table tr,
+            .status-table td {
+                display: block;
+                width: 100%;
+            }
+            .status-table thead {
+                display: none;
+            }
+            .status-table tbody tr {
+                margin-bottom: 0.6rem;
+                padding: 0.5rem 0.6rem;
+                border: 1px solid var(--ruok-border);
+                border-radius: var(--radius-md);
+                background: var(--ruok-surface);
+            }
+            .status-table tbody tr:last-child {
+                margin-bottom: 0;
+            }
+            .status-table tbody tr:hover {
+                background: var(--ruok-surface);
+            }
+            .status-table td {
+                display: grid;
+                grid-template-columns: minmax(4.5rem, 6.5rem) minmax(0, 1fr);
+                gap: 0.6rem;
+                align-items: baseline;
+                padding: 0.3rem 0;
+                border: none;
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+            /* Badges and inline chips must hug their text, not fill the cell. */
+            .status-table td > * {
+                justify-self: start;
+            }
+            .status-table td::before {
+                content: attr(data-label);
+                color: var(--ruok-text-muted);
+                font-size: 0.85em;
+                font-weight: 600;
+            }
+            .status-table td[data-label]:empty {
+                display: none;
             }
         }
         table {
