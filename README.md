@@ -497,11 +497,17 @@ DELETE /ruok/api/modules/music
 | 状态码 | 含义 |
 | :--- | :--- |
 | `200` | 请求成功 |
-| `400` | 请求内容不合法，例如影响插件不属于 Session 原模块 |
+| `400` | 请求内容不合法：JSON 格式错误、字段类型或取值不合法、影响插件不属于 Session 原模块 |
 | `401` | API key 未配置、缺失或错误 |
 | `403` | Session 系统被禁用，相关写操作不可用 |
 | `404` | Session 或模块不存在 |
 | `503` | `/health` 探针判断服务不可用 |
+
+请求体必须是 JSON 对象。`POST /ruok/api/sessions` 要求非空 `module_name`，`source` 只能取
+`manual` 或 `automatic`，`reporter_type` 只能取 `user` 或 `automatic`；`PATCH` 的 `status`
+只能取 `pending`、`unsolved`、`solved`、`ignored`，`developer_notes` 必须是字符串。
+`PUT /ruok/api/modules/{name}` 的 `plugins` 必须是字符串数组，`display_name` 必须是字符串，
+`description` 必须是字符串或 `null`。任一项不满足都会返回 `400`，并且不会写入数据文件。
 
 ## 数据文件
 

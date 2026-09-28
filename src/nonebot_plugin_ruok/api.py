@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import time
 import asyncio
 import secrets
 from typing import Any
 from pathlib import Path
+from collections.abc import Mapping
 
 from fastapi import Query, Header, Depends, Request, APIRouter, HTTPException
+from pydantic import ValidationError
 from fastapi.responses import JSONResponse
 
 from .config import ScopedConfig
@@ -39,6 +42,26 @@ from .collector import (
 # ────────────────────────────────
 # Router factory
 # ────────────────────────────────
+
+_SESSION_SOURCES = frozenset({"automatic", "manual"})
+_REPORTER_TYPES = frozenset({"automatic", "user"})
+_SESSION_STATUSES = frozenset({"pending", "unsolved", "solved", "ignored"})
+
+
+async def _read_json_body(request: Request) -> dict[str, Any]:
+    """Return a JSON object body, or raise 400 for malformed/unsupported input.
+
+    Client mistakes must stay client errors.  Letting a decode or validation
+    failure escape would reach the application-wide exception handler and
+    create a RUOK self-monitoring Session for a bad request.
+    """
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    if not isinstance(body, Mapping):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    return dict(body)
 
 
 def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
@@ -166,21 +189,48 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         if not config.session_enabled:
             raise HTTPException(status_code=403, detail="Session system disabled")
 
-        body = await request.json()
+        body = await _read_json_body(request)
         module_name = body.get("module_name", "")
         description = body.get("description", "")
-        reporter = ReporterInfo(
-            type=body.get("reporter_type", "user"),
-            user_id=body.get("user_id"),
-            group_id=body.get("group_id"),
-            platform=body.get("platform"),
-        )
+        if not isinstance(module_name, str) or not module_name.strip():
+            raise HTTPException(status_code=400, detail="module_name is required")
+        if not isinstance(description, str):
+            raise HTTPException(status_code=400, detail="description must be a string")
+
+        source = body.get("source", "manual")
+        if source not in _SESSION_SOURCES:
+            raise HTTPException(
+                status_code=400,
+                detail="source must be one of: " + ", ".join(sorted(_SESSION_SOURCES)),
+            )
+        reporter_type = body.get("reporter_type", "user")
+        if reporter_type not in _REPORTER_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "reporter_type must be one of: "
+                    + ", ".join(sorted(_REPORTER_TYPES))
+                ),
+            )
+
+        try:
+            reporter = ReporterInfo(
+                type=reporter_type,
+                user_id=body.get("user_id"),
+                group_id=body.get("group_id"),
+                platform=body.get("platform"),
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=400, detail="Invalid reporter fields"
+            ) from exc
+
         session = create_session(
             data_dir,
-            module_name=module_name,
+            module_name=module_name.strip(),
             description=description,
             reporter=reporter,
-            source=body.get("source", "manual"),
+            source=source,
         )
         await dispatch_notification(session, config, data_dir)
         _cache.pop("status", None)  # invalidate cache
@@ -213,14 +263,34 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         if not config.session_enabled:
             raise HTTPException(status_code=403, detail="Session system disabled")
 
-        body = await request.json()
+        body = await _read_json_body(request)
+        if "status" in body and body["status"] not in _SESSION_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "status must be one of: " + ", ".join(sorted(_SESSION_STATUSES))
+                ),
+            )
+        if "developer_notes" in body and body["developer_notes"] is not None:
+            if not isinstance(body["developer_notes"], str):
+                raise HTTPException(
+                    status_code=400, detail="developer_notes must be a string"
+                )
         if body.get("status") == "unsolved" and "affected_plugins" in body:
+            plugins = body["affected_plugins"]
+            if not isinstance(plugins, list) or not all(
+                isinstance(item, str) for item in plugins
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="affected_plugins must be a list of strings",
+                )
             try:
                 session = confirm_session_plugins(
                     data_dir,
                     config,
                     session_id,
-                    body.get("affected_plugins", []),
+                    plugins,
                 )
             except SessionPluginValidationError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -320,13 +390,33 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         _: None = Depends(_require_api_key),
     ) -> dict[str, Any]:
         """Create or update a module definition."""
-        body = await request.json()
-        definition = ModuleDefinition(
-            name=name,
-            display_name=body.get("display_name", name),
-            plugins=body.get("plugins", []),
-            description=body.get("description"),
-        )
+        body = await _read_json_body(request)
+        display_name = body.get("display_name", name)
+        plugins = body.get("plugins", [])
+        description = body.get("description")
+        if not isinstance(display_name, str):
+            raise HTTPException(status_code=400, detail="display_name must be a string")
+        if not isinstance(plugins, list) or not all(
+            isinstance(item, str) for item in plugins
+        ):
+            raise HTTPException(
+                status_code=400, detail="plugins must be a list of strings"
+            )
+        if description is not None and not isinstance(description, str):
+            raise HTTPException(
+                status_code=400, detail="description must be a string or null"
+            )
+        try:
+            definition = ModuleDefinition(
+                name=name,
+                display_name=display_name,
+                plugins=plugins,
+                description=description,
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=400, detail="Invalid module definition"
+            ) from exc
         upsert_module(data_dir, definition)
         _cache.pop("status", None)
         return definition.model_dump(mode="json")

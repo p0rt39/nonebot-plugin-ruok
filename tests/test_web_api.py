@@ -125,3 +125,80 @@ def test_api_create_session_dispatches_rule_notification(
 
     assert response.status_code == 200
     assert calls == [response.json()["session_id"]]
+
+
+def test_api_rejects_invalid_session_bodies_with_400(tmp_path: Path) -> None:
+    """Invalid bodies are client errors and must not create self-monitoring sessions."""
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    headers = {"X-RUOK-API-Key": "secret"}
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+
+    responses = [
+        client.post(
+            "/ruok/api/sessions",
+            headers=headers,
+            json={"module_name": "music", "source": "bogus"},
+        ),
+        client.post(
+            "/ruok/api/sessions",
+            headers=headers,
+            json={"module_name": "music", "reporter_type": "bogus"},
+        ),
+        client.post(
+            "/ruok/api/sessions",
+            headers=headers,
+            json={"module_name": "", "description": "missing module"},
+        ),
+        client.post(
+            "/ruok/api/sessions",
+            headers=headers,
+            content=b"{not json",
+        ),
+        client.patch(
+            "/ruok/api/sessions/ruok-deadbeef",
+            headers=headers,
+            content=b"{bad json",
+        ),
+        client.patch(
+            "/ruok/api/sessions/ruok-deadbeef",
+            headers=headers,
+            json={"status": "invalid"},
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [400] * len(responses)
+    assert list_sessions(tmp_path) == []
+
+
+def test_api_rejects_invalid_module_bodies_with_400(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    headers = {"X-RUOK-API-Key": "secret"}
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+
+    responses = [
+        client.put(
+            "/ruok/api/modules/music", headers=headers, json={"plugins": "nope"}
+        ),
+        client.put(
+            "/ruok/api/modules/music",
+            headers=headers,
+            json={"plugins": ["ok", 1]},
+        ),
+        client.put(
+            "/ruok/api/modules/music",
+            headers=headers,
+            json={"display_name": 5},
+        ),
+        client.put(
+            "/ruok/api/modules/music",
+            headers=headers,
+            content=b"[]",
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [400] * len(responses)
+    assert list_sessions(tmp_path) == []
