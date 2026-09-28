@@ -1527,36 +1527,40 @@ def create_webui_router(
         if not channel_list:
             return _error_html("请至少选择一个通知通道")
         try:
-            rules = _load_notification_rules()
-            normalized_name = name.strip()
-            normalized_original = original_name.strip()
-            if not normalized_name:
-                return HTMLResponse(
-                    '<p style="color:var(--pico-del-color);">❌ 规则名称不能为空</p>',
-                    status_code=400,
-                )
-            if normalized_original and normalized_original != normalized_name:
-                if any(r.name == normalized_name for r in rules):
+            from ..collectors.notifications import locked_rules
+
+            with locked_rules(data_dir):
+                rules = _load_notification_rules()
+                normalized_name = name.strip()
+                normalized_original = original_name.strip()
+                if not normalized_name:
                     return HTMLResponse(
-                        f'<p style="color:var(--pico-del-color);">'
-                        f'❌ 规则 "{normalized_name}" 已存在</p>',
+                        '<p style="color:var(--pico-del-color);">'
+                        "❌ 规则名称不能为空</p>",
                         status_code=400,
                     )
-            rule = NotificationRule(
-                name=normalized_name,
-                enabled=enabled,
-                on_status=statuses,
-                on_module=_parse_form_values(selected_modules, on_module),
-                cooldown_minutes=cooldown_minutes,
-                channels=channel_list,
-                webhook_url=webhook_url or None,
-            )
-            replace_name = normalized_original or normalized_name
-            rules = [r for r in rules if r.name != replace_name]
-            if replace_name != normalized_name:
-                rules = [r for r in rules if r.name != normalized_name]
-            rules.append(rule)
-            _save_notification_rules(rules)
+                if normalized_original and normalized_original != normalized_name:
+                    if any(r.name == normalized_name for r in rules):
+                        return HTMLResponse(
+                            f'<p style="color:var(--pico-del-color);">'
+                            f'❌ 规则 "{normalized_name}" 已存在</p>',
+                            status_code=400,
+                        )
+                rule = NotificationRule(
+                    name=normalized_name,
+                    enabled=enabled,
+                    on_status=statuses,
+                    on_module=_parse_form_values(selected_modules, on_module),
+                    cooldown_minutes=cooldown_minutes,
+                    channels=channel_list,
+                    webhook_url=webhook_url or None,
+                )
+                replace_name = normalized_original or normalized_name
+                rules = [r for r in rules if r.name != replace_name]
+                if replace_name != normalized_name:
+                    rules = [r for r in rules if r.name != normalized_name]
+                rules.append(rule)
+                _save_notification_rules(rules)
         except Exception as exc:
             sid = _handle_ruok_error(exc, "action_notification_upsert", data_dir)
             return HTMLResponse(
@@ -1593,9 +1597,12 @@ def create_webui_router(
     ) -> HTMLResponse | JSONResponse:
         """Delete a notification rule by name."""
         try:
+            from ..collectors.notifications import locked_rules
+
             delete_name = name.strip()
-            rules = [r for r in _load_notification_rules() if r.name != delete_name]
-            _save_notification_rules(rules)
+            with locked_rules(data_dir):
+                rules = [r for r in _load_notification_rules() if r.name != delete_name]
+                _save_notification_rules(rules)
         except Exception as exc:
             sid = _handle_ruok_error(exc, "action_notification_delete", data_dir)
             return HTMLResponse(

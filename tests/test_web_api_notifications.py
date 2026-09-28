@@ -342,6 +342,43 @@ def test_notification_delete_without_redirect_target_renders_list(
     assert "HX-Redirect" not in response.headers
 
 
+def test_concurrent_rule_saves_persist_every_rule(tmp_path: Path) -> None:
+    """Concurrent rule replacements must not lose writes or corrupt the rules file."""
+    from collections import defaultdict
+    from concurrent.futures import ThreadPoolExecutor
+
+    from nonebot_plugin_ruok.protocol import NotificationRule
+    from nonebot_plugin_ruok.collectors.notifications import (
+        _load_rules,
+        _save_rules,
+        locked_rules,
+    )
+
+    _save_rules(tmp_path, [NotificationRule(name="base")])
+    failures: dict[str, int] = defaultdict(int)
+
+    def upsert(index: int) -> None:
+        try:
+            with locked_rules(tmp_path):
+                rules = [
+                    rule
+                    for rule in _load_rules(tmp_path)
+                    if rule.name != f"rule{index}"
+                ]
+                rules.append(NotificationRule(name=f"rule{index}"))
+                _save_rules(tmp_path, rules)
+        except Exception as exc:  # pragma: no cover - failure diagnostics
+            failures[type(exc).__name__] += 1
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        list(executor.map(upsert, range(64)))
+
+    persisted = [rule.name for rule in _load_rules(tmp_path)]
+    assert failures == {}
+    assert len(persisted) == 65
+    assert set(persisted) == {"base"} | {f"rule{index}" for index in range(64)}
+
+
 def test_notification_rules_are_loaded_from_webui_storage_only(
     tmp_path: Path,
 ) -> None:

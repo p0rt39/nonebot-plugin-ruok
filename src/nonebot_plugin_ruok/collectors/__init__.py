@@ -56,6 +56,7 @@ from .trackers import (
     _network_tracker,
 )
 from .notifications import (
+    locked_rules,
     register_summary_job,
     dispatch_notification,
 )
@@ -100,6 +101,7 @@ __all__ = [
     "list_module_related_sessions",
     "list_modules",
     "list_sessions",
+    "locked_rules",
     "parse_filter_datetime",
     "rebuild_plugin_impacts",
     "register_summary_job",
