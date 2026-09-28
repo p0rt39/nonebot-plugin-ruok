@@ -598,6 +598,8 @@ uv run pyright
 uv run pytest
 ```
 
+测试会把插件的插件数据目录指向临时目录，不会读写仓库内的 `data/`，因此本地遗留的运行数据不会影响测试结果。
+
 项目使用 `prek` 执行 `.pre-commit-config.yaml` 中定义的 hooks，包含 ruff、typos、uv lock/sync 等检查：
 
 ```powershell
