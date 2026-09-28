@@ -1,7 +1,7 @@
 <!-- Overall status bar partial (innerHTML, no wrapper) -->
 <article class="hero-banner {% if status.overall == 'available' %}ok{% elif status.overall == 'degraded' %}warn{% else %}error{% endif %}">
     <div class="status-bar__main">
-        <span class="status-dot status-{{ status.overall }}"></span>
+        <span class="status-dot status-{{ status.overall }}" aria-hidden="true"></span>
         <strong class="status-bar__title">
             {% if status.overall == 'available' %}一切正常
             {% elif status.overall == 'degraded' %}部分降级

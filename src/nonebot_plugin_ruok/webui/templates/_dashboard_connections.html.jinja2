@@ -3,9 +3,10 @@
 <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-bottom:0.9rem;">
     {% for conn in status.connections %}
     <span class="info-chip">
-        <span class="status-dot status-{{ 'available' if conn.connected else 'unavailable' }}"></span>
+        <span class="status-dot status-{{ 'available' if conn.connected else 'unavailable' }}" aria-hidden="true"></span>
         {{ conn.self_id }}
         <small class="muted-text">{{ conn.adapter }}{% if conn.latency_ms is not none %} · {{ '%.0f'|format(conn.latency_ms) }}ms{% endif %}</small>
+        <span class="visually-hidden">{{ '在线' if conn.connected else '离线' }}</span>
     </span>
     {% else %}
     <p class="muted-text" style="margin:0;">暂无 Bot 连接</p>

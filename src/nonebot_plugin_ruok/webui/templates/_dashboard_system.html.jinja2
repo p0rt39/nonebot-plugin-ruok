@@ -34,7 +34,8 @@
 
     <!-- Memory Gauge Tile -->
     <article class="sys-tile sys-tile--gauge animate-in" id="tile-mem"
-             onclick="this.classList.toggle('expanded')">
+             data-expandable tabindex="0" role="button" aria-expanded="false"
+             aria-label="内存详情">
         <div class="sys-tile__face">
             <svg viewBox="0 0 120 120" class="sys-gauge" id="gauge-mem">
                 <circle cx="60" cy="60" r="50" fill="none"
@@ -97,7 +98,8 @@
     <!-- Load Tile (hidden on Windows — os.getloadavg unavailable) -->
     {% if metrics.load_1m is not none %}
     <article class="sys-tile sys-tile--stat animate-in" id="tile-load"
-             onclick="this.classList.toggle('expanded')">
+             data-expandable tabindex="0" role="button" aria-expanded="false"
+             aria-label="Load Average 详情">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">⚖️</div>
             <div class="sys-tile__value" id="info-load">
@@ -121,7 +123,8 @@
 
     <!-- Network Tile -->
     <article class="sys-tile sys-tile--stat animate-in" id="tile-net"
-             onclick="this.classList.toggle('expanded')">
+             data-expandable tabindex="0" role="button" aria-expanded="false"
+             aria-label="网络速率详情">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">🌐</div>
             <div class="sys-tile__value sys-metric-rows">
@@ -146,7 +149,8 @@
 
     <!-- Disk IO Tile -->
     <article class="sys-tile sys-tile--stat animate-in" id="tile-disk"
-             onclick="this.classList.toggle('expanded')">
+             data-expandable tabindex="0" role="button" aria-expanded="false"
+             aria-label="磁盘 I/O 详情">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">💾</div>
             <div class="sys-tile__value sys-metric-rows">
@@ -171,7 +175,8 @@
 
     <!-- Process Tile -->
     <article class="sys-tile sys-tile--stat animate-in" id="tile-proc"
-             onclick="this.classList.toggle('expanded')">
+             data-expandable tabindex="0" role="button" aria-expanded="false"
+             aria-label="进程详情">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">🔧</div>
             <div class="sys-tile__value" id="info-procs">{{ metrics.process_count }}</div>
@@ -187,7 +192,8 @@
 
     <!-- Uptime Tile -->
     <article class="sys-tile sys-tile--stat animate-in" id="tile-uptime"
-             onclick="this.classList.toggle('expanded')">
+             data-expandable tabindex="0" role="button" aria-expanded="false"
+             aria-label="运行时间详情">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">⏱️</div>
             <div class="sys-tile__value">
@@ -211,7 +217,8 @@
     <!-- Temperature Tile (hidden if no data) -->
     <article class="sys-tile sys-tile--stat animate-in" id="tile-temp"
              style="{% if metrics.cpu_temp is none %}display:none;{% endif %}"
-             onclick="this.classList.toggle('expanded')">
+             data-expandable tabindex="0" role="button" aria-expanded="false"
+             aria-label="CPU 温度详情">
         <div class="sys-tile__face">
             <div class="sys-tile__icon">🌡️</div>
             <div class="sys-tile__value" id="info-temp">

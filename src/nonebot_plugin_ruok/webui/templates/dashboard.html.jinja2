@@ -83,6 +83,24 @@
         bindStreamHandlers(src);
     }
 
+    // ── Expandable system tiles (mouse + keyboard) ──
+    document.addEventListener('click', function(e) {
+        var tile = e.target.closest && e.target.closest('[data-expandable]');
+        if (!tile) return;
+        toggleTile(tile);
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var tile = e.target.closest && e.target.closest('[data-expandable]');
+        if (!tile) return;
+        e.preventDefault();
+        toggleTile(tile);
+    });
+    function toggleTile(tile) {
+        var expanded = tile.classList.toggle('expanded');
+        tile.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+
     // ── Panel refresh feedback ──
     // Declared hx-get polls report the panel itself as `elt`; programmatic
     // htmx.ajax calls report `body`, so fall back to the swap target.

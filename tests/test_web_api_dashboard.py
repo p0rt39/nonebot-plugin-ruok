@@ -308,3 +308,79 @@ def test_dashboard_stats_partial_destroys_replaced_chart(tmp_path: Path) -> None
     # previous Chart.js instance bound to the replaced canvas.
     assert "window.ruokStatsChart.canvas !== ctx" in response.text
     assert ".destroy()" in response.text
+
+
+def test_theme_prefers_system_scheme_without_a_stored_choice(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    # The pre-paint script must consult the OS setting and keep the
+    # color-scheme meta in sync with the resolved theme.
+    assert "prefers-color-scheme: dark" in response.text
+    assert 'name="color-scheme"' in response.text
+    assert ".setAttribute('data-theme', t)" in response.text
+    # An explicit choice still wins and is persisted.
+    assert "localStorage.setItem('ruok-theme', t)" in response.text
+
+
+def test_theme_toggle_reports_pressed_state(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    assert 'id="theme-toggle"' in response.text
+    assert "aria-pressed" in response.text
+
+
+def test_metric_tiles_are_keyboard_operable(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    # Tiles expose button semantics and announce their expanded state.
+    assert "data-expandable" in response.text
+    assert 'role="button"' in response.text
+    assert 'aria-expanded="false"' in response.text
+    # The inline onclick handler is replaced by the shared keyboard handler.
+    assert "onclick=\"this.classList.toggle('expanded')\"" not in response.text
+    assert 'aria-label="内存详情"' in response.text
+    assert "toggleTile" in response.text
+    # role="button" inherits Pico's filled button styling, so the card surface
+    # and text colour must be restored explicitly.
+    assert '.sys-tile[role="button"]' in response.text
+    assert "--ruok-text:" in response.text
+
+
+def test_decorative_status_dots_are_hidden_from_assistive_tech(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    create_session(
+        tmp_path,
+        module_name="ruok",
+        description="a11y check",
+        reporter=ReporterInfo(type="user", user_id="1", platform="webui"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    dashboard = client.get("/ruok")
+    users = client.get("/ruok/users")
+
+    assert dashboard.status_code == 200
+    assert '<span class="status-dot status-unavailable" aria-hidden="true">' in (
+        dashboard.text
+    )
+    # Screen-reader-only text carries the state that the dot only colours.
+    assert "visually-hidden" in dashboard.text
+    assert users.status_code == 200
