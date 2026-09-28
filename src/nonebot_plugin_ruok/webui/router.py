@@ -229,6 +229,16 @@ def _error_html(message: str, status_code: int = 400) -> HTMLResponse:
     )
 
 
+def _missing_session_response() -> HTMLResponse:
+    """Return the same 404 fragment as the Session detail page.
+
+    Session actions are idempotent buttons; a target that disappeared (deleted
+    or expired view) is a client error, not an internal failure, and must not
+    create a self-monitoring Session.
+    """
+    return HTMLResponse("<p>Session not found</p>", status_code=404)
+
+
 def _filter_users(users, search: str):
     """Filter stored WebUI users by username or bound platform identity."""
     query = search.strip().casefold()
@@ -1217,8 +1227,6 @@ def create_webui_router(
         try:
             confirm_session_plugins(data_dir, config, session_id, affected_plugins)
             s = get_session(data_dir, session_id)
-            if s is None:
-                raise ValueError("Session not found after update")
         except SessionPluginValidationError as exc:
             return _error_html(str(exc))
         except Exception as exc:
@@ -1228,6 +1236,8 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+        if s is None:
+            return _missing_session_response()
         return _render_session_action(s, view, "Session confirmed", "success")
 
     @router.post("/ruok/_actions/solve/{session_id}")
@@ -1239,10 +1249,7 @@ def create_webui_router(
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
         try:
-            update_session(data_dir, session_id, {"status": "solved"})
-            s = get_session(data_dir, session_id)
-            if s is None:
-                raise ValueError("Session not found after update")
+            s = update_session(data_dir, session_id, {"status": "solved"})
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_solve {session_id}", data_dir)
             return HTMLResponse(
@@ -1250,6 +1257,8 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+        if s is None:
+            return _missing_session_response()
         return _render_session_action(s, view, "Session resolved", "success")
 
     @router.post("/ruok/_actions/ignore/{session_id}")
@@ -1261,10 +1270,7 @@ def create_webui_router(
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
         try:
-            update_session(data_dir, session_id, {"status": "ignored"})
-            s = get_session(data_dir, session_id)
-            if s is None:
-                raise ValueError("Session not found after update")
+            s = update_session(data_dir, session_id, {"status": "ignored"})
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_ignore {session_id}", data_dir)
             return HTMLResponse(
@@ -1272,6 +1278,8 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+        if s is None:
+            return _missing_session_response()
         return _render_session_action(s, view, "Session ignored", "info")
 
     @router.post("/ruok/_actions/session-note/{session_id}")
@@ -1283,7 +1291,9 @@ def create_webui_router(
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
         try:
-            update_session(data_dir, session_id, {"developer_notes": developer_notes})
+            saved = update_session(
+                data_dir, session_id, {"developer_notes": developer_notes}
+            )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_session_note {session_id}", data_dir)
             return HTMLResponse(
@@ -1291,6 +1301,8 @@ def create_webui_router(
                 f"❌ 保存失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+        if saved is None:
+            return _missing_session_response()
         return HTMLResponse(
             f'<div id="notes-area">'
             f'<form hx-post="/ruok/_actions/session-note/{session_id}" '
@@ -1330,7 +1342,8 @@ def create_webui_router(
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
-        unlink_session(data_dir, session_id)
+        if not unlink_session(data_dir, session_id):
+            return _missing_session_response()
         return HTMLResponse("<p>已解除关联</p>")
 
     @router.post("/ruok/_actions/link/{session_id}/remove/{other_id}")
@@ -1341,7 +1354,8 @@ def create_webui_router(
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
-        unlink_session(data_dir, other_id)
+        if not unlink_session(data_dir, other_id):
+            return _missing_session_response()
         linked = get_linked_sessions(data_dir, session_id)
         return render(
             "_linked_list.html.jinja2",

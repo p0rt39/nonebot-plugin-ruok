@@ -612,3 +612,59 @@ def test_session_summary_strips_markup_and_truncates() -> None:
     long_text = session_summary("x" * 500)
     assert len(long_text) == 160
     assert long_text.endswith("…")
+
+
+def test_webui_session_actions_return_404_for_missing_session(tmp_path: Path) -> None:
+    """Missing Session is a client error, not a 500 with a self-monitoring Session."""
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+    missing = "ruok-deadbeef"
+
+    responses = {
+        "confirm": client.post(f"/ruok/_actions/confirm/{missing}"),
+        "solve": client.post(f"/ruok/_actions/solve/{missing}"),
+        "ignore": client.post(f"/ruok/_actions/ignore/{missing}"),
+        "note": client.post(
+            f"/ruok/_actions/session-note/{missing}",
+            data={"developer_notes": "note"},
+        ),
+        "unlink": client.post(f"/ruok/_actions/unlink/{missing}"),
+        "unlink-other": client.post(f"/ruok/_actions/link/{missing}/remove/{missing}"),
+    }
+
+    for name, response in responses.items():
+        assert response.status_code == 404, name
+        assert "Session not found" in response.text, name
+        assert "已保存" not in response.text, name
+        assert "已解除关联" not in response.text, name
+    assert list_sessions(tmp_path) == []
+
+
+def test_webui_session_note_and_unlink_still_succeed_for_existing_session(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import get_session, link_sessions
+
+    (session_id,) = _create_many_sessions(tmp_path, 1)
+    (other_id,) = _create_many_sessions(tmp_path, 1)
+    assert link_sessions(tmp_path, session_id, other_id)
+
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    note = client.post(
+        f"/ruok/_actions/session-note/{session_id}",
+        data={"developer_notes": "kept"},
+    )
+    unlink = client.post(f"/ruok/_actions/unlink/{session_id}")
+
+    reloaded = get_session(tmp_path, session_id)
+    assert note.status_code == 200
+    assert "已保存" in note.text
+    assert unlink.status_code == 200
+    assert "已解除关联" in unlink.text
+    assert reloaded is not None
+    assert reloaded.developer_notes == "kept"
+    assert reloaded.link_group is None
