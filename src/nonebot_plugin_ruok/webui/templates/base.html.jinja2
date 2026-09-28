@@ -250,6 +250,57 @@
             font-size: 0.9em;
         }
 
+        /* ── Live-update connection indicator ── */
+        .live-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin: 0 0 0.8rem;
+            padding: 0.15rem 0.65rem 0.15rem 0.5rem;
+            border: 1px solid var(--ruok-border);
+            border-radius: 999px;
+            background: var(--ruok-surface);
+            color: var(--ruok-text-muted);
+            font-size: 0.8em;
+        }
+        .live-status__dot {
+            width: 8px;
+            height: 8px;
+            flex: none;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        .live-status[data-state="open"] { color: var(--ruok-ok); }
+        .live-status[data-state="paused"],
+        .live-status[data-state="reconnecting"] { color: var(--ruok-warn); }
+        .live-status[data-state="failed"] {
+            color: var(--ruok-err);
+            border-color: var(--ruok-err-fill);
+        }
+
+        /* ── Panel refresh state ── */
+        .is-refreshing {
+            opacity: 0.55;
+            transition: opacity var(--transition);
+        }
+        .panel-note {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin: 0 0 0.7rem;
+            padding: 0.35rem 0.65rem;
+            border-left: 3px solid var(--ruok-warn-fill);
+            border-radius: var(--radius-sm);
+            background: var(--ruok-warn-bg);
+            color: var(--ruok-warn);
+            font-size: 0.85em;
+        }
+        .panel-note--error {
+            border-left-color: var(--ruok-err-fill);
+            background: var(--ruok-err-bg);
+            color: var(--ruok-err);
+        }
+
         /* ── Animations (kept subtle) ── */
         @keyframes toastSlideIn {
             from { opacity: 0; transform: translateY(-6px); }

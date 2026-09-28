@@ -253,3 +253,58 @@ def test_dashboard_sse_host_metadata_uses_text_content_rendering(
     assert "diskRow.textContent" in response.text
     assert "processRow.textContent" in response.text
     assert "document.createElement('div')" in response.text
+
+
+def test_dashboard_hero_reports_connection_context_and_reasons(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    assert 'id="live-status"' in response.text
+    assert 'data-state="connecting"' in response.text
+    assert 'role="status"' in response.text
+    assert 'aria-live="polite"' in response.text
+    # The hero states how many connections are online and when it collected.
+    assert "连接 0/0 在线" in response.text
+    assert "未报告异常原因" in response.text or "status-bar__reasons" in response.text
+
+
+def test_dashboard_marks_pollable_panels_for_refresh_feedback(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    for panel in ("dashboard-disk", "dashboard-connections", "dashboard-stats"):
+        assert f'id="{panel}" class="panel"' in response.text
+    assert "htmx:beforeRequest" in response.text
+    assert "htmx:afterRequest" in response.text
+    assert "panel-note--error" in response.text
+
+
+def test_dashboard_pauses_stream_when_tab_hidden(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    assert "visibilitychange" in response.text
+    assert "标签页不活跃，实时更新已暂停" in response.text
+    assert "ruokTrendRefreshNow" in response.text
+
+
+def test_dashboard_stats_partial_destroys_replaced_chart(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok?_partial=dashboard-stats")
+
+    assert response.status_code == 200
+    # The partial re-renders on every Session change, so it must release the
+    # previous Chart.js instance bound to the replaced canvas.
+    assert "window.ruokStatsChart.canvas !== ctx" in response.text
+    assert ".destroy()" in response.text

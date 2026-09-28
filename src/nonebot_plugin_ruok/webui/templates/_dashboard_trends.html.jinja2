@@ -191,5 +191,7 @@
     window.ruokTrendResizeListener = resizeCharts;
     window.addEventListener('resize', window.ruokTrendResizeListener);
     window.ruokTrendRefreshTimer = window.setInterval(refreshHistory, 30000);
+    // Exposed so the dashboard can refetch once when the tab becomes visible.
+    window.ruokTrendRefreshNow = refreshHistory;
 })();
 </script>

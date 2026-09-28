@@ -23,4 +23,8 @@
 {% endif %}
 {% endfor %}
 {% endif %}
-{% if not ns.has_disk %}<p class="muted-text">暂无磁盘数据</p>{% endif %}
+{% if not ns.has_disk %}
+<p class="muted-text">
+    {% if status.bot and status.bot.checks %}暂无磁盘数据{% else %}⏳ 磁盘数据采集中…{% endif %}
+</p>
+{% endif %}

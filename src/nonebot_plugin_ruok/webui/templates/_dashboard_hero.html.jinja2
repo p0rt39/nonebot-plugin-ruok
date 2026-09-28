@@ -10,11 +10,18 @@
         </strong>
         <span class="status-bar__ts hero-ts">{{ status.timestamp.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}</span>
     </div>
+    <p class="status-bar__sub">
+        {% set connected = status.connections | selectattr('connected') | list | length %}
+        连接 {{ connected }}/{{ status.connections | length }} 在线 · 采集于
+        <time datetime="{{ status.timestamp.isoformat() }}">{{ status.timestamp.astimezone().strftime('%H:%M:%S') }}</time>
+    </p>
     {% if status.status_reasons %}
     <ul class="status-bar__reasons">
         {% for reason in status.status_reasons %}
         <li>{{ reason }}</li>
         {% endfor %}
     </ul>
+    {% else %}
+    <p class="status-bar__sub">未报告异常原因。</p>
     {% endif %}
 </article>

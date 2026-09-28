@@ -20,12 +20,19 @@
     var data = [{{ stats.pending }}, {{ stats.unsolved }}, {{ stats.solved }}, {{ stats.ignored }}];
     var ctx = document.getElementById('chart-sessions-pie');
     if (!ctx) return;
+    // This partial is re-rendered on every Session change, which replaces the
+    // canvas. Destroy the previous instance so Chart.js does not accumulate
+    // orphaned charts bound to detached canvases.
+    if (window.ruokStatsChart && window.ruokStatsChart.canvas !== ctx) {
+        window.ruokStatsChart.destroy();
+        window.ruokStatsChart = null;
+    }
     var chart = Chart.getChart(ctx);
     if (chart) {
         chart.data.datasets[0].data = data;
         chart.update('none');
     } else {
-        new Chart(ctx, {
+        chart = new Chart(ctx, {
             type: 'doughnut',
             data: {
                 labels: ['待确认', '未解决', '已解决', '已忽略'],
@@ -43,5 +50,6 @@
             }
         });
     }
+    window.ruokStatsChart = chart;
 })();
 </script>
