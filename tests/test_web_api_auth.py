@@ -566,3 +566,58 @@ def test_webui_admin_manual_report_uses_admin_identity(tmp_path: Path) -> None:
     sessions = list_sessions(tmp_path)
     assert response.status_code == 200
     assert sessions[0].reporter.user_id == "webui-admin"
+
+
+def test_webui_concurrent_registration_persists_every_user(tmp_path: Path) -> None:
+    """Concurrent registrations must not lose writes or corrupt webui_users.json."""
+    from collections import defaultdict
+    from concurrent.futures import ThreadPoolExecutor
+
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+
+    auth = WebUIAuth(ScopedConfig(webui_admin_password=ADMIN_PASSWORD), tmp_path)
+    failures: dict[str, int] = defaultdict(int)
+
+    def register(index: int) -> None:
+        try:
+            auth.register_user(f"user{index}", "secret-password")
+        except Exception as exc:  # pragma: no cover - failure diagnostics
+            failures[type(exc).__name__] += 1
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        list(executor.map(register, range(64)))
+
+    payload = json.loads((tmp_path / "webui_users.json").read_text(encoding="utf-8"))
+    assert failures == {}
+    assert len(payload["users"]) == 64
+    assert len(auth.list_users()) == 64
+
+
+def test_webui_concurrent_remember_tokens_persist_every_token(tmp_path: Path) -> None:
+    """Concurrent remember-token issuance must not lose writes or corrupt the file."""
+    from collections import defaultdict
+    from concurrent.futures import ThreadPoolExecutor
+
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth, CurrentWebUIUser
+
+    auth = WebUIAuth(ScopedConfig(webui_admin_password=ADMIN_PASSWORD), tmp_path)
+    failures: dict[str, int] = defaultdict(int)
+    admin = CurrentWebUIUser(username="admin", role="admin")
+
+    def issue(_: int) -> None:
+        try:
+            auth.issue_remember_token(admin)
+        except Exception as exc:  # pragma: no cover - failure diagnostics
+            failures[type(exc).__name__] += 1
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        list(executor.map(issue, range(64)))
+
+    payload = json.loads(
+        (tmp_path / "webui_remember_tokens.json").read_text(encoding="utf-8")
+    )
+    assert failures == {}
+    assert len(payload["tokens"]) == 64
+    assert len(auth._load_remember_tokens()) == 64

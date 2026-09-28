@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .jinja import render
 from ..config import ScopedConfig
+from ..collectors.storage import locked_file, atomic_write_text
 
 UserRole = Literal["admin", "user"]
 AdminSource = Literal["builtin", "superuser"]
@@ -316,17 +317,18 @@ class WebUIAuth:
         token_id = secrets.token_urlsafe(12)
         secret = secrets.token_urlsafe(32)
         token_value = f"{token_id}.{secret}"
-        tokens = self._load_remember_tokens()
         now = _utc_now()
-        tokens[token_id] = StoredRememberToken(
-            token_id=token_id,
-            token_hash=_hash_auth_key(secret),
-            username=user.username,
-            credential_stamp=self._credential_stamp(user.username),
-            created_at=now,
-            expires_at=now + REMEMBER_TOKEN_TTL,
-        )
-        self._save_remember_tokens(tokens)
+        with locked_file(self._remember_tokens_path):
+            tokens = self._load_remember_tokens()
+            tokens[token_id] = StoredRememberToken(
+                token_id=token_id,
+                token_hash=_hash_auth_key(secret),
+                username=user.username,
+                credential_stamp=self._credential_stamp(user.username),
+                created_at=now,
+                expires_at=now + REMEMBER_TOKEN_TTL,
+            )
+            self._save_remember_tokens(tokens)
         return token_value
 
     def active_auth_key(self, user: StoredWebUIUser | None) -> str | None:
@@ -349,20 +351,22 @@ class WebUIAuth:
         token_id, _secret = self._split_remember_token(token_value)
         if token_id is None:
             return
-        tokens = self._load_remember_tokens()
-        if token_id in tokens:
-            tokens.pop(token_id)
-            self._save_remember_tokens(tokens)
+        with locked_file(self._remember_tokens_path):
+            tokens = self._load_remember_tokens()
+            if token_id in tokens:
+                tokens.pop(token_id)
+                self._save_remember_tokens(tokens)
 
     def revoke_user_remember_tokens(self, username: str) -> None:
         """Revoke all remember tokens for a user."""
         key = self._user_key(username)
-        tokens = {
-            token_id: token
-            for token_id, token in self._load_remember_tokens().items()
-            if self._user_key(token.username) != key
-        }
-        self._save_remember_tokens(tokens)
+        with locked_file(self._remember_tokens_path):
+            tokens = {
+                token_id: token
+                for token_id, token in self._load_remember_tokens().items()
+                if self._user_key(token.username) != key
+            }
+            self._save_remember_tokens(tokens)
 
     def register_user(self, username: str, password: str) -> RegistrationResult:
         """Create a normal user and return the one-time binding key."""
@@ -376,21 +380,22 @@ class WebUIAuth:
         if not password:
             raise UserRegistrationError("密码不能为空")
 
-        users = self._load_users()
-        key = self._user_key(normalized)
-        if key in users:
-            raise UserRegistrationError("用户名已存在")
+        with locked_file(self._users_path):
+            users = self._load_users()
+            key = self._user_key(normalized)
+            if key in users:
+                raise UserRegistrationError("用户名已存在")
 
-        auth_key = secrets.token_urlsafe(24)
-        user = StoredWebUIUser(
-            username=normalized,
-            password_hash=hash_password(password),
-            auth_key_hash=_hash_auth_key(auth_key),
-            auth_key_value=auth_key,
-            auth_key_expires_at=_utc_now() + AUTH_KEY_TTL,
-        )
-        users[key] = user
-        self._save_users(users)
+            auth_key = secrets.token_urlsafe(24)
+            user = StoredWebUIUser(
+                username=normalized,
+                password_hash=hash_password(password),
+                auth_key_hash=_hash_auth_key(auth_key),
+                auth_key_value=auth_key,
+                auth_key_expires_at=_utc_now() + AUTH_KEY_TTL,
+            )
+            users[key] = user
+            self._save_users(users)
         return RegistrationResult(user=user, auth_key=auth_key)
 
     def issue_auth_key(
@@ -400,19 +405,20 @@ class WebUIAuth:
         allow_bound: bool = False,
     ) -> RegistrationResult:
         """Generate a fresh one-time auth_key for a normal user."""
-        users = self._load_users()
-        user = users.get(self._user_key(username))
-        if user is None:
-            raise UserRegistrationError("用户不存在")
-        if user.is_bound and not allow_bound:
-            raise UserRegistrationError("用户已绑定平台账号")
+        with locked_file(self._users_path):
+            users = self._load_users()
+            user = users.get(self._user_key(username))
+            if user is None:
+                raise UserRegistrationError("用户不存在")
+            if user.is_bound and not allow_bound:
+                raise UserRegistrationError("用户已绑定平台账号")
 
-        auth_key = secrets.token_urlsafe(24)
-        user.auth_key_hash = _hash_auth_key(auth_key)
-        user.auth_key_value = auth_key
-        user.auth_key_expires_at = _utc_now() + AUTH_KEY_TTL
-        users[self._user_key(user.username)] = user
-        self._save_users(users)
+            auth_key = secrets.token_urlsafe(24)
+            user.auth_key_hash = _hash_auth_key(auth_key)
+            user.auth_key_value = auth_key
+            user.auth_key_expires_at = _utc_now() + AUTH_KEY_TTL
+            users[self._user_key(user.username)] = user
+            self._save_users(users)
         return RegistrationResult(user=user, auth_key=auth_key)
 
     def bind_auth_key(
@@ -428,6 +434,18 @@ class WebUIAuth:
         if not normalized_key or not normalized_user_id or not normalized_platform:
             raise AuthKeyInvalid("auth_key 无效")
 
+        with locked_file(self._users_path):
+            return self._bind_auth_key_locked(
+                normalized_key, normalized_user_id, normalized_platform
+            )
+
+    def _bind_auth_key_locked(
+        self,
+        normalized_key: str,
+        normalized_user_id: str,
+        normalized_platform: str,
+    ) -> StoredWebUIUser:
+        """Consume an auth_key while the user file lock is held."""
         key_hash = _hash_auth_key(normalized_key)
         users = self._load_users()
         matched_expired: StoredWebUIUser | None = None
@@ -490,24 +508,25 @@ class WebUIAuth:
         if not normalized_user_id:
             raise UserManagementError("平台账号无效")
 
-        users = self._load_users()
         if not normalized_platform:
             raise UserManagementError("当前平台账号未绑定 WebUI 用户")
 
-        user = self._find_bound_user(
-            users,
-            normalized_user_id,
-            normalized_platform,
-        )
-        if user is None:
-            raise UserManagementError("当前平台账号未绑定 WebUI 用户")
+        with locked_file(self._users_path):
+            users = self._load_users()
+            user = self._find_bound_user(
+                users,
+                normalized_user_id,
+                normalized_platform,
+            )
+            if user is None:
+                raise UserManagementError("当前平台账号未绑定 WebUI 用户")
 
-        reset_key = secrets.token_urlsafe(24)
-        user.password_reset_key_hash = _hash_auth_key(reset_key)
-        user.password_reset_expires_at = _utc_now() + PASSWORD_RESET_TTL
-        user.password_reset_platform = normalized_platform
-        users[self._user_key(user.username)] = user
-        self._save_users(users)
+            reset_key = secrets.token_urlsafe(24)
+            user.password_reset_key_hash = _hash_auth_key(reset_key)
+            user.password_reset_expires_at = _utc_now() + PASSWORD_RESET_TTL
+            user.password_reset_platform = normalized_platform
+            users[self._user_key(user.username)] = user
+            self._save_users(users)
         return PasswordResetResult(user=user, reset_key=reset_key)
 
     def reset_password_with_key(
@@ -523,6 +542,17 @@ class WebUIAuth:
             raise UserManagementError("密码不能为空")
 
         key_hash = _hash_auth_key(normalized_key)
+        with locked_file(self._users_path):
+            user = self._redeem_password_reset_key(key_hash, new_password)
+        self.revoke_user_remember_tokens(user.username)
+        return user
+
+    def _redeem_password_reset_key(
+        self,
+        key_hash: str,
+        new_password: str,
+    ) -> StoredWebUIUser:
+        """Apply a password reset while the user file lock is held."""
         users = self._load_users()
         matched_expired = False
         for user in users.values():
@@ -548,7 +578,6 @@ class WebUIAuth:
             user.password_reset_platform = None
             users[self._user_key(user.username)] = user
             self._save_users(users)
-            self.revoke_user_remember_tokens(user.username)
             return user
 
         if matched_expired:
@@ -583,30 +612,31 @@ class WebUIAuth:
         new_password: str | None = None,
     ) -> StoredWebUIUser:
         """Rename and/or reset the password for a stored normal user."""
-        users = self._load_users()
-        old_key = self._user_key(username)
-        user = users.get(old_key)
-        if user is None:
-            raise UserManagementError("用户不存在")
+        with locked_file(self._users_path):
+            users = self._load_users()
+            old_key = self._user_key(username)
+            user = users.get(old_key)
+            if user is None:
+                raise UserManagementError("用户不存在")
 
-        normalized_name = (new_username or user.username).strip()
-        if not normalized_name:
-            raise UserManagementError("用户名不能为空")
-        if normalized_name.casefold() == ADMIN_USERNAME:
-            raise UserManagementError("admin 是内置管理员账户，不能作为普通用户名")
+            normalized_name = (new_username or user.username).strip()
+            if not normalized_name:
+                raise UserManagementError("用户名不能为空")
+            if normalized_name.casefold() == ADMIN_USERNAME:
+                raise UserManagementError("admin 是内置管理员账户，不能作为普通用户名")
 
-        new_key = self._user_key(normalized_name)
-        if new_key != old_key and new_key in users:
-            raise UserManagementError("用户名已存在")
+            new_key = self._user_key(normalized_name)
+            if new_key != old_key and new_key in users:
+                raise UserManagementError("用户名已存在")
 
-        users.pop(old_key)
-        user.username = normalized_name
-        if new_password is not None:
-            if not new_password:
-                raise UserManagementError("密码不能为空")
-            user.password_hash = hash_password(new_password)
-        users[new_key] = user
-        self._save_users(users)
+            users.pop(old_key)
+            user.username = normalized_name
+            if new_password is not None:
+                if not new_password:
+                    raise UserManagementError("密码不能为空")
+                user.password_hash = hash_password(new_password)
+            users[new_key] = user
+            self._save_users(users)
         if new_key != old_key:
             self.revoke_user_remember_tokens(username)
         if new_password is not None:
@@ -626,28 +656,30 @@ class WebUIAuth:
 
     def clear_binding(self, username: str) -> StoredWebUIUser:
         """Remove a stored user's platform binding."""
-        users = self._load_users()
-        key = self._user_key(username)
-        user = users.get(key)
-        if user is None:
-            raise UserManagementError("用户不存在")
-        user.bound_user_id = None
-        user.bound_platform = None
-        user.password_reset_key_hash = None
-        user.password_reset_expires_at = None
-        user.password_reset_platform = None
-        users[key] = user
-        self._save_users(users)
+        with locked_file(self._users_path):
+            users = self._load_users()
+            key = self._user_key(username)
+            user = users.get(key)
+            if user is None:
+                raise UserManagementError("用户不存在")
+            user.bound_user_id = None
+            user.bound_platform = None
+            user.password_reset_key_hash = None
+            user.password_reset_expires_at = None
+            user.password_reset_platform = None
+            users[key] = user
+            self._save_users(users)
         return user
 
     def delete_user(self, username: str) -> None:
         """Delete a stored normal user."""
-        users = self._load_users()
-        key = self._user_key(username)
-        if key not in users:
-            raise UserManagementError("用户不存在")
-        users.pop(key)
-        self._save_users(users)
+        with locked_file(self._users_path):
+            users = self._load_users()
+            key = self._user_key(username)
+            if key not in users:
+                raise UserManagementError("用户不存在")
+            users.pop(key)
+            self._save_users(users)
         self.revoke_user_remember_tokens(username)
 
     def create_router(self) -> APIRouter:
@@ -980,7 +1012,6 @@ class WebUIAuth:
         return users
 
     def _save_users(self, users: dict[str, StoredWebUIUser]) -> None:
-        self._users_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "users": [
                 user.model_dump(mode="json")
@@ -990,10 +1021,11 @@ class WebUIAuth:
                 )
             ]
         }
-        self._users_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        with locked_file(self._users_path):
+            atomic_write_text(
+                self._users_path,
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
 
     def _load_remember_tokens(self) -> dict[str, StoredRememberToken]:
         if not self._remember_tokens_path.exists():
@@ -1022,11 +1054,11 @@ class WebUIAuth:
                 continue
             tokens[token.token_id] = token
         if changed:
-            self._save_remember_tokens(tokens)
+            with locked_file(self._remember_tokens_path):
+                self._save_remember_tokens(tokens)
         return tokens
 
     def _save_remember_tokens(self, tokens: dict[str, StoredRememberToken]) -> None:
-        self._remember_tokens_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "tokens": [
                 token.model_dump(mode="json")
@@ -1036,7 +1068,8 @@ class WebUIAuth:
                 )
             ]
         }
-        self._remember_tokens_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        with locked_file(self._remember_tokens_path):
+            atomic_write_text(
+                self._remember_tokens_path,
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
