@@ -40,8 +40,8 @@ Session 列表在路由层分页（`page`，`page_size` 10–100，默认 20）�
 
 ## 响应式 + 实时更新契约
 
-`core`、`_43_modules_table`、`_44_notifications_list` 与 `modules_detail` 通过共享的
-`status-table` / `status-table-scroll` 契约渲染状态表。每个表体单元格带 `data-label`；
+模块表（`_modules_table.html.jinja2`）、通知规则表（`_notifications_list.html.jinja2`）与
+`modules_detail.html.jinja2` 通过共享的 `status-table` / `status-table-scroll` 契约渲染状态表。每个表体单元格带 `data-label`；
 `base.html.jinja2` 在 600px 以下把这些行堆叠成“标签-值”卡片，600px 以上保留真实 `<table>`
 与表头行。新增的 host-status 表也要放进 `status-table-scroll` 并给每个单元格 `data-label`；
 不要在手机尺寸恢复旧的 40rem 最小宽度。

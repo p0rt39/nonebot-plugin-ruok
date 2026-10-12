@@ -55,6 +55,9 @@ uv run pytest tests/test_web_api_users.py
 - `test_web_api_notifications.py`：通知规则 WebUI 行为。
 - `test_web_api_users.py`：用户管理与自助。
 - `webui_test_utils.py`：FastAPI/TestClient 辅助。
+- `test_config.py`：配置模型与校验边界。
+- `test_test_isolation.py`：测试隔离（`LOCALSTORE_PLUGIN_DATA_DIR` 等）保障。
+- `fake.py`：假事件构造；`conftest.py`：NoneBot 初始化与夹具。
 
 ## 约定与注意
 

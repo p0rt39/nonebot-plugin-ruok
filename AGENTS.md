@@ -60,6 +60,8 @@ modify -> ruff -> pyright -> focused pytest -> (full pytest) -> [本地] 同步�
 - 插件须零配置可加载；缺少配置时优雅降级。
 - 异步路径禁同步阻塞；跨插件依赖先 `require()`。
 - 保留 `__init__.py` 的 `PluginMetadata`；README 继续提供 `nb plugin install`。
+- CI 与发布：`prek` 与 `typos` 在 pre-commit/CI 中执行，勿跳过；打 `v*` 标签触发 release，
+  标签版本必须与 `pyproject.toml` 的 version 一致，版本号工具会自动提交并打标签。
 
 ## 全局不变量
 
@@ -77,5 +79,4 @@ modify -> ruff -> pyright -> focused pytest -> (full pytest) -> [本地] 同步�
 - `docs/testing.md`：测试布局、命令、coverage 与 conftest 约定。
 - `docs/publishing.md`：面向 NoneBot 商店的发布合规约束。
 
-> `.llm/` 是本地（git 忽略）目录，仅存放本地调研、动态验证产物与归档长文档；
-> 它不是权威指令来源。权威指令在各级 `AGENTS.md`；`docs/` 为描述性参考。
+权威指令在各级 `AGENTS.md`；`docs/` 为描述性参考。

@@ -43,8 +43,8 @@ Scope：`src/nonebot_plugin_ruok/webui/`（路由、认证、SSE、Jinja）。�
 
 ## 备注
 
-- `dist/index.html` 是一个无人引用的遗留独立前端（自带 `fetch('/ruok/api/...')`），不属于现行
-  SSR 模板体系；改动 WebUI 时以 `templates/` 为准。
+- 仓库历史中存在一个未入库的遗留独立前端（`webui/dist/index.html`），干净克隆里**不存在**；
+  它不是现行体系的一部分。改动 WebUI 一律以 `templates/`（SSR/Jinja）为准。
 - `static/vendor/` 存放 Pico/htmx/Idiomorph/Chart.js 及其许可证，经路径受控路由提供；无 Node/SPA 构建。
 
 ## 描述性参考
