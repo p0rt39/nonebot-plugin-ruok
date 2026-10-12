@@ -83,6 +83,9 @@ profile_default/
 ipython_config.py
 
 # AI/LLM development context
+# Local-only research, dynamic verification artifacts, and archived long-form docs.
+# The machine-facing AGENTS.md files at the repo root and in subdirectories are
+# tracked instructions, so they are NOT ignored here; keep .llm/ for local notes only.
 .llm/
 
 # pyenv
