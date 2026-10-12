@@ -44,4 +44,4 @@ Scope：`src/nonebot_plugin_ruok/webui/templates/`（SSR Jinja 模板）。先�
 
 ## 描述性参考
 
-完整模板清单与契约细节见 `docs/webui-frontend.md`。
+完整模板清单与契约细节见 `../../../../docs/webui-frontend.md`。

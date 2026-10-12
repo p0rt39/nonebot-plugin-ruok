@@ -14,7 +14,7 @@ Scope：`tests/`。先读根 `AGENTS.md`。
 
 ## 命令
 
-聚焦测试与全量命令见 `docs/testing.md`。要点：
+聚焦测试与全量命令见 `../docs/testing.md`。要点：
 
 - `uv run pytest` 跑全量；`uv run poe test` 以 xdist 并产出覆盖率/JUnit（coverage 门槛 >= 70%）。
 - 裸 `uv run pytest` 未启用覆盖率时不强制该门槛。
@@ -28,4 +28,4 @@ Scope：`tests/`。先读根 `AGENTS.md`。
 
 ## 描述性参考
 
-测试文件布局说明与聚焦命令清单见 `docs/testing.md`。
+测试文件布局说明与聚焦命令清单见 `../docs/testing.md`。

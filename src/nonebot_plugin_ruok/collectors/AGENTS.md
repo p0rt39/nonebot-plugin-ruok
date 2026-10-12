@@ -46,4 +46,4 @@ Scope：`src/nonebot_plugin_ruok/collectors/`。先读根 `AGENTS.md` 与包级 
 
 ## 描述性参考
 
-完整的存储布局与状态语义推导见 `docs/architecture.md`。
+完整的存储布局与状态语义推导见 `../../../docs/architecture.md`。

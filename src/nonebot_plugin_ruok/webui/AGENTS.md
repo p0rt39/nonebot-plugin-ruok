@@ -41,6 +41,12 @@ Scope：`src/nonebot_plugin_ruok/webui/`（路由、认证、SSE、Jinja）。�
 - 使用共享 Jinja 环境（`autoescape=True`）。
 - vendor 静态资源经路径受控路由提供；无 Node/SPA 构建管线。
 
+## 备注
+
+- `dist/index.html` 是一个无人引用的遗留独立前端（自带 `fetch('/ruok/api/...')`），不属于现行
+  SSR 模板体系；改动 WebUI 时以 `templates/` 为准。
+- `static/vendor/` 存放 Pico/htmx/Idiomorph/Chart.js 及其许可证，经路径受控路由提供；无 Node/SPA 构建。
+
 ## 描述性参考
 
-模板清单与前端契约见 `docs/webui-frontend.md`；路由总览见 `docs/architecture.md`。
+模板清单与前端契约见 `../../../docs/webui-frontend.md`；路由总览见 `../../../docs/architecture.md`。

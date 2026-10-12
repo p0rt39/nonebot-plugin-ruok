@@ -16,8 +16,8 @@
 - 测试：`tests/AGENTS.md`
 
 深层 `AGENTS.md` 只补充其所在子树的定向约束，不重复上层内容；若上下层表述冲突，以更具体（更深）者为准，
-但不得违反本根文件的安全、兼容与发布底线。提交的短语描述性参考在 `docs/` 下，正文以链接进入，
-约束仍在各级 `AGENTS.md`。
+但不得违反本根文件的安全、兼容与发布底线。`docs/` 下是描述性参考（非权威指令），正文以链接进入，
+约束仍以各级 `AGENTS.md` 为准。
 
 ## 开发工作流（L1nk Workflow）
 
@@ -27,7 +27,8 @@
 modify -> ruff -> pyright -> focused pytest -> (full pytest) -> [本地] 同步测试环境 -> git commit -s
 ```
 
-- 依次执行 `uv run ruff check .`、`uv run ruff format --check .`、`uv run pyright`，修复全部报告项。
+- 依次执行 `uv run ruff check .`、`uv run ruff format --check .`，再做类型检查：本地用 `uv run pyright`；
+   CI 对齐用 `uvx basedpyright==1.40.0`。修复全部报告项。
 - 先跑变更区域的聚焦 pytest；改动涉及共享行为、API 契约、WebUI 路由、认证、存储或 Session 状态语义时跑全量 pytest。
 - 用户环境包含一个本地测试 Bot；涉及运行时验证时按用户说明**本地**同步并人工验收（具体路径/方式属本地环境，不在本仓库指令中固化）。
 - 完成后本地 `git commit -s`；除非用户明确要求，不要 push 到远端。
@@ -37,11 +38,10 @@ modify -> ruff -> pyright -> focused pytest -> (full pytest) -> [本地] 同步�
 
 - 优先在拥有该行为的子系统内做小范围、定向的修改。
 - 严格遵守 Pylance 与 Ruff；把静态告警、lint、import 顺序、格式与异步风格问题当作必须处理的工作。
-- 领域共享 Pydantic 模型放 `protocol.py`，配置模型放 `config.py`，账号/token 持久化模型放 `webui/auth.py`；
-  已有模型时不要临时拼凑 dict 契约。
+- 用既有模型（`protocol.py`/`config.py`/`webui/auth.py` 等处的 Pydantic 模型），不要临时拼凑 dict 契约。
 - 持久化时间戳使用时区感知的 UTC datetime。
 - 不要阻塞事件循环；psutil 等阻塞工作继续用 `asyncio.to_thread` 等方式。
-- 指标、通知、SSE、插件清单与摘要调度按 best-effort 处理，不应让主插件崩溃。
+- 面向外部的辅助子系统（指标、通知、SSE、摘要调度）按 best-effort 处理，不应让主插件崩溃。
 - 若为保住运行行为而捕获宽泛异常，意外错误要视情况走 `_handle_ruok_error`；日志 sink 不得递归上报自身异常。
   预期的校验/未找到错误应返回客户端错误而非产生自监控 Session。
 - 注意 `matcher.finish()` 会抛 NoneBot matcher 异常。
@@ -63,10 +63,12 @@ modify -> ruff -> pyright -> focused pytest -> (full pytest) -> [本地] 同步�
 
 ## 全局不变量
 
-- 不随意改动 JSON 形状；模型字段变更须保持向后兼容校验或提供迁移路径。
-- 文件写遵循进程内锁 + 同目录临时文件 + `os.replace()` 原子替换；运行期数据由 localstore 定位。
-- `Session` 是状态与插件影响的事实源；`plugin_impacts.json` 是可重建缓存。
-- API key 认证与 WebUI 认证相互独立；新增/修改端点时保持该边界。
+仅列跨子树的底线；具体约束见对应 scoped AGENTS.md：
+
+- 持久化数据保持向后兼容：不随意改 JSON 形状，不做破坏性格式变更（细节见
+  `src/nonebot_plugin_ruok/collectors/AGENTS.md`）。
+- 运行期数据由 `nonebot-plugin-localstore` 定位，文件写采用原子替换原则。
+- 两条认证边界（JSON API 的 API key 与 WebUI 登录）相互独立。
 
 ## 描述性参考（docs/）
 
@@ -76,4 +78,4 @@ modify -> ruff -> pyright -> focused pytest -> (full pytest) -> [本地] 同步�
 - `docs/publishing.md`：面向 NoneBot 商店的发布合规约束。
 
 > `.llm/` 是本地（git 忽略）目录，仅存放本地调研、动态验证产物与归档长文档；
-> 它不是权威指令来源，权威指令在各级 `AGENTS.md` 与 `docs/`。
+> 它不是权威指令来源。权威指令在各级 `AGENTS.md`；`docs/` 为描述性参考。
