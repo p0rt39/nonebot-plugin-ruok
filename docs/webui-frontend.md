@@ -40,17 +40,20 @@ Session 列表在路由层分页（`page`，`page_size` 10–100，默认 20）�
 
 ## 响应式 + 实时更新契约
 
-模块表（`_modules_table.html.jinja2`）、通知规则表（`_notifications_list.html.jinja2`）与
-`modules_detail.html.jinja2` 通过共享的 `status-table` / `status-table-scroll` 契约渲染状态表。每个表体单元格带 `data-label`；
+模块表（`_modules_table.html.jinja2`）与通知规则表（`_notifications_list.html.jinja2`）
+通过共享的 `status-table` / `status-table-scroll` 契约渲染状态表。（`modules_detail.html.jinja2`
+当前为普通表格，未接入该契约。）每个表体单元格带 `data-label`；
 `base.html.jinja2` 在 600px 以下把这些行堆叠成“标签-值”卡片，600px 以上保留真实 `<table>`
 与表头行。新增的 host-status 表也要放进 `status-table-scroll` 并给每个单元格 `data-label`；
 不要在手机尺寸恢复旧的 40rem 最小宽度。
 
 Dashboard 的可轮询区域标记为 `.panel`，共享脚本在刷新失败时插入 `role="alert"` 的过期数据提示，
-恢复后自动清除。实时指示器 `#live-status` 报告 connected/reconnecting/paused/failed；标签页隐藏时
+恢复后自动清除。实时指示器 `#live-status` 的 `data-state` 依次为 `connecting`（初始）/`open`/`reconnecting`/
+`paused`/`failed`（见 `dashboard.html.jinja2` 的 `setLiveState`）；标签页隐藏时
 关闭 EventSource，返回时重连一次。因此每个可见性周期都不得新增第二个 EventSource 或 Chart 实例。
-SSE `status`/`tick` 载荷带 `collection_ok`、`collection_error`、`collected_at`；采集失败时保留
-上一次的 `overall` 与时间戳，客户端不得用失败的载荷推进“collected at”显示。
+SSE 载荷中：`status` 事件携带 `collection_ok`、`collection_error`、`collected_at`（采集失败时
+`collection_ok=False` 并保留上一次成功的 `overall` 与时间戳），`tick` 事件只携带 `collection_ok`
+与连接计数等；客户端不得用失败的载荷推进"collected at"显示。
 
 ## 表单反馈契约
 

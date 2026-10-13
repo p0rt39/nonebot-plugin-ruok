@@ -7,7 +7,7 @@ Scope：`src/nonebot_plugin_ruok/`（Python 包根）。在进入子目录前请
 
 - `__init__.py`：NoneBot 集成——`__plugin_meta__`、scoped config、`/ruok` 命令、bot 连接跟踪、
   ASGI 挂载与 startup。
-- `config.py`：`Config` 与 `ScopedConfig`（dotenv 前缀 `RUOK__`）；配置默认值**必须与 `README.md`
+- `config.py`：`Config` 与 `ScopedConfig`（dotenv 前缀 `RUOK__`）；配置默认值**必须与 `../../README.md`
   配置表保持一致**——修改默认值的同一时间更新 README 表格，二者互为锁定。
 - `protocol.py`：共享领域 Pydantic 模型（Session、Module、指标、API/报告模型等）。
 - `api.py`：`/ruok/api/*` JSON API；API key 校验、输入校验、路由级状态缓存。
@@ -42,8 +42,9 @@ Scope：`src/nonebot_plugin_ruok/`（Python 包根）。在进入子目录前请
 ## 配置约束（config.py）
 
 - `cache_ttl` 必须为有限值且 `>= 0.5` 秒；`webui_session_ttl` 必须为正整数。
-- 空值语义：`webui_admin_password` 为空会禁用 WebUI 普通用户登录入口；`api_key` 为空时受保护的
-  `/ruok/api/*` 端点返回 401 而非公开（`/health` 除外）。
+- 空值语义：`webui_admin_password` 为空会禁用**整个 WebUI 登录**（含内置 admin 与普通用户，
+  见 `webui/auth.py` `admin_configured` 分支）；`api_key` 为空时受保护的 `/ruok/api/*` 端点
+  返回 401 而非公开（`/health` 除外）。
 - 新增配置带合理的 Pydantic 校验边界；不要给每个设置都强加正数下界（注意保留合法的零值语义）。
 - `cors_origins` 默认为 `["*"]`（作用于整个 NoneBot 应用的 CORS）是有意的宽松默认，便于本地与
   Tunnel → 本地 Uvicorn 部署；收紧它属于兼容性变更，需用户在部署层自行处理，不要在代码里静默收窄。

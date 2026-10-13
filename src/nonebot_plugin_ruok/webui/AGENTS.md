@@ -13,7 +13,6 @@ Scope：`src/nonebot_plugin_ruok/webui/`（路由、认证、SSE、Jinja）。�
 - 模块/通知删除的 `redirect_to` 经 `_safe_redirect_target()`：仅接受本站 `/ruok` 路径，
   其余回退端点默认值（防开放重定向）。
 - 模块/通知详情用 `{name:path}` 与 URL 编码支持特殊字符；保留 `_path_quote` 与编码。
-- 保持 `/sessions/stats` 注册在 `/sessions/{session_id}` 之前。
 
 ## 认证（scope 含 `auth.py`）
 
@@ -24,14 +23,21 @@ Scope：`src/nonebot_plugin_ruok/webui/`（路由、认证、SSE、Jinja）。�
 - 已绑定且平台 ID 当前在 `SUPERUSERS` 的普通用户动态成为 WebUI admin；移除后即失效。
 - 密码用加盐 PBKDF2-HMAC-SHA256；remember token 存哈希 + credential stamp，30 天过期，
   密码变更即撤销；签名会话 cookie 与 remember token 是两套机制。
+- remember token 的恢复校验独立于 `webui_secret_key`（按 token 自身哈希 + credential stamp
+  校验，`auth.py` 恢复路径）；仅轮换 `webui_secret_key` **不会**撤销已发放的 remember token，
+  也不等于强制全员重新登录。
 - `webui_users.json` 与 `webui_remember_tokens.json` 的写遵循进程内锁 + 原子替换。
 
 ## SSE / 实时约束
 
 - `EventBus` 进程内、每订阅者 256 项队列，满了即丢；不是持久日志或多 worker 传输。
-- SSE 循环用 `ceil` 夹每 tick（<1s 也至少一 tick）；快速指标在带重叠保护的后台任务采集，
+- SSE 循环用 `ceil` 夹每 tick（<1s 也至少一个 tick）；快速指标在带重叠保护的后台任务采集，
   约每三个 tick 附进程快照；完整状态按自身 TTL 节奏采集。
-- `cache_ttl` 校验为有限且 >= 0.5 秒；直接调用者同样被夹到至少一个 tick，避免忙循环。
+- SSE 消费端对 `cache_ttl` 做 `max(1, ceil(...))` 下限保护，直接传入的非法非正值也不会造成忙循环
+  （`cache_ttl` 的取值校验归属 config，见包级 `../AGENTS.md`）。
+- `sse_public=True` 会同时放行 `/ruok/sse` 的**登录与 admin 守卫**（`router.py` 的 SSE 入口在
+  `config.sse_public` 为真时跳过 `current_user`/角色检查），会公开实时的主机/进程数据；
+  只在你确知后果时才启用该开关。
 - 状态变更与自动捕获发布事件；仅备注/链接或同状态影响编辑不一定发布。改动时保留清理与
   线程/事件循环边界。
 

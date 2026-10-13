@@ -15,7 +15,7 @@ Pyright/BasedPyright 与 prek 不是声明的 dev 依赖；CI 对齐的类型检
 uv sync --all-groups
 uv run ruff check .
 uv run ruff format --check .
-uv run pyright
+uv run pyright            # 需另行安装 pyright(未声明为 dev 依赖)；CI 对齐用下一条
 uvx basedpyright==1.40.0
 uv run pytest
 uv run poe test
@@ -67,6 +67,7 @@ uv run pytest tests/test_web_api_users.py
   本地 Session 与模块状态决定结果（曾因此出现 4 个陈旧自动 Session 导致 3 个 `/ruok status`
   断言失败）。修改 fixture 时保持该隔离。
 - 从 `nonebot_plugin_ruok` 的测试 import 常放在测试函数内部，以避免在 NoneBot 初始化前 import 插件。
+  （隔离成立的根因是上一项中 `LOCALSTORE_PLUGIN_DATA_DIR` 先行设置，并非下述 `.env` 选择顺序。）
 - `tests/conftest.py` 优先用 `.env.dev`，否则 `.env.test`，并把异步测试放在 session 级事件循环上。
   用 `tmp_path` 加 `webui_test_utils._client()` 获得隔离的 API/auth 存储。连接开发 Bot 配置前先
   检查环境选择。

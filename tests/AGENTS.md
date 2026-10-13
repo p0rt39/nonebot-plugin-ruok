@@ -8,8 +8,9 @@ Scope：`tests/`。先读根 `AGENTS.md`。
   `LOCALSTORE_PLUGIN_DATA_DIR` 指向一次性临时目录，使套件**不读写仓库 `data/` 树**。
   修改 fixture 时必须保持该隔离（否则会因 `.env.test` 的 `LOCALSTORE_USE_CWD=true` 让遗留本地
   Session 决定结果）。
-- `conftest.py` 的环境选择顺序是 **`.env.dev` 优先、否则 `.env.test`**——这是隔离成立的前提，
-  改动 fixture/conftest 时不得颠倒该顺序。异步测试在 session 级事件循环上。
+- 隔离的真正前提是 `LOCALSTORE_PLUGIN_DATA_DIR` 在 NoneBot 加载前指向临时目录；`.env.dev` 优先/否则
+  `.env.test` 的选择顺序决定加载哪套配置，但**不是**隔离成立的根因。改动 fixture/conftest 时保持
+  临时数据目录的先行设置，且不要颠倒环境选择顺序。异步测试在 session 级事件循环上。
   从 `nonebot_plugin_ruok` 的 import 常放测试函数内部，避免在 NoneBot 初始化前 import 插件。
 - 用 `tmp_path` + `webui_test_utils._client()` 获得隔离的 API/auth 存储。
 
