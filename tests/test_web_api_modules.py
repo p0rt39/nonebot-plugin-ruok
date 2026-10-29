@@ -189,3 +189,140 @@ def test_module_delete_accepts_special_character_name(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert module_name not in names
     assert "keep" in names
+
+
+def test_module_delete_rejects_external_redirect_target(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = _webui_config()
+    _upsert_module(tmp_path, ModuleDefinition(name="victim"))
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    for hostile in (
+        "https://evil.example/x",
+        "//evil.example",
+        "/ruok/../evil",
+        "javascript:alert(1)",
+    ):
+        response = client.post(
+            "/ruok/_actions/module-delete",
+            data={"name": "victim", "redirect_to": hostile},
+        )
+        assert response.status_code == 200
+        assert response.headers["HX-Redirect"] == "/ruok/modules"
+        _upsert_module(tmp_path, ModuleDefinition(name="victim"))
+
+
+def test_module_delete_without_redirect_target_uses_default(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = _webui_config()
+    _upsert_module(tmp_path, ModuleDefinition(name="victim"))
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post("/ruok/_actions/module-delete", data={"name": "victim"})
+
+    assert response.status_code == 200
+    assert response.headers["HX-Redirect"] == "/ruok/modules"
+
+
+def test_module_table_provides_mobile_card_labels(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = _webui_config()
+    _upsert_module(
+        tmp_path,
+        ModuleDefinition(
+            name="cardmod",
+            display_name="卡片模块",
+            plugins=["plugin_a"],
+            description="很长的一段描述文本，用于检查移动端卡片布局不会裁剪内容",
+        ),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    assert 'class="table-scroll status-table-scroll"' in response.text
+    assert 'class="striped status-table"' in response.text
+    # Every body cell carries the label the stacked card layout renders.
+    assert response.text.count('data-label="状态"') == response.text.count("<tr>") - 1
+    for label in ("状态", "模块", "内部名", "插件数", "描述"):
+        assert f'data-label="{label}"' in response.text
+    # The table keeps real table semantics for wide viewports.
+    assert "<thead>" in response.text
+    assert "<tbody>" in response.text
+    assert "cardmod" in response.text
+
+
+def test_module_table_wraps_rows_in_scroll_container(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ModuleDefinition
+
+    config = _webui_config()
+    _upsert_module(tmp_path, ModuleDefinition(name="scrollmod"))
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/_partials/modules")
+
+    assert response.status_code == 200
+    assert 'id="module-list"' in response.text
+    assert "status-table-scroll" in response.text
+    assert "module-table" not in response.text
+
+
+def test_module_form_has_inline_status_region(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    assert "data-form-status" in response.text
+    assert 'id="module-edit-result" class="ruok-form-status"' in response.text
+    assert 'aria-live="polite"' in response.text
+
+
+def test_shared_page_script_describes_validation_errors(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    # FastAPI's 422 payload must be turned into a readable message, and an
+    # inline region must suppress the duplicate error toast.
+    assert "describeValidationError" in response.text
+    assert "请填写：" in response.text
+    assert "window.ruokErrorMessage = messageFromXhr" in response.text
+    assert "form.querySelector('[data-form-status]')" in response.text
+    # Busy state stays announced on the submitting control.
+    assert "aria-busy" in response.text
+    assert "正在提交…" in response.text
+
+
+def test_session_rows_keep_the_compact_grid(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    create_session(
+        tmp_path,
+        module_name="ruok",
+        description="row layout check",
+        reporter=ReporterInfo(type="user", user_id="1", platform="webui"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert response.status_code == 200
+    # Row-level action forms must not reserve space for a status region; the
+    # shared script skips them so the compact grid is preserved.
+    assert "form.closest('.session-row')" in client.get("/ruok/modules").text
+    assert ".session-row [data-form-status]" not in response.text

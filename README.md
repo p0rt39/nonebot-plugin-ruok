@@ -333,13 +333,22 @@ stateDiagram-v2
 | 页面 | 路由 | 说明 |
 | :--- | :--- | :--- |
 | 总览 | `/ruok` | 系统指标、连接、插件、模块、趋势、Session 统计 |
-| Sessions | `/ruok/sessions` | 搜索、筛选、确认、解决、忽略、关联、备注 |
-| Session 详情 | `/ruok/sessions/{id}` | 完整信息、用户说明、Traceback、关联 Session、影响插件 |
+| Sessions | `/ruok/sessions` | 按状态、模块、插件、时间筛选和搜索，每页 20 条；支持确认、解决、忽略 |
+| Session 详情 | `/ruok/sessions/{id}` | 完整信息、用户说明、Traceback、关联 Session、影响插件、备注 |
 | 模块 | `/ruok/modules` | 模块列表与创建 |
 | 模块详情 | `/ruok/modules/{name}` | 编辑名称、显示名、描述、关联插件、删除 |
 | 通知 | `/ruok/notifications` | 通知规则列表与创建 |
 | 通知详情 | `/ruok/notifications/{name}` | 编辑规则、触发状态、模块、冷却、通道、删除 |
 | 用户 | `/ruok/users` | 用户搜索、创建、改名、重置密码、绑定码、清除绑定、删除 |
+
+模块和通知规则的删除按钮通过 `redirect_to` 指定返回页面；该值只接受本站 `/ruok`
+路径，外部 URL 或越出 `/ruok` 前缀的值会被忽略并回退到对应列表页。
+
+Session 的确认、解决、忽略、备注和解除关联按钮在目标 Session 已不存在（例如列表已过期）
+时返回 `404`，页面会通过错误提示告知结果，而不是显示成功。
+
+Sessions 列表的筛选条件和页码会同步到地址栏（例如 `/ruok/sessions?status=pending&page=2`），
+刷新或后退时会保留当前视图；可用 `page_size` 调整每页条数（10–100）。
 
 ### 普通用户
 
@@ -494,11 +503,17 @@ DELETE /ruok/api/modules/music
 | 状态码 | 含义 |
 | :--- | :--- |
 | `200` | 请求成功 |
-| `400` | 请求内容不合法，例如影响插件不属于 Session 原模块 |
+| `400` | 请求内容不合法：JSON 格式错误、字段类型或取值不合法、影响插件不属于 Session 原模块 |
 | `401` | API key 未配置、缺失或错误 |
 | `403` | Session 系统被禁用，相关写操作不可用 |
 | `404` | Session 或模块不存在 |
 | `503` | `/health` 探针判断服务不可用 |
+
+请求体必须是 JSON 对象。`POST /ruok/api/sessions` 要求非空 `module_name`，`source` 只能取
+`manual` 或 `automatic`，`reporter_type` 只能取 `user` 或 `automatic`；`PATCH` 的 `status`
+只能取 `pending`、`unsolved`、`solved`、`ignored`，`developer_notes` 必须是字符串。
+`PUT /ruok/api/modules/{name}` 的 `plugins` 必须是字符串数组，`display_name` 必须是字符串，
+`description` 必须是字符串或 `null`。任一项不满足都会返回 `400`，并且不会写入数据文件。
 
 ## 数据文件
 
@@ -517,10 +532,11 @@ RUOK 使用 `nonebot-plugin-localstore` 的插件数据目录。
 
 `plugin_impacts.json` 是缓存，不是权威状态。缺失、损坏或过期时会从 Session 文件重建。
 
-Session、插件影响索引和每日指标的文件写入在进程内使用锁，并通过同目录临时文件和原子替换
-完成，避免并发请求互相覆盖或留下半截 JSON。指标文件若已损坏，会先保留为带有
-`.corrupt-...` 后缀的隔离副本并记录告警，再创建新的当天文件。锁只覆盖当前进程；多进程
-同时使用同一数据目录时，应改用文件锁或事务型存储。
+Session、插件影响索引、模块定义、通知规则、通知冷却、每日指标，以及 WebUI 账户和记住登录
+token 的文件写入在进程内使用锁，并通过同目录临时文件和原子替换完成，避免并发请求互相覆盖
+或留下半截 JSON。指标文件若已损坏，会先保留为带有 `.corrupt-...` 后缀的隔离副本并记录告警，
+再创建新的当天文件。锁只覆盖当前进程；多进程同时使用同一数据目录时，应改用文件锁或事务型
+存储。
 
 ## 前端静态资产及其许可证
 
@@ -594,6 +610,8 @@ uv run ruff format --check .
 uv run pyright
 uv run pytest
 ```
+
+测试会把插件的插件数据目录指向临时目录，不会读写仓库内的 `data/`，因此本地遗留的运行数据不会影响测试结果。
 
 项目使用 `prek` 执行 `.pre-commit-config.yaml` 中定义的 hooks，包含 ruff、typos、uv lock/sync 等检查：
 

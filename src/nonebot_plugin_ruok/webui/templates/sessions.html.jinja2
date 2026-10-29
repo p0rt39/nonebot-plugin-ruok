@@ -4,55 +4,146 @@
 
 {% block head %}
 <style>
-    .filter-bar {
-        display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end;
-        padding: 1rem;
-        background: var(--glass-bg);
-        backdrop-filter: blur(12px);
-        border: 1px solid var(--glass-border);
-        border-radius: var(--radius-md);
-        margin-bottom: 1rem;
-    }
-    .filter-bar label { margin-bottom: 0; }
-    .filter-bar input, .filter-bar select { margin-bottom: 0; }
-    .active-filters {
-        display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+    .page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
         margin-bottom: 0.75rem;
     }
-    .filter-tag {
-        display: inline-flex; align-items: center; gap: 0.3rem;
-        padding: 2px 10px;
-        border-radius: 20px; font-size: 0.78em;
-        background: rgba(102,126,234,0.12);
-        border: 1px solid rgba(102,126,234,0.3);
+    .page-header h3 {
+        margin: 0;
     }
-    .filter-tag a {
-        text-decoration: none; color: var(--pico-del-color);
-        font-weight: bold; line-height: 1;
+    .report-panel {
+        margin-bottom: 0.9rem;
     }
-    .filter-tag a:hover { color: #c00; }
-    .results-count {
-        color: var(--pico-muted-color);
+    .report-panel > summary {
+        font-weight: 600;
+    }
+    .filter-bar {
+        display: grid;
+        grid-template-columns: minmax(12rem, 2fr) repeat(3, minmax(8rem, 1fr)) repeat(2, minmax(10rem, 1fr)) auto;
+        gap: 0.5rem 0.6rem;
+        align-items: end;
+        padding: 0.7rem 0.8rem;
+        margin-bottom: 0.75rem;
+        background: var(--ruok-surface);
+        border: 1px solid var(--ruok-border);
+        border-radius: var(--radius-md);
+    }
+    .filter-bar label {
+        margin: 0;
         font-size: 0.85em;
-        margin-bottom: 0.5rem;
+        color: var(--ruok-text-muted);
+    }
+    .filter-bar input, .filter-bar select {
+        margin: 0.15rem 0 0;
+        font-size: 1rem;
+    }
+    .filter-bar__actions {
+        display: flex;
+        gap: 0.4rem;
+    }
+    .filter-bar__actions [role="button"], .filter-bar__actions button {
+        margin: 0;
+        white-space: nowrap;
+    }
+    .filter-toggle {
+        display: none;
+    }
+    .session-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.6rem;
+    }
+    .status-chips {
+        display: flex;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+    }
+    .status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        width: auto;
+        margin: 0;
+        padding: 0.2rem 0.65rem;
+        font-size: 0.85em;
+        color: var(--pico-color);
+        background: var(--ruok-surface);
+        border: 1px solid var(--ruok-border);
+        border-radius: 999px;
+    }
+    .status-chip:hover {
+        background: var(--ruok-surface-2);
+    }
+    .status-chip.is-active {
+        border-color: var(--pico-primary);
+        background: var(--ruok-accent-bg);
+        color: var(--pico-primary);
+    }
+    .results-count {
+        color: var(--ruok-text-muted);
+        font-size: 0.85em;
+    }
+    .pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        margin: 0.5rem 0 1rem;
+    }
+    .pagination [role="button"] {
+        margin: 0;
+    }
+    .pagination [aria-disabled="true"] {
+        opacity: 0.45;
+        pointer-events: none;
+    }
+    .pagination__info {
+        color: var(--ruok-text-muted);
+        font-size: 0.85em;
+    }
+    @media (max-width: 1100px) {
+        .filter-bar {
+            grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+        }
     }
     @media (max-width: 768px) {
-        .filter-bar { flex-direction: column; }
-        .filter-bar > * { width: 100%; }
+        .filter-bar {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+        .filter-bar__search {
+            grid-column: 1 / -1;
+        }
+        .filter-toggle {
+            display: inline-flex;
+        }
+        .filter-bar:not(.is-expanded) .filter-extra {
+            display: none;
+        }
+        .filter-bar__actions {
+            grid-column: 1 / -1;
+        }
     }
 </style>
 {% endblock %}
 
 {% block content %}
 
-<h3>📋 事件 Sessions</h3>
+<div class="page-header">
+    <h3>Sessions</h3>
+</div>
 
 <!-- Manual report form -->
-<details style="margin-bottom: 1.5rem;">
-    <summary>➕ 手动上报问题</summary>
+<details class="report-panel">
+    <summary>手动上报问题</summary>
     <form hx-post="/ruok/_actions/session-create"
-          hx-target="#session-content" hx-swap="outerHTML"
-          style="margin-top: 1rem;">
+          hx-target="#session-content">
         <div class="grid">
             <label>
                 模块名
@@ -73,65 +164,33 @@
             问题描述
             <textarea name="description" rows="3" required placeholder="详细描述你遇到的问题..."></textarea>
         </label>
-        <button type="submit">📝 提交上报</button>
+        <button type="submit">提交上报</button>
+        <p class="ruok-form-status" data-form-status role="status" aria-live="polite"></p>
     </form>
 </details>
 
-<!-- Active filter tags -->
-{% set has_filters = current_status or current_search or current_module or current_plugin or current_after or current_before %}
-{% if has_filters %}
-<div class="active-filters">
-    {% if current_status %}
-    <span class="filter-tag">
-        状态: {{ current_status | _status_label }}
-        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'search': current_search, 'module': current_module, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
-    </span>
-    {% endif %}
-    {% if current_module %}
-    <span class="filter-tag">
-        模块: {{ current_module }}
-        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'search': current_search, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
-    </span>
-    {% endif %}
-    {% if current_search %}
-    <span class="filter-tag">
-        搜索: "{{ current_search }}"
-        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'module': current_module, 'plugin': current_plugin, 'after': current_after, 'before': current_before} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
-    </span>
-    {% endif %}
-    {% if current_after or current_before %}
-    <span class="filter-tag">
-        时间: {{ current_after or '...' }} ~ {{ current_before or '...' }}
-        <a href="?" hx-get="/ruok/_partials/sessions?{{ {'status': current_status, 'search': current_search, 'module': current_module, 'plugin': current_plugin} | urlencode }}" hx-target="#session-content" hx-trigger="click">&times;</a>
-    </span>
-    {% endif %}
-    <a href="/ruok/sessions" role="button" class="secondary outline ruok-button ruok-button-compact">清除全部</a>
-</div>
-{% endif %}
-
 <!-- Filter bar -->
-<form class="filter-bar"
+<form class="filter-bar" id="session-filters"
       hx-get="/ruok/_partials/sessions"
       hx-target="#session-content"
-      hx-trigger="input changed delay:300ms from:input[name=search], change from:select, change from:input[type=datetime-local]"
-      hx-include="[name=status], [name=search], [name=module], [name=plugin], [name=after], [name=before]">
+      hx-trigger="input changed delay:300ms from:input[name=search], change from:select, change from:input[type=datetime-local]">
 
-    <label style="flex: 2; min-width: 180px;">
-        🔍 搜索
-        <input type="search" name="search" placeholder="session_id / 模块 / 描述 / 用户..."
+    <label class="filter-bar__search">
+        搜索
+        <input type="search" name="search" placeholder="Session ID / 模块 / 描述 / 用户 / 插件"
                value="{{ current_search }}" autocomplete="off">
     </label>
-    <label style="flex: 1; min-width: 130px;">
+    <label>
         状态
         <select name="status">
             <option value="" {% if not current_status %}selected{% endif %}>全部状态</option>
-            <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>🟡 待确认</option>
-            <option value="unsolved" {% if current_status == 'unsolved' %}selected{% endif %}>🔴 未解决</option>
-            <option value="solved" {% if current_status == 'solved' %}selected{% endif %}>🟢 已解决</option>
-            <option value="ignored" {% if current_status == 'ignored' %}selected{% endif %}>⚪ 已忽略</option>
+            <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>待确认</option>
+            <option value="unsolved" {% if current_status == 'unsolved' %}selected{% endif %}>未解决</option>
+            <option value="solved" {% if current_status == 'solved' %}selected{% endif %}>已解决</option>
+            <option value="ignored" {% if current_status == 'ignored' %}selected{% endif %}>已忽略</option>
         </select>
     </label>
-    <label style="flex: 1; min-width: 130px;">
+    <label class="filter-extra">
         功能模块
         <select name="module">
             <option value="" {% if not current_module %}selected{% endif %}>全部模块</option>
@@ -143,7 +202,7 @@
         </select>
     </label>
     {% set all_plugins = all_modules | map(attribute='plugins') | sum(start=[]) | unique | sort %}
-    <label style="flex: 1; min-width: 130px;">
+    <label class="filter-extra">
         关联插件
         <select name="plugin">
             <option value="" {% if not current_plugin %}selected{% endif %}>全部插件</option>
@@ -152,19 +211,53 @@
             {% endfor %}
         </select>
     </label>
-    <label style="flex: 1; min-width: 140px;">
+    <label class="filter-extra">
         起始时间
         <input type="datetime-local" name="after" value="{{ current_after }}">
     </label>
-    <label style="flex: 1; min-width: 140px;">
+    <label class="filter-extra">
         截止时间
         <input type="datetime-local" name="before" value="{{ current_before }}">
     </label>
+    <div class="filter-bar__actions">
+        <button type="button" class="secondary outline ruok-button-compact filter-toggle"
+                aria-expanded="false" data-filter-toggle>更多筛选</button>
+        <a href="/ruok/sessions" role="button" class="secondary outline ruok-button-compact">清除筛选</a>
+    </div>
 </form>
 
-<!-- Session content (stats + count + list) — HTMX target -->
+<!-- Session content (status chips + count + list + pagination) — HTMX target -->
 <div id="session-content">
 {% include "_session_container.html.jinja2" %}
 </div>
+
+<script>
+(function() {
+    var form = document.getElementById('session-filters');
+    if (!form) return;
+    var hasExtra = {{ 'true' if (current_module or current_plugin or current_after or current_before) else 'false' }};
+    var toggle = form.querySelector('[data-filter-toggle]');
+    function setExpanded(expanded) {
+        form.classList.toggle('is-expanded', expanded);
+        if (toggle) toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+    setExpanded(hasExtra);
+    if (toggle) {
+        toggle.addEventListener('click', function() {
+            setExpanded(!form.classList.contains('is-expanded'));
+        });
+    }
+    // Status chips live inside the swapped container; route them through the
+    // filter form so the select and the list stay in sync.
+    document.addEventListener('click', function(event) {
+        var chip = event.target.closest('[data-status-filter]');
+        if (!chip) return;
+        var select = form.querySelector('select[name=status]');
+        if (!select) return;
+        select.value = chip.getAttribute('data-status-filter');
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+})();
+</script>
 
 {% endblock %}

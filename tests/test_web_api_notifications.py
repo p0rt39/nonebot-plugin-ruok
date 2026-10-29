@@ -296,6 +296,89 @@ def test_notification_detail_delete_redirects_to_list(tmp_path: Path) -> None:
     assert [rule.name for rule in rules] == ["keep"]
 
 
+def test_notification_delete_rejects_external_redirect_target(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = _webui_config()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [NotificationRule(name="victim"), NotificationRule(name="keep")],
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/notification-delete",
+        data={"name": "victim", "redirect_to": "https://evil.example/x"},
+    )
+
+    rules = _load_notification_rules(config, tmp_path)
+    assert response.status_code == 200
+    assert response.headers["HX-Redirect"] == "/ruok/notifications"
+    assert [rule.name for rule in rules] == ["keep"]
+
+
+def test_notification_delete_without_redirect_target_renders_list(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = _webui_config()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [NotificationRule(name="victim"), NotificationRule(name="keep")],
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/notification-delete",
+        data={"name": "victim"},
+    )
+
+    assert response.status_code == 200
+    assert "HX-Redirect" not in response.headers
+
+
+def test_concurrent_rule_saves_persist_every_rule(tmp_path: Path) -> None:
+    """Concurrent rule replacements must not lose writes or corrupt the rules file."""
+    from collections import defaultdict
+    from concurrent.futures import ThreadPoolExecutor
+
+    from nonebot_plugin_ruok.protocol import NotificationRule
+    from nonebot_plugin_ruok.collectors.notifications import (
+        _load_rules,
+        _save_rules,
+        locked_rules,
+    )
+
+    _save_rules(tmp_path, [NotificationRule(name="base")])
+    failures: dict[str, int] = defaultdict(int)
+
+    def upsert(index: int) -> None:
+        try:
+            with locked_rules(tmp_path):
+                rules = [
+                    rule
+                    for rule in _load_rules(tmp_path)
+                    if rule.name != f"rule{index}"
+                ]
+                rules.append(NotificationRule(name=f"rule{index}"))
+                _save_rules(tmp_path, rules)
+        except Exception as exc:  # pragma: no cover - failure diagnostics
+            failures[type(exc).__name__] += 1
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        list(executor.map(upsert, range(64)))
+
+    persisted = [rule.name for rule in _load_rules(tmp_path)]
+    assert failures == {}
+    assert len(persisted) == 65
+    assert set(persisted) == {"base"} | {f"rule{index}" for index in range(64)}
+
+
 def test_notification_rules_are_loaded_from_webui_storage_only(
     tmp_path: Path,
 ) -> None:
@@ -501,3 +584,121 @@ async def test_concurrent_notifications_atomically_claim_cooldown(
     assert calls == ["ruok-1234abcd"]
     release_send.set()
     await first
+
+
+def test_notification_form_uses_status_and_channel_checkboxes(tmp_path: Path) -> None:
+    import re
+
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = _webui_config()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [
+            NotificationRule(
+                name="hooked",
+                on_status=["solved"],
+                channels=["webhook"],
+                webhook_url="https://example.com/hook",
+            )
+        ],
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    new_form = client.get("/ruok/notifications")
+    edit_form = client.get("/ruok/notifications/hooked")
+
+    assert re.search(r'name="on_status" value="pending"\s+checked', new_form.text)
+    assert re.search(r'name="on_status" value="unsolved"\s+checked', new_form.text)
+    assert re.search(r'name="channels" value="bot_dm"\s+checked', new_form.text)
+    assert "<label data-webhook-field hidden>" in new_form.text
+    assert '<details class="form-panel">' in new_form.text
+    assert re.search(r'name="on_status" value="solved"\s+checked', edit_form.text)
+    assert not re.search(r'name="on_status" value="pending"\s+checked', edit_form.text)
+    assert re.search(r'name="channels" value="webhook"\s+checked', edit_form.text)
+    assert "<label data-webhook-field >" in edit_form.text
+    assert '<details class="form-panel" open>' in edit_form.text
+    assert 'hx-target="#notification-edit-result"' in edit_form.text
+    assert 'id="notification-edit-result"' in edit_form.text
+    assert 'hx-target="#notification-edit-result"' not in new_form.text
+
+
+def test_notification_upsert_accepts_checkbox_values(tmp_path: Path) -> None:
+    config = _webui_config()
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={
+            "name": "checkbox rule",
+            "enabled": "on",
+            "on_status": ["pending", "ignored"],
+            "cooldown_minutes": "5",
+            "channels": ["bot_dm", "webhook"],
+            "webhook_url": "https://example.com/hook",
+        },
+    )
+
+    rules = _load_notification_rules(config, tmp_path)
+    rule = next(rule for rule in rules if rule.name == "checkbox rule")
+    assert response.status_code == 200
+    assert rule.on_status == ["pending", "ignored"]
+    assert rule.channels == ["bot_dm", "webhook"]
+
+
+def test_notification_upsert_requires_status_and_channel(tmp_path: Path) -> None:
+    config = _webui_config()
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    no_status = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={"name": "empty status", "enabled": "on", "channels": "bot_dm"},
+    )
+    no_channel = client.post(
+        "/ruok/_actions/notification-upsert",
+        data={"name": "empty channel", "enabled": "on", "on_status": "pending"},
+    )
+
+    names = [rule.name for rule in _load_notification_rules(config, tmp_path)]
+    assert no_status.status_code == 400
+    assert "请至少选择一个触发状态" in no_status.text
+    assert no_channel.status_code == 400
+    assert "请至少选择一个通知通道" in no_channel.text
+    assert "empty status" not in names
+    assert "empty channel" not in names
+
+
+def test_notification_table_provides_mobile_card_labels(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import NotificationRule
+
+    config = _webui_config()
+    _save_notification_rules(
+        config,
+        tmp_path,
+        [
+            NotificationRule(
+                name="card rule",
+                enabled=True,
+                on_status=["pending"],
+                channels=["bot_dm"],
+                cooldown_minutes=30,
+            )
+        ],
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/notifications")
+
+    assert response.status_code == 200
+    assert 'class="table-scroll status-table-scroll"' in response.text
+    assert 'class="striped status-table"' in response.text
+    for label in ("规则", "状态", "触发状态", "适用模块", "冷却", "通道"):
+        assert f'data-label="{label}"' in response.text
+    assert "<thead>" in response.text
+    assert "<tbody>" in response.text
+    assert "card rule" in response.text

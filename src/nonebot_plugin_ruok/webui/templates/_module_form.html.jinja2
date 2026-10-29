@@ -1,9 +1,8 @@
 {% set current_module = module | default(none) %}
-<details open style="margin-bottom:1.5rem;">
-    <summary>{% if current_module %}✏️ 编辑模块{% else %}➕ 添加模块{% endif %}</summary>
+<details class="form-panel"{% if current_module %} open{% endif %}>
+    <summary>{% if current_module %}编辑模块{% else %}+ 新建模块{% endif %}</summary>
     <form hx-post="/ruok/_actions/module-upsert"
-          {% if current_module %}hx-target="#module-edit-result" hx-swap="innerHTML"{% else %}hx-target="#module-list" hx-swap="outerHTML"{% endif %}
-          style="margin-top:1rem;">
+          {% if current_module %}hx-target="#module-edit-result" hx-swap="innerHTML"{% else %}hx-target="#module-list" hx-swap="outerHTML"{% endif %}>
         {% if current_module %}
         <input type="hidden" name="original_name" value="{{ current_module.name }}">
         <input type="hidden" name="return_to_detail" value="true">
@@ -84,6 +83,7 @@
             </button>
             {% endif %}
         </div>
-        <div id="module-edit-result"></div>
+        <div id="module-edit-result" class="ruok-form-status" data-form-status
+             role="status" aria-live="polite"></div>
     </form>
 </details>

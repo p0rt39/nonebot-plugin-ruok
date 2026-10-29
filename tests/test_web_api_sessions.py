@@ -173,7 +173,10 @@ def test_session_detail_renders_automatic_traceback_as_code_block(
     assert "<span>异常信息</span>" in response.text
     assert "<strong>boom</strong>" in response.text
     assert "Traceback" in response.text
-    assert '<pre class="session-traceback"><code>Traceback line 1' in response.text
+    # The traceback renders inside a fold whose id the copy control targets.
+    assert 'id="session-traceback-text"' in response.text
+    assert 'data-copy-target="session-traceback-text"' in response.text
+    assert ">Traceback line 1" in response.text
     assert "RuntimeError: boom" in response.text
     assert '<pre class="session-description-block">' not in response.text
 
@@ -414,3 +417,336 @@ def test_api_patch_session_rejects_affected_plugins_without_confirm_status(
     assert reloaded is not None
     assert reloaded.status == "pending"
     assert reloaded.affected_plugins == []
+
+
+def _create_many_sessions(data_dir: Path, count: int) -> list[str]:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    return [
+        create_session(
+            data_dir, "music", f"issue {index}", ReporterInfo(type="user")
+        ).session_id
+        for index in range(count)
+    ]
+
+
+def test_webui_sessions_list_paginates_and_pushes_url(tmp_path: Path) -> None:
+    _create_many_sessions(tmp_path, 25)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    first = client.get("/ruok/sessions")
+    second = client.get("/ruok/_partials/sessions", params={"page": 2})
+
+    assert first.status_code == 200
+    assert first.text.count('class="session-row"') == 20
+    assert "第 1–20 条 / 共 25 条" in first.text
+    assert 'hx-get="/ruok/_partials/sessions?page=2"' in first.text
+    assert second.status_code == 200
+    assert second.text.count('class="session-row"') == 5
+    assert "第 21–25 条 / 共 25 条" in second.text
+    assert second.headers["HX-Push-Url"] == "/ruok/sessions?page=2"
+    assert "<!DOCTYPE html>" not in second.text
+
+
+def test_webui_sessions_pagination_clamps_input(tmp_path: Path) -> None:
+    _create_many_sessions(tmp_path, 25)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    past_end = client.get("/ruok/_partials/sessions", params={"page": 99})
+    before_start = client.get("/ruok/_partials/sessions", params={"page": 0})
+    tiny = client.get("/ruok/_partials/sessions", params={"page_size": 1})
+    huge = client.get("/ruok/_partials/sessions", params={"page_size": 1000})
+
+    assert "第 21–25 条 / 共 25 条" in past_end.text
+    assert past_end.headers["HX-Push-Url"] == "/ruok/sessions?page=2"
+    assert "第 1–20 条 / 共 25 条" in before_start.text
+    assert before_start.headers["HX-Push-Url"] == "/ruok/sessions"
+    assert tiny.text.count('class="session-row"') == 10
+    assert tiny.headers["HX-Push-Url"] == "/ruok/sessions?page_size=10"
+    assert huge.text.count('class="session-row"') == 25
+    assert "Session 分页" not in huge.text
+
+
+def test_webui_sessions_pagination_preserves_filters(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import update_session
+
+    session_ids = _create_many_sessions(tmp_path, 25)
+    for session_id in session_ids[:3]:
+        update_session(tmp_path, session_id, {"status": "solved"})
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get(
+        "/ruok/_partials/sessions", params={"status": "pending", "search": "issue"}
+    )
+
+    assert response.status_code == 200
+    assert "第 1–20 条 / 共 22 条" in response.text
+    assert "status=pending&amp;search=issue&amp;page=2" in response.text
+    assert response.headers["HX-Push-Url"] == (
+        "/ruok/sessions?status=pending&search=issue"
+    )
+    assert 'data-status-filter="pending"\n' in response.text
+    assert 'class="status-chip is-active"' in response.text
+
+
+def test_webui_sessions_list_shows_markup_free_summaries(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import create_session
+
+    create_session(
+        tmp_path,
+        "ruok",
+        "**上下文**: action_solve\n"
+        "**异常类型**: RuntimeError\n"
+        "**异常信息**: boom\n\n"
+        "```\nTraceback line 1\n```",
+        ReporterInfo(type="automatic"),
+        source="automatic",
+    )
+    create_session(
+        tmp_path,
+        "music",
+        "```\n日志来源: nonebot_plugin_music\n模块映射: music\n"
+        "Player crashed\nTraceback line\n```",
+        ReporterInfo(type="automatic"),
+        source="automatic",
+    )
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert response.status_code == 200
+    assert "RuntimeError: boom" in response.text
+    assert "Player crashed" in response.text
+    assert "**异常类型**" not in response.text
+    assert "日志来源" not in response.text
+    assert "```" not in response.text
+
+
+def test_webui_session_badges_use_status_tones(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import update_session
+
+    unsolved_id, ignored_id = _create_many_sessions(tmp_path, 2)
+    update_session(tmp_path, unsolved_id, {"status": "unsolved"})
+    update_session(tmp_path, ignored_id, {"status": "ignored"})
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert '<span class="badge badge-err">未解决</span>' in response.text
+    assert '<span class="badge badge-muted">已忽略</span>' in response.text
+    assert 'class="badge badge-error"' not in response.text
+
+
+def test_webui_ignore_from_list_requires_confirmation(tmp_path: Path) -> None:
+    (session_id,) = _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert f'hx-post="/ruok/_actions/ignore/{session_id}"' in response.text
+    assert f"确定将 {session_id} 标记为误报并忽略？" in response.text
+
+
+def test_webui_detail_actions_return_detail_fragment(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import get_session
+
+    confirm_id, solve_id, ignore_id = _create_many_sessions(tmp_path, 3)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    page = client.get(f"/ruok/sessions/{solve_id}")
+    responses = {
+        "unsolved": client.post(f"/ruok/_actions/confirm/{confirm_id}?view=detail"),
+        "solved": client.post(f"/ruok/_actions/solve/{solve_id}?view=detail"),
+        "ignored": client.post(f"/ruok/_actions/ignore/{ignore_id}?view=detail"),
+    }
+
+    assert page.status_code == 200
+    assert f"/ruok/_actions/solve/{solve_id}?view=detail" in page.text
+    assert "hx-on::after-request" not in page.text
+    for status, response in responses.items():
+        assert response.status_code == 200
+        assert response.text.count('id="session-detail-content"') == 1
+        assert "时间线" in response.text
+        assert 'id="notes-area"' in response.text
+        assert 'id="linked-container"' in response.text
+        assert 'class="session-row"' not in response.text
+        assert "<!DOCTYPE html>" not in response.text
+        assert response.headers["HX-Trigger"]
+    for session_id, status in (
+        (confirm_id, "unsolved"),
+        (solve_id, "solved"),
+        (ignore_id, "ignored"),
+    ):
+        reloaded = get_session(tmp_path, session_id)
+        assert reloaded is not None
+        assert reloaded.status == status
+    assert "?view=detail" in responses["unsolved"].text
+    assert "?view=detail" not in responses["solved"].text
+
+
+def test_webui_list_actions_still_return_session_row(tmp_path: Path) -> None:
+    (session_id,) = _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post(f"/ruok/_actions/solve/{session_id}")
+
+    assert response.status_code == 200
+    assert f'id="session-{session_id}" class="session-row"' in response.text
+    assert 'id="session-detail-content"' not in response.text
+    assert '<span class="badge badge-ok">已解决</span>' in response.text
+
+
+def test_session_summary_strips_markup_and_truncates() -> None:
+    from nonebot_plugin_ruok.webui.jinja import session_summary
+
+    assert session_summary("  用户 **说明** 第一行\n第二行") == "用户 说明 第一行"
+    assert session_summary("") == ""
+    assert session_summary("```\n日志来源: x\n```") == ""
+    long_text = session_summary("x" * 500)
+    assert len(long_text) == 160
+    assert long_text.endswith("…")
+
+
+def test_webui_session_actions_return_404_for_missing_session(tmp_path: Path) -> None:
+    """Missing Session is a client error, not a 500 with a self-monitoring Session."""
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+    missing = "ruok-deadbeef"
+
+    responses = {
+        "confirm": client.post(f"/ruok/_actions/confirm/{missing}"),
+        "solve": client.post(f"/ruok/_actions/solve/{missing}"),
+        "ignore": client.post(f"/ruok/_actions/ignore/{missing}"),
+        "note": client.post(
+            f"/ruok/_actions/session-note/{missing}",
+            data={"developer_notes": "note"},
+        ),
+        "unlink": client.post(f"/ruok/_actions/unlink/{missing}"),
+        "unlink-other": client.post(f"/ruok/_actions/link/{missing}/remove/{missing}"),
+    }
+
+    for name, response in responses.items():
+        assert response.status_code == 404, name
+        assert "Session not found" in response.text, name
+        assert "已保存" not in response.text, name
+        assert "已解除关联" not in response.text, name
+    assert list_sessions(tmp_path) == []
+
+
+def test_webui_session_note_and_unlink_still_succeed_for_existing_session(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import get_session, link_sessions
+
+    (session_id,) = _create_many_sessions(tmp_path, 1)
+    (other_id,) = _create_many_sessions(tmp_path, 1)
+    assert link_sessions(tmp_path, session_id, other_id)
+
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    note = client.post(
+        f"/ruok/_actions/session-note/{session_id}",
+        data={"developer_notes": "kept"},
+    )
+    unlink = client.post(f"/ruok/_actions/unlink/{session_id}")
+
+    reloaded = get_session(tmp_path, session_id)
+    assert note.status_code == 200
+    assert "已保存" in note.text
+    assert unlink.status_code == 200
+    assert "已解除关联" in unlink.text
+    assert reloaded is not None
+    assert reloaded.developer_notes == "kept"
+    assert reloaded.link_group is None
+
+
+def test_session_detail_folds_long_traceback_with_copy_control(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    traceback_text = "\n".join(f"line {i}" for i in range(80))
+    session = create_session(
+        tmp_path,
+        module_name="ruok",
+        description="**异常类型**: RuntimeError\n\n```\n" + traceback_text + "\n```\n",
+        reporter=ReporterInfo(type="automatic"),
+        source="automatic",
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get(f"/ruok/sessions/{session.session_id}")
+
+    assert response.status_code == 200
+    assert 'class="detail-fold" open' in response.text
+    assert 'data-copy-target="session-traceback-text"' in response.text
+    assert 'id="session-traceback-text"' in response.text
+    assert "共 80 行" in response.text
+    assert "复制" in response.text
+    # The fold must not duplicate Pico's disclosure marker.
+    assert "summary::before" not in response.text
+
+
+def test_session_detail_keeps_short_description_inline(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    session = create_session(
+        tmp_path,
+        module_name="ruok",
+        description="短说明",
+        reporter=ReporterInfo(type="user", user_id="1", platform="webui"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    response = client.get(f"/ruok/sessions/{session.session_id}")
+
+    assert response.status_code == 200
+    # A short description stays visible rather than hiding behind a fold.
+    assert '<pre class="session-description-block">短说明</pre>' in response.text
+
+
+def test_detail_actions_still_return_the_detail_fragment(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    session = create_session(
+        tmp_path,
+        module_name="ruok",
+        description="**异常类型**: RuntimeError\n\n```\nboom\n```\n",
+        reporter=ReporterInfo(type="automatic"),
+        source="automatic",
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    page = client.get(f"/ruok/sessions/{session.session_id}")
+    response = client.post(
+        f"/ruok/_actions/solve/{session.session_id}?view=detail",
+    )
+
+    assert page.status_code == 200
+    assert response.status_code == 200
+    assert response.text.count('id="session-detail-content"') == 1
+    assert 'class="timeline"' in response.text
+    assert 'id="notes-area"' in response.text
+    assert 'id="linked-container"' in response.text

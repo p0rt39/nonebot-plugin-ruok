@@ -1,0 +1,183 @@
+{# Session detail body; rendered by the detail page and by detail-view actions. #}
+<div id="session-detail-content">
+<article>
+    <header class="detail-header">
+        <strong class="detail-header__id">{{ session.session_id }}</strong>
+        <span class="badge badge-{{ session.status | _status_tone }}">{{ session.status | _status_label }}</span>
+        <span class="muted-text">{{ session.module_name }} · {{ session.source }}</span>
+    </header>
+
+    <div class="grid">
+        <div>
+            <h4>基本信息</h4>
+            <table class="kv-table">
+                <tr><th scope="row">来源</th><td>{{ session.source }}</td></tr>
+                <tr><th scope="row">模块</th><td>{{ session.module_name }}</td></tr>
+                <tr><th scope="row">影响插件</th><td>{{ session.affected_plugins | join(', ') if session.affected_plugins else '—' }}</td></tr>
+                <tr><th scope="row">签名</th><td><code>{{ session.error_signature or '—' }}</code></td></tr>
+            </table>
+        </div>
+        <div>
+            <h4>上报者</h4>
+            <table class="kv-table">
+                {% set reporter_label = reporter_display(session.reporter) if reporter_display is defined else session.reporter.user_id %}
+                <tr><th scope="row">类型</th><td>{{ session.reporter.type }}</td></tr>
+                <tr><th scope="row">用户</th><td>{{ reporter_label or '—' }}</td></tr>
+                <tr><th scope="row">群组</th><td>{{ session.reporter.group_id or '—' }}</td></tr>
+                <tr><th scope="row">平台</th><td>{{ session.reporter.platform or '—' }}</td></tr>
+            </table>
+        </div>
+    </div>
+</article>
+
+<!-- Actions -->
+{% if session.status in ('pending', 'unsolved') %}
+<article>
+    <h4>操作</h4>
+    <div class="ruok-button-row--grid">
+        {% set plugin_options = session_plugin_options(session.module_name) if session_plugin_options is defined else [] %}
+        {% if session.status == 'pending' or plugin_options or session.affected_plugins %}
+        <form hx-post="/ruok/_actions/confirm/{{ session.session_id }}?view=detail"
+              hx-target="#session-detail-content"
+              hx-swap="outerHTML"
+              style="margin:0;">
+            {% if plugin_options %}
+            <details class="confirm-plugin-picker">
+                <summary role="button" class="secondary outline ruok-button">
+                    {% if session.status == 'pending' %}✅ 确认为未解决{% else %}🧩 修改影响插件{% endif %}
+                </summary>
+                <div class="confirm-plugin-options">
+                    {% for plugin in plugin_options %}
+                    <label>
+                        <input type="checkbox" name="affected_plugins" value="{{ plugin }}"
+                               {% if plugin in session.affected_plugins %}checked{% endif %}>
+                        {{ plugin }}
+                    </label>
+                    {% endfor %}
+                    <button type="submit" class="secondary outline ruok-button">
+                        {% if session.status == 'pending' %}确认 Session{% else %}保存插件关联{% endif %}
+                    </button>
+                </div>
+            </details>
+            {% elif session.status == 'unsolved' and session.affected_plugins %}
+            <button type="submit" class="secondary outline">🧹 清空插件关联</button>
+            {% else %}
+            <button type="submit" class="secondary outline">✅ 确认为未解决</button>
+            {% endif %}
+        </form>
+        {% endif %}
+        <button class="secondary outline"
+                hx-post="/ruok/_actions/solve/{{ session.session_id }}?view=detail"
+                hx-target="#session-detail-content"
+                hx-swap="outerHTML">
+            解决
+        </button>
+        <button class="secondary outline ruok-button-danger"
+                hx-post="/ruok/_actions/ignore/{{ session.session_id }}?view=detail"
+                hx-target="#session-detail-content"
+                hx-swap="outerHTML"
+                hx-confirm="确定将 {{ session.session_id }} 标记为误报并忽略？">
+            忽略误报
+        </button>
+    </div>
+</article>
+{% endif %}
+
+<!-- Submitted Description / Automatic Error Summary -->
+<article>
+    <h4>{% if session.source == 'manual' %}用户提交说明{% else %}异常摘要{% endif %}</h4>
+    {% if session.source == 'automatic' and session_summary_fields %}
+    <div class="session-summary-grid">
+        {% for label, value in session_summary_fields.items() %}
+        <div class="session-summary-item">
+            <span>{{ label }}</span>
+            <strong>{{ value }}</strong>
+        </div>
+        {% endfor %}
+    </div>
+    {% elif session_description %}
+    {% if session_description | length > 600 %}
+    <details class="detail-fold">
+        <summary>展开完整说明（{{ session_description | length }} 字符）</summary>
+        <pre class="session-description-block">{{ session_description }}</pre>
+    </details>
+    {% else %}
+    <pre class="session-description-block">{{ session_description }}</pre>
+    {% endif %}
+    {% else %}
+    <p class="muted-text">暂无说明</p>
+    {% endif %}
+</article>
+
+{% if session_traceback %}
+{% set traceback_title = '日志内容' if (session.source == 'automatic' and not session_summary_fields) else 'Traceback' %}
+<article>
+    <h4>{{ traceback_title }}</h4>
+    <details class="detail-fold" open>
+        <summary>
+            <span>共 {{ session_traceback.splitlines() | length }} 行</span>
+            <button type="button" class="secondary outline ruok-button-compact"
+                    data-copy-target="session-traceback-text"
+                    aria-label="复制{{ traceback_title }}到剪贴板">复制</button>
+        </summary>
+        <pre class="session-traceback"><code id="session-traceback-text">{{ session_traceback }}</code></pre>
+    </details>
+</article>
+{% endif %}
+
+<!-- Timeline -->
+<article>
+    <h4>时间线</h4>
+    <div class="timeline">
+        <div class="timeline-item">
+            <span class="status-dot status-pending"></span>
+            <strong>首次发现</strong> {{ session.first_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
+        </div>
+        <div class="timeline-item">
+            <span class="status-dot status-{{ session.status }}"></span>
+            <strong>最近更新</strong> {{ session.last_seen_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
+        </div>
+        {% if session.resolved_at %}
+        <div class="timeline-item">
+            <span class="status-dot status-{{ session.status }}"></span>
+            <strong>关闭时间</strong> {{ session.resolved_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}
+        </div>
+        {% endif %}
+    </div>
+</article>
+
+<!-- Developer Notes (HTMX inline edit) -->
+<article>
+    <h4>开发者备注</h4>
+    <div id="notes-area">
+        <form hx-post="/ruok/_actions/session-note/{{ session.session_id }}"
+              hx-target="#notes-area" hx-swap="outerHTML">
+            <textarea name="developer_notes" rows="3" style="width: 100%;"
+                      placeholder="添加备注...">{{ session.developer_notes or '' }}</textarea>
+            <button type="submit">保存备注</button>
+            <p class="ruok-form-status" data-form-status role="status" aria-live="polite"></p>
+        </form>
+    </div>
+</article>
+
+<!-- Linked Sessions -->
+<article>
+    <h4>关联 Sessions {% if session.link_group %}<code style="font-size:0.75em;">{{ session.link_group }}</code>{% endif %}</h4>
+    <div id="linked-container">
+        {% include "_linked_list.html.jinja2" %}
+    </div>
+    <form hx-post="/ruok/_actions/link/{{ session.session_id }}"
+          hx-target="#linked-container" hx-swap="outerHTML"
+          class="link-form">
+        <input type="text" name="other_id" placeholder="输入 Session ID" required>
+        <button type="submit" class="secondary outline ruok-button">关联</button>
+    </form>
+    {% if session.link_group %}
+    <form hx-post="/ruok/_actions/unlink/{{ session.session_id }}"
+          hx-target="#linked-container" hx-swap="outerHTML"
+          style="margin-top:0.5rem;">
+        <button type="submit" class="secondary outline ruok-button-danger">退出关联组</button>
+    </form>
+    {% endif %}
+</article>
+</div><!-- /#session-detail-content -->

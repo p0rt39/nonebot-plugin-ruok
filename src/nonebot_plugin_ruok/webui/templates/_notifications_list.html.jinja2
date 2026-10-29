@@ -1,65 +1,51 @@
 <div id="notifications-container">
 {% if rules %}
-<div class="card-grid">
-    {% for rule in rules %}
-    <article class="notification-card" style="display:flex;flex-direction:column;gap:0.85rem;">
-        <header style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;">
-            <strong style="overflow-wrap:anywhere;">{{ rule.name }}</strong>
-            <span class="badge badge-{% if rule.enabled %}ok{% else %}error{% endif %}"
-                  style="white-space:nowrap;">
-                {{ '启用' if rule.enabled else '禁用' }}
-            </span>
-        </header>
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0.75rem;">
-            <div>
-                <div class="metric-label">触发状态</div>
-                <div style="display:flex;gap:0.35rem;flex-wrap:wrap;">
-                    {% for s in rule.on_status %}
-                    <span class="badge badge-{% if s == 'solved' %}ok{% elif s in ('pending','unsolved') %}warn{% else %}error{% endif %}">
-                        {{ s | _status_label }}
-                    </span>
-                    {% endfor %}
-                </div>
-            </div>
-            <div>
-                <div class="metric-label">适用模块</div>
-                <div style="overflow-wrap:anywhere;">
-                    {{ rule.on_module | join(', ') if rule.on_module else '全部' }}
-                </div>
-            </div>
-            <div>
-                <div class="metric-label">冷却时间</div>
-                <div>{{ rule.cooldown_minutes }} 分钟</div>
-            </div>
-            <div>
-                <div class="metric-label">通道</div>
-                <div style="overflow-wrap:anywhere;">{{ rule.channels | join(', ') }}</div>
-            </div>
-        </div>
-
-        {% if rule.webhook_url %}
-        <div>
-            <div class="metric-label">Webhook</div>
-            <code style="display:block;overflow-wrap:anywhere;white-space:normal;">
-                {{ rule.webhook_url }}
-            </code>
-        </div>
-        {% endif %}
-
-        <footer class="ruok-button-row" style="margin-top:auto;">
-            <a href="/ruok/notifications/{{ rule.name | _path_quote }}"
-               role="button"
-               class="secondary outline ruok-button">
-                📋 详情
-            </a>
-        </footer>
-    </article>
-    {% endfor %}
+<div class="table-scroll status-table-scroll">
+<table class="striped status-table">
+    <thead>
+        <tr>
+            <th>规则</th>
+            <th>状态</th>
+            <th>触发状态</th>
+            <th>适用模块</th>
+            <th>冷却</th>
+            <th>通道</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for rule in rules %}
+        <tr class="notification-card">
+            <td data-label="规则">
+                <strong>
+                    <a href="/ruok/notifications/{{ rule.name | _path_quote }}">{{ rule.name }}</a>
+                </strong>
+            </td>
+            <td class="cell-nowrap" data-label="状态">
+                <span class="badge badge-{{ 'ok' if rule.enabled else 'muted' }}">
+                    {{ '启用' if rule.enabled else '禁用' }}
+                </span>
+            </td>
+            <td data-label="触发状态">
+                {% for s in rule.on_status %}
+                <span class="badge badge-{{ s | _status_tone }}">{{ s | _status_label }}</span>
+                {% endfor %}
+            </td>
+            <td class="cell-name" data-label="适用模块">
+                {{ rule.on_module | join(', ') if rule.on_module else '全部' }}
+            </td>
+            <td class="cell-nowrap" data-label="冷却">{{ rule.cooldown_minutes | round(1) }} 分钟</td>
+            <td class="cell-name" data-label="通道">
+                {{ rule.channels | join(', ') }}
+                {% if rule.webhook_url %}<br><small class="muted-text">{{ rule.webhook_url }}</small>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
 </div>
 {% else %}
 <article>
-    <p>🎉 暂无通知规则。使用上方表单添加。</p>
+    <p>暂无通知规则。使用上方的“新建规则”添加。</p>
 </article>
 {% endif %}
 </div>

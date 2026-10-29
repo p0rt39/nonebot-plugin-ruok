@@ -6,6 +6,11 @@
 
 {% block content %}
 
+<p class="live-status" id="live-status" data-state="connecting" role="status" aria-live="polite">
+    <span class="live-status__dot"></span>
+    <span id="live-status-text">正在连接实时更新…</span>
+</p>
+
 <!-- Hero — SSE status event triggers HTMX refresh -->
 <div id="dashboard-hero" hx-ext="morph"
      hx-get="/ruok?_partial=dashboard-hero" hx-trigger="load" hx-swap="innerHTML">
@@ -13,26 +18,26 @@
 </div>
 
 <!-- Unified System Overview — SSE-driven, no HTMX polling needed -->
-<div id="dashboard-system">
+<div id="dashboard-system" class="panel" data-panel="metrics">
     {% include "_dashboard_system.html.jinja2" %}
 </div>
 
 <!-- Disk — polling 15s -->
-<div id="dashboard-disk"
+<div id="dashboard-disk" class="panel" data-panel="disk"
      hx-get="/ruok?_partial=dashboard-disk"
      hx-trigger="load, every 15s" hx-swap="innerHTML">
     {% include "_dashboard_disk.html.jinja2" %}
 </div>
 
 <!-- Connections — polling 30s -->
-<div id="dashboard-connections"
+<div id="dashboard-connections" class="panel" data-panel="connections"
      hx-get="/ruok?_partial=dashboard-connections"
      hx-trigger="load, every 30s" hx-swap="innerHTML">
     {% include "_dashboard_connections.html.jinja2" %}
 </div>
 
 <!-- Session stats — SSE on session changes -->
-<div id="dashboard-stats" hx-ext="morph"
+<div id="dashboard-stats" class="panel" data-panel="stats" hx-ext="morph"
      hx-get="/ruok?_partial=dashboard-stats" hx-trigger="load" hx-swap="innerHTML">
     {% include "_dashboard_stats.html.jinja2" %}
 </div>
@@ -40,18 +45,97 @@
 <script>
 (function() {
     var DBG = '[RUOK:SSE]';
-    console.log(DBG, '初始化 SSE 连接...');
+    // Verbose SSE tracing: run localStorage.setItem('ruok-debug', '1') in DevTools.
+    var DEBUG = false;
+    try { DEBUG = localStorage.getItem('ruok-debug') === '1'; } catch (_) {}
+    function dbg() { if (DEBUG) console.log.apply(console, arguments); }
+    dbg(DBG, '初始化 SSE 连接...');
 
-    var src = new EventSource('/ruok/sse');
+    // ── Live-update indicator ──
+    var statusEl = document.getElementById('live-status');
+    var statusText = document.getElementById('live-status-text');
+    function setLiveState(state, text) {
+        if (statusEl) statusEl.setAttribute('data-state', state);
+        if (statusText) statusText.textContent = text;
+    }
+
+    var src = null;
     var lastOverall = '';
+    var hidden = document.hidden;
     var _evtCount = { status: 0, tick: 0, metrics: 0, session_update: 0 };
 
-    src.onopen = function() {
-        console.log(DBG, '✅ SSE 连接已建立');
-    };
-    src.onerror = function(e) {
-        console.warn(DBG, '⚠️ SSE 连接错误/断开 (将自动重连)', e);
-    };
+    function connectStream() {
+        src = new EventSource('/ruok/sse');
+        src.onopen = function() {
+            dbg(DBG, '✅ SSE 连接已建立');
+            setLiveState('open', '实时更新已连接');
+        };
+        src.onerror = function(e) {
+            dbg(DBG, '⚠️ SSE 连接错误/断开 (将自动重连)', e);
+            if (hidden) {
+                setLiveState('paused', '标签页不活跃，实时更新已暂停');
+            } else if (src.readyState === EventSource.CLOSED) {
+                setLiveState('failed', '实时更新已断开 — 刷新页面重试');
+            } else {
+                setLiveState('reconnecting', '实时更新重连中…');
+            }
+        };
+        bindStreamHandlers(src);
+    }
+
+    // ── Expandable system tiles (mouse + keyboard) ──
+    document.addEventListener('click', function(e) {
+        var tile = e.target.closest && e.target.closest('[data-expandable]');
+        if (!tile) return;
+        toggleTile(tile);
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var tile = e.target.closest && e.target.closest('[data-expandable]');
+        if (!tile) return;
+        e.preventDefault();
+        toggleTile(tile);
+    });
+    function toggleTile(tile) {
+        var expanded = tile.classList.toggle('expanded');
+        tile.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+
+    // ── Panel refresh feedback ──
+    // Declared hx-get polls report the panel itself as `elt`; programmatic
+    // htmx.ajax calls report `body`, so fall back to the swap target.
+    function panelOf(detail) {
+        var candidate = detail.elt;
+        if (!candidate || candidate === document.body) candidate = detail.target;
+        if (typeof candidate === 'string') candidate = document.querySelector(candidate);
+        return candidate && candidate.closest ? candidate.closest('.panel') : null;
+    }
+    document.body.addEventListener('htmx:beforeRequest', function(e) {
+        var panel = panelOf(e.detail);
+        if (panel && !panel.hasAttribute('data-initial')) {
+            panel.classList.add('is-refreshing');
+        }
+    });
+    document.body.addEventListener('htmx:afterRequest', function(e) {
+        var panel = panelOf(e.detail);
+        if (panel) panel.classList.remove('is-refreshing');
+        if (!panel) return;
+        if (e.detail.successful) {
+            panel.setAttribute('data-initial', '1');
+            // A successful swap means this panel's collection worked.
+            var stale = panel.querySelector('.panel-note--error');
+            if (stale) stale.remove();
+            return;
+        }
+        // Failed polling must not leave a stale panel looking current.
+        if (!panel.querySelector('.panel-note--error')) {
+            var note = document.createElement('p');
+            note.className = 'panel-note panel-note--error';
+            note.setAttribute('role', 'alert');
+            note.textContent = '此区域刷新失败，显示的是最近一次成功采集的数据。';
+            panel.insertBefore(note, panel.firstChild);
+        }
+    });
 
     // ── Sparkline history buffers (30 points = ~90s @ 3s interval) ──
     var _spark = { net_up: [], net_down: [], disk_read: [], disk_write: [] };
@@ -64,7 +148,7 @@
 
     function drawSparkline(svgId, data, maxVal) {
         var poly = document.getElementById(svgId);
-        if (!poly) { console.debug(DBG, '  sparkline SVG 未找到:', svgId); return; }
+        if (!poly) { dbg(DBG, '  sparkline SVG 未找到:', svgId); return; }
         if (!data.length) { poly.removeAttribute('points'); return; }
         var w = 120, h = 36, padTB = 6, padLR = 3;
         var peak = maxVal || Math.max.apply(null, data) || 1;
@@ -95,39 +179,58 @@
 
     function clr(v) { return v < 70 ? '#2ecc40' : v < 90 ? '#ffdc00' : '#ff4136'; }
 
+    function bindStreamHandlers(stream) {
     // ── status event ──
-    src.addEventListener('status', function(e) {
+    stream.addEventListener('status', function(e) {
         _evtCount.status++;
         try {
             var d = JSON.parse(e.data);
-            console.log(DBG, '📡 status #' + _evtCount.status,
-                'overall=' + d.overall);
-            if (d.overall !== lastOverall) {
-                console.log(DBG, '  overall 变更:', lastOverall, '→', d.overall, '— 刷新 hero');
-                lastOverall = d.overall;
-                htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
-                    { target: '#dashboard-hero', swap: 'innerHTML' });
+            dbg(DBG, '📡 status #' + _evtCount.status,
+                'overall=' + d.overall, 'collection_ok=' + d.collection_ok);
+            if (d.collection_ok === false) {
+                // The payload is the last successful snapshot, not new data.
+                setLiveState('failed', '采集失败 — 显示最近一次成功的状态');
+                var hero = document.getElementById('dashboard-hero');
+                if (hero && !hero.querySelector('.panel-note--error')) {
+                    var note = document.createElement('p');
+                    note.className = 'panel-note panel-note--error';
+                    note.setAttribute('role', 'alert');
+                    note.textContent = '状态采集失败，下方数据可能已过期。';
+                    hero.insertBefore(note, hero.firstChild);
+                }
+            } else {
+                setLiveState('open', '实时更新已连接');
+                var stale = document.querySelector('#dashboard-hero .panel-note--error');
+                if (stale) stale.remove();
+                if (d.overall !== lastOverall) {
+                    dbg(DBG, '  overall 变更:', lastOverall, '→', d.overall, '— 刷新 hero');
+                    lastOverall = d.overall;
+                    htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
+                        { target: '#dashboard-hero', swap: 'innerHTML' });
+                }
             }
         } catch(ex) { console.error(DBG, 'status 解析失败:', ex, e.data); }
     });
 
     // ── tick event ──
-    src.addEventListener('tick', function(e) {
+    stream.addEventListener('tick', function(e) {
         _evtCount.tick++;
         try {
             var d = JSON.parse(e.data);
             if (_evtCount.tick <= 3 || _evtCount.tick % 10 === 0) {
-                console.log(DBG, '⏱ tick #' + _evtCount.tick,
+                dbg(DBG, '⏱ tick #' + _evtCount.tick,
                     'overall=' + d.overall);
             }
             if (d.overall !== lastOverall) {
-                console.log(DBG, '  (via tick) overall 变更:', lastOverall, '→', d.overall);
+                dbg(DBG, '  (via tick) overall 变更:', lastOverall, '→', d.overall);
                 lastOverall = d.overall;
                 htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
                     { target: '#dashboard-hero', swap: 'innerHTML' });
             }
+            // Only advance the "collected at" time for a successful collection;
+            // otherwise the hero would claim fresher data than it has.
             var tsEl = document.querySelector('#dashboard-hero .hero-ts');
-            if (tsEl && d.timestamp) {
+            if (tsEl && d.timestamp && d.collection_ok !== false) {
                 var dt = new Date(d.timestamp);
                 tsEl.textContent = dt.getFullYear() + '-' +
                     String(dt.getMonth()+1).padStart(2,'0') + '-' +
@@ -140,14 +243,14 @@
     });
 
     // ── metrics event: update all tiles + sparklines ──
-    src.addEventListener('metrics', function(e) {
+    stream.addEventListener('metrics', function(e) {
         _evtCount.metrics++;
         var t0 = performance.now();
         try {
             var m = JSON.parse(e.data);
             document.dispatchEvent(new CustomEvent('ruok:metrics', { detail: m }));
             var fields = Object.keys(m).length;
-            console.log(DBG, '📊 metrics #' + _evtCount.metrics,
+            dbg(DBG, '📊 metrics #' + _evtCount.metrics,
                 '(' + fields + ' 字段)',
                 'cpu=' + (m.cpu != null ? Math.round(m.cpu) + '%' : '?'),
                 'mem=' + (m.mem_pct != null ? Math.round(m.mem_pct) + '%' : '?'),
@@ -162,7 +265,7 @@
             // Helper: log DOM element existence
             function el(id) {
                 var e = document.getElementById(id);
-                if (!e) console.debug(DBG, '  ⚠ DOM 元素未找到: #' + id);
+                if (!e) dbg(DBG, '  ⚠ DOM 元素未找到: #' + id);
                 return e;
             }
 
@@ -336,7 +439,7 @@
 
             var elapsed = (performance.now() - t0).toFixed(1);
             if (_evtCount.metrics <= 3 || _evtCount.metrics % 5 === 0) {
-                console.log(DBG, '  ✅ metrics #' + _evtCount.metrics + ' 更新完成 (' + elapsed + 'ms)');
+                dbg(DBG, '  ✅ metrics #' + _evtCount.metrics + ' 更新完成 (' + elapsed + 'ms)');
             }
         } catch(ex) {
             console.error(DBG, '❌ metrics #' + _evtCount.metrics + ' 处理异常:', ex);
@@ -344,33 +447,55 @@
     });
 
     // ── session_update ──
-    src.addEventListener('session_update', function(e) {
+    stream.addEventListener('session_update', function(e) {
         _evtCount.session_update++;
-        console.log(DBG, '🔄 session_update #' + _evtCount.session_update, '— 刷新 stats');
+        dbg(DBG, '🔄 session_update #' + _evtCount.session_update, '— 刷新 stats');
         try {
             htmx.ajax('GET', '/ruok?_partial=dashboard-stats',
                 { target: '#dashboard-stats', swap: 'innerHTML' });
         } catch(ex) { console.error(DBG, 'session_update HTMX 失败:', ex); }
     });
+    }
+
+    connectStream();
 
     // ── Cleanup on page unload ──
     window.addEventListener('beforeunload', function() {
-        console.log(DBG, '🛑 页面卸载, 关闭 SSE (共收到',
+        dbg(DBG, '🛑 页面卸载, 关闭 SSE (共收到',
             _evtCount.status + ' status,', _evtCount.tick + ' tick,',
             _evtCount.metrics + ' metrics,', _evtCount.session_update + ' session_update)');
-        src.close();
+        if (src) src.close();
+    });
+
+    // ── Background tab: pause the stream, refresh once on return ──
+    document.addEventListener('visibilitychange', function() {
+        hidden = document.hidden;
+        if (hidden) {
+            dbg(DBG, '⏸ 标签页不可见 — 暂停实时更新');
+            setLiveState('paused', '标签页不活跃，实时更新已暂停');
+            if (src) src.close();
+            src = null;
+        } else {
+            dbg(DBG, '▶ 标签页恢复 — 重连实时更新并补拉一次');
+            setLiveState('reconnecting', '正在恢复实时更新…');
+            if (src) src.close();
+            connectStream();
+            htmx.ajax('GET', '/ruok?_partial=dashboard-hero',
+                { target: '#dashboard-hero', swap: 'innerHTML' });
+            if (window.ruokTrendRefreshNow) window.ruokTrendRefreshNow();
+        }
     });
 })();
 </script>
 
 <!-- Module Status (auto-refresh every 10s) -->
-<h3>📦 模块状态</h3>
+<h3>模块状态</h3>
 <div hx-get="/ruok/_partials/modules" hx-trigger="load, every 10s" hx-swap="outerHTML">
     {% include "_modules_table.html.jinja2" %}
 </div>
 
 <!-- Trend Charts — JS refreshes data without replacing canvas elements -->
-<h3>📈 指标趋势</h3>
+<h3>指标趋势</h3>
 <div id="dashboard-trends">
     {% include "_dashboard_trends.html.jinja2" %}
 </div>

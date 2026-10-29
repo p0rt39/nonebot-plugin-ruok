@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import html
+import json
 import asyncio
+import posixpath
 from typing import Any
 from pathlib import Path
-from urllib.parse import quote
+from datetime import datetime, timezone
+from urllib.parse import quote, urlsplit, urlencode, urlunsplit
 from collections.abc import Callable
 
 from fastapi import Form, Query, Depends, Request, APIRouter, HTTPException
@@ -25,9 +28,11 @@ from .auth import (
     UserManagementError,
     UserRegistrationError,
 )
-from .jinja import render
+from .jinja import render, parse_session_summary, split_session_description
 from ..config import ScopedConfig
 from ..protocol import (
+    Session,
+    MetricPoint,
     NetworkRate,
     ReporterInfo,
     ModuleDefinition,
@@ -61,13 +66,92 @@ from ..collector import (
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Ranges a dashboard trend chart may request.  Long ranges are still bounded by
+# the daily file reader in ``MetricsStore.query``, which only walks whole days.
+TREND_HOURS_MIN = 1.0
+TREND_HOURS_MAX = 168.0
+# Upper bound on points returned after downsampling.  A browser canvas cannot
+# resolve more, and an unbounded series is exactly what made day-plus ranges
+# unusable before the bucketing step existed.
+TREND_MAX_POINTS = 360
+
+
+def _bucket_timestamp(moment: datetime, step_seconds: float) -> str:
+    """Snap *moment* down to the start of its *step_seconds* bucket."""
+    epoch = int(moment.timestamp())
+    bucket = int(epoch // step_seconds) * int(step_seconds)
+    return datetime.fromtimestamp(bucket, tz=timezone.utc).isoformat()
+
+
+def _downsample_metrics(
+    points: list[MetricPoint],
+    hours: float,
+    *,
+    max_points: int = TREND_MAX_POINTS,
+) -> list[dict[str, Any]]:
+    """Return chart-ready metrics, averaged into fixed time buckets.
+
+    ``MetricsStore.query`` can return several thousand points for a multi-day
+    range; sending them all produces an unreadable chart.  Buckets keep the
+    series aligned to wall-clock time instead of array position, and the
+    session/connection counters are carry-forward counts rather than rates, so
+    each bucket reports the newest sample it contains.
+    """
+    serialized = [point.model_dump(mode="json") for point in points]
+    if len(serialized) <= max_points or not serialized:
+        return serialized
+
+    step_seconds = max(float(hours) * 3600.0 / max_points, 1.0)
+    counter_fields = (
+        "sessions_total",
+        "sessions_pending",
+        "sessions_unsolved",
+        "connections_total",
+        "connections_online",
+    )
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    order: list[str] = []
+
+    for record in serialized:
+        raw_ts = record.get("ts")
+        if not isinstance(raw_ts, str):
+            continue
+        try:
+            moment = datetime.fromisoformat(raw_ts)
+        except ValueError:
+            continue
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        key = _bucket_timestamp(moment, step_seconds)
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(record)
+
+    averaged: list[dict[str, Any]] = []
+    for key in sorted(order):
+        members = buckets[key]
+        representative = dict(members[-1])
+        representative["ts"] = key
+        for field in ("cpu_percent", "memory_percent", "disk_percent"):
+            samples = [
+                member[field]
+                for member in members
+                if isinstance(member.get(field), (int, float))
+            ]
+            representative[field] = (
+                round(sum(samples) / len(samples), 2) if samples else None
+            )
+        for field in counter_fields:
+            representative[field] = members[-1].get(field, 0)
+        averaged.append(representative)
+
+    return averaged
+
 
 def _query_metrics_history(data_dir: Path, hours: float = 1.0) -> list[dict[str, Any]]:
     """Return serialized historical metrics for WebUI chart rendering."""
-    return [
-        point.model_dump(mode="json")
-        for point in MetricsStore.query(data_dir, hours=hours)
-    ]
+    return _downsample_metrics(MetricsStore.query(data_dir, hours=hours), hours)
 
 
 def _plugin_names() -> list[str]:
@@ -101,6 +185,11 @@ def _parse_module_plugins(selected: list[str], raw: str) -> list[str]:
     return _parse_form_values(selected, raw)
 
 
+def _split_multi_values(values: list[str]) -> list[str]:
+    """Flatten checkbox values and legacy comma-separated strings."""
+    return _parse_form_values(values, "")
+
+
 def _extra_notification_modules(
     rule: NotificationRule | None, module_names: list[str]
 ) -> list[str]:
@@ -119,6 +208,27 @@ def _module_detail_url(name: str) -> str:
 def _notification_detail_url(name: str) -> str:
     """Build a WebUI notification detail URL for arbitrary rule names."""
     return f"/ruok/notifications/{quote(name, safe='')}"
+
+
+def _safe_redirect_target(value: str, default: str) -> str:
+    """Return a local WebUI path for ``HX-Redirect``, or *default*.
+
+    ``redirect_to`` is submitted by the browser, so an attacker-supplied value
+    must not be able to send an authenticated client off-site.  Only same-site
+    ``/ruok`` paths are accepted; absolute URLs, protocol-relative URLs,
+    scheme-prefixed values and paths that escape the prefix after normalization
+    fall back to *default*.
+    """
+    candidate = value.strip()
+    if not candidate or candidate.startswith("//"):
+        return default
+    parts = urlsplit(candidate)
+    if parts.scheme or parts.netloc:
+        return default
+    normalized = posixpath.normpath(parts.path)
+    if normalized != "/ruok" and not normalized.startswith("/ruok/"):
+        return default
+    return urlunsplit(("", "", normalized, parts.query, parts.fragment))
 
 
 def _account_reporter_id(user: CurrentWebUIUser) -> str | None:
@@ -200,6 +310,16 @@ def _error_html(message: str, status_code: int = 400) -> HTMLResponse:
     )
 
 
+def _missing_session_response() -> HTMLResponse:
+    """Return the same 404 fragment as the Session detail page.
+
+    Session actions are idempotent buttons; a target that disappeared (deleted
+    or expired view) is a client error, not an internal failure, and must not
+    create a self-monitoring Session.
+    """
+    return HTMLResponse("<p>Session not found</p>", status_code=404)
+
+
 def _filter_users(users, search: str):
     """Filter stored WebUI users by username or bound platform identity."""
     query = search.strip().casefold()
@@ -219,35 +339,36 @@ def _filter_users(users, search: str):
 
 def _split_session_description(description: str) -> tuple[str, str]:
     """Split a session description into prose and fenced code content."""
-    marker = "```"
-    start = description.find(marker)
-    if start == -1:
-        return description.strip(), ""
-
-    end = description.find(marker, start + len(marker))
-    if end == -1:
-        return description.strip(), ""
-
-    prose = description[:start].strip()
-    code = description[start + len(marker) : end].strip()
-    return prose, code
+    return split_session_description(description)
 
 
 def _parse_session_summary(description: str) -> dict[str, str]:
     """Parse RUOK automatic summary markdown into display fields."""
-    summary: dict[str, str] = {}
-    for line in description.splitlines():
-        stripped = line.strip()
-        if not stripped or not stripped.startswith("**"):
-            continue
-        label_end = stripped.find("**", 2)
-        if label_end == -1:
-            continue
-        label = stripped[2:label_end].strip()
-        value = stripped[label_end + 2 :].lstrip(":：").strip()
-        if label and value:
-            summary[label] = value
-    return summary
+    return parse_session_summary(description)
+
+
+SESSION_PAGE_SIZE_DEFAULT = 20
+SESSION_PAGE_SIZE_MIN = 10
+SESSION_PAGE_SIZE_MAX = 100
+
+
+def _paginate(items: list[Any], page: int, page_size: int) -> dict[str, Any]:
+    """Clamp paging input and return the visible slice plus paging metadata."""
+    size = max(SESSION_PAGE_SIZE_MIN, min(SESSION_PAGE_SIZE_MAX, page_size))
+    total = len(items)
+    total_pages = max(1, -(-total // size))
+    current = max(1, min(total_pages, page))
+    start = (current - 1) * size
+    visible = items[start : start + size]
+    return {
+        "sessions": visible,
+        "total": total,
+        "page": current,
+        "page_size": size,
+        "total_pages": total_pages,
+        "range_start": start + 1 if visible else 0,
+        "range_end": start + len(visible),
+    }
 
 
 def create_webui_router(
@@ -299,6 +420,105 @@ def create_webui_router(
             },
         )
 
+    # ── Shared render contexts ──
+
+    def _session_plugin_options(module_name: str) -> list[str]:
+        return _module_plugin_options(data_dir, config, module_name)
+
+    def _session_list_context(
+        *,
+        status: str = "",
+        search: str = "",
+        module: str = "",
+        plugin: str = "",
+        after: str = "",
+        before: str = "",
+        page: int = 1,
+        page_size: int = SESSION_PAGE_SIZE_DEFAULT,
+    ) -> dict[str, Any]:
+        """Build the Session list context; raises ValueError on bad dates."""
+        first_seen_after = parse_filter_datetime(after) if after else None
+        first_seen_before = parse_filter_datetime(before) if before else None
+        sessions = list_sessions(
+            data_dir,
+            status=status or None,
+            module_name=module or None,
+            search=search or None,
+            first_seen_after=first_seen_after,
+            first_seen_before=first_seen_before,
+            plugin_name=plugin or None,
+        )
+        filters = {
+            "status": status,
+            "search": search,
+            "module": module,
+            "plugin": plugin,
+            "after": after,
+            "before": before,
+        }
+        paging = _paginate(sessions, page, page_size)
+
+        def query_for(**overrides: Any) -> str:
+            """Encode the active filters plus overrides, dropping empty values."""
+            params: dict[str, Any] = {**filters, **overrides}
+            if paging["page_size"] != SESSION_PAGE_SIZE_DEFAULT:
+                params.setdefault("page_size", paging["page_size"])
+            if params.get("page") == 1:
+                params.pop("page")
+            return urlencode({k: v for k, v in params.items() if v not in ("", None)})
+
+        return {
+            **paging,
+            "stats": get_session_stats(data_dir),
+            "filters": filters,
+            "query_for": query_for,
+            "current_status": status,
+            "current_search": search,
+            "current_module": module,
+            "current_plugin": plugin,
+            "current_after": after,
+            "current_before": before,
+            "reporter_display": _reporter_display_factory(auth.list_users()),
+            "session_plugin_options": _session_plugin_options,
+        }
+
+    def _session_detail_context(session: Session) -> dict[str, Any]:
+        session_description, session_traceback = _split_session_description(
+            session.description
+        )
+        return {
+            "session": session,
+            "session_description": session_description,
+            "session_summary_fields": (
+                _parse_session_summary(session_description)
+                if session.source == "automatic"
+                else {}
+            ),
+            "session_traceback": session_traceback,
+            "linked_sessions": get_linked_sessions(data_dir, session.session_id),
+            "reporter_display": _reporter_display_factory(auth.list_users()),
+            "session_plugin_options": _session_plugin_options,
+        }
+
+    def _render_session_action(
+        session: Session, view: str, toast: str, toast_type: str
+    ) -> HTMLResponse:
+        """Render the fragment matching the element that issued the action."""
+        headers = {"HX-Trigger": json.dumps({"toast": toast, "toastType": toast_type})}
+        if view == "detail":
+            return render(
+                "_session_detail_content.html.jinja2",
+                **_session_detail_context(session),
+                headers=headers,
+            )
+        return render(
+            "_session_card.html.jinja2",
+            s=session,
+            reporter_display=_reporter_display_factory(auth.list_users()),
+            session_plugin_options=_session_plugin_options,
+            headers=headers,
+        )
+
     # ── Auth guard dependencies ──
 
     async def _login_guard(request: Request) -> CurrentWebUIUser:
@@ -337,6 +557,9 @@ def create_webui_router(
     async def page_dashboard(
         request: Request,
         _partial: str = "",
+        trend_hours: int = Query(
+            int(TREND_HOURS_MIN), ge=int(TREND_HOURS_MIN), le=int(TREND_HOURS_MAX)
+        ),
         user: CurrentWebUIUser = Depends(_login_guard),
     ) -> HTMLResponse:
         try:
@@ -405,7 +628,8 @@ def create_webui_router(
         if _partial == "dashboard-trends":
             return render(
                 "_dashboard_trends.html.jinja2",
-                metrics_history=_query_metrics_history(data_dir),
+                metrics_history=_query_metrics_history(data_dir, hours=trend_hours),
+                metrics_history_hours=trend_hours,
             )
 
         # Initial data for full page render
@@ -427,7 +651,8 @@ def create_webui_router(
             modules=modules,
             stats=stats,
             metrics=metrics_snap,
-            metrics_history=_query_metrics_history(data_dir),
+            metrics_history=_query_metrics_history(data_dir, hours=trend_hours),
+            metrics_history_hours=trend_hours,
             net_up=net_rate.bytes_sent_per_sec,
             net_down=net_rate.bytes_recv_per_sec,
         )
@@ -474,39 +699,28 @@ def create_webui_router(
         plugin: str = "",
         after: str = "",
         before: str = "",
+        page: int = 1,
+        page_size: int = SESSION_PAGE_SIZE_DEFAULT,
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            first_seen_after = parse_filter_datetime(after) if after else None
-            first_seen_before = parse_filter_datetime(before) if before else None
-            sessions = list_sessions(
-                data_dir,
-                status=status if status else None,
-                module_name=module if module else None,
-                search=search if search else None,
-                first_seen_after=first_seen_after,
-                first_seen_before=first_seen_before,
-                plugin_name=plugin if plugin else None,
+            context = _session_list_context(
+                status=status,
+                search=search,
+                module=module,
+                plugin=plugin,
+                after=after,
+                before=before,
+                page=page,
+                page_size=page_size,
             )
-            stats = get_session_stats(data_dir)
             all_modules = list_modules(data_dir, config)
             return render(
                 "sessions.html.jinja2",
                 request=request,
                 current_user=user,
-                sessions=sessions,
-                stats=stats,
                 all_modules=all_modules,
-                current_status=status,
-                current_search=search,
-                current_module=module,
-                current_plugin=plugin,
-                current_after=after,
-                current_before=before,
-                reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                **context,
             )
         except ValueError:
             return _error_html("Invalid ISO datetime filter", status_code=400)
@@ -528,28 +742,11 @@ def create_webui_router(
             session = get_session(data_dir, session_id)
             if session is None:
                 return HTMLResponse("<p>Session not found</p>", status_code=404)
-            linked = get_linked_sessions(data_dir, session_id)
-            session_description, session_traceback = _split_session_description(
-                session.description
-            )
-            session_summary_fields = (
-                _parse_session_summary(session_description)
-                if session.source == "automatic"
-                else {}
-            )
             return render(
                 "sessions_detail.html.jinja2",
                 request=request,
                 current_user=user,
-                session=session,
-                session_description=session_description,
-                session_summary_fields=session_summary_fields,
-                session_traceback=session_traceback,
-                linked_sessions=linked,
-                reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                **_session_detail_context(session),
             )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"page_session_detail {session_id}", data_dir)
@@ -701,7 +898,7 @@ def create_webui_router(
 
     @router.get("/ruok/_partials/dashboard-trends-data")
     async def partial_dashboard_trends_data(
-        hours: float = Query(1.0, ge=0.5, le=168.0),
+        hours: float = Query(1.0, ge=TREND_HOURS_MIN, le=TREND_HOURS_MAX),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> list[dict[str, Any]]:
         """JSON data for dashboard trend charts.
@@ -720,29 +917,28 @@ def create_webui_router(
         plugin: str = "",
         after: str = "",
         before: str = "",
+        page: int = 1,
+        page_size: int = SESSION_PAGE_SIZE_DEFAULT,
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            first_seen_after = parse_filter_datetime(after) if after else None
-            first_seen_before = parse_filter_datetime(before) if before else None
-            sessions = list_sessions(
-                data_dir,
-                status=status if status else None,
-                module_name=module if module else None,
-                search=search if search else None,
-                first_seen_after=first_seen_after,
-                first_seen_before=first_seen_before,
-                plugin_name=plugin if plugin else None,
+            context = _session_list_context(
+                status=status,
+                search=search,
+                module=module,
+                plugin=plugin,
+                after=after,
+                before=before,
+                page=page,
+                page_size=page_size,
             )
-            stats = get_session_stats(data_dir)
+            query = context["query_for"](page=context["page"])
+            # Keep the address bar in sync so reload/back restore filters and page.
+            push_url = "/ruok/sessions" + (f"?{query}" if query else "")
             return render(
                 "_session_container.html.jinja2",
-                sessions=sessions,
-                stats=stats,
-                reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                **context,
+                headers={"HX-Push-Url": push_url},
             )
         except ValueError:
             return _error_html("Invalid ISO datetime filter", status_code=400)
@@ -817,17 +1013,11 @@ def create_webui_router(
                     },
                 )
             # Refresh session list
-            sessions = list_sessions(data_dir)
-            stats = get_session_stats(data_dir)
+            context = _session_list_context()
             # Return session-content partial (stats + count + list)
             return render(
                 "_session_container.html.jinja2",
-                sessions=sessions,
-                stats=stats,
-                reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                **context,
                 headers={
                     "HX-Trigger": ('{"toast":"Session created","toastType":"success"}')
                 },
@@ -1115,6 +1305,7 @@ def create_webui_router(
     async def action_confirm(
         session_id: str,
         affected_plugins: list[str] = Form(default_factory=list),
+        view: str = Query(""),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
@@ -1122,8 +1313,6 @@ def create_webui_router(
         try:
             confirm_session_plugins(data_dir, config, session_id, affected_plugins)
             s = get_session(data_dir, session_id)
-            if s is None:
-                raise ValueError("Session not found after update")
         except SessionPluginValidationError as exc:
             return _error_html(str(exc))
         except Exception as exc:
@@ -1133,30 +1322,20 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        return render(
-            "_session_card.html.jinja2",
-            s=s,
-            reporter_display=_reporter_display_factory(auth.list_users()),
-            session_plugin_options=lambda module_name: _module_plugin_options(
-                data_dir, config, module_name
-            ),
-            headers={
-                "HX-Trigger": ('{"toast":"Session confirmed","toastType":"success"}')
-            },
-        )
+        if s is None:
+            return _missing_session_response()
+        return _render_session_action(s, view, "Session confirmed", "success")
 
     @router.post("/ruok/_actions/solve/{session_id}")
     async def action_solve(
         session_id: str,
+        view: str = Query(""),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
         try:
-            update_session(data_dir, session_id, {"status": "solved"})
-            s = get_session(data_dir, session_id)
-            if s is None:
-                raise ValueError("Session not found after update")
+            s = update_session(data_dir, session_id, {"status": "solved"})
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_solve {session_id}", data_dir)
             return HTMLResponse(
@@ -1164,30 +1343,20 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        return render(
-            "_session_card.html.jinja2",
-            s=s,
-            reporter_display=_reporter_display_factory(auth.list_users()),
-            session_plugin_options=lambda module_name: _module_plugin_options(
-                data_dir, config, module_name
-            ),
-            headers={
-                "HX-Trigger": ('{"toast":"Session resolved","toastType":"success"}')
-            },
-        )
+        if s is None:
+            return _missing_session_response()
+        return _render_session_action(s, view, "Session resolved", "success")
 
     @router.post("/ruok/_actions/ignore/{session_id}")
     async def action_ignore(
         session_id: str,
+        view: str = Query(""),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
         try:
-            update_session(data_dir, session_id, {"status": "ignored"})
-            s = get_session(data_dir, session_id)
-            if s is None:
-                raise ValueError("Session not found after update")
+            s = update_session(data_dir, session_id, {"status": "ignored"})
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_ignore {session_id}", data_dir)
             return HTMLResponse(
@@ -1195,15 +1364,9 @@ def create_webui_router(
                 f"❌ 操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        return render(
-            "_session_card.html.jinja2",
-            s=s,
-            reporter_display=_reporter_display_factory(auth.list_users()),
-            session_plugin_options=lambda module_name: _module_plugin_options(
-                data_dir, config, module_name
-            ),
-            headers={"HX-Trigger": ('{"toast":"Session ignored","toastType":"info"}')},
-        )
+        if s is None:
+            return _missing_session_response()
+        return _render_session_action(s, view, "Session ignored", "info")
 
     @router.post("/ruok/_actions/session-note/{session_id}")
     async def action_session_note(
@@ -1214,7 +1377,9 @@ def create_webui_router(
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
         try:
-            update_session(data_dir, session_id, {"developer_notes": developer_notes})
+            saved = update_session(
+                data_dir, session_id, {"developer_notes": developer_notes}
+            )
         except Exception as exc:
             sid = _handle_ruok_error(exc, f"action_session_note {session_id}", data_dir)
             return HTMLResponse(
@@ -1222,6 +1387,8 @@ def create_webui_router(
                 f"❌ 保存失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
+        if saved is None:
+            return _missing_session_response()
         return HTMLResponse(
             f'<div id="notes-area">'
             f'<form hx-post="/ruok/_actions/session-note/{session_id}" '
@@ -1261,7 +1428,8 @@ def create_webui_router(
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
-        unlink_session(data_dir, session_id)
+        if not unlink_session(data_dir, session_id):
+            return _missing_session_response()
         return HTMLResponse("<p>已解除关联</p>")
 
     @router.post("/ruok/_actions/link/{session_id}/remove/{other_id}")
@@ -1272,7 +1440,8 @@ def create_webui_router(
     ) -> HTMLResponse:
         if not config.session_enabled:
             return HTMLResponse("Session system disabled", status_code=403)
-        unlink_session(data_dir, other_id)
+        if not unlink_session(data_dir, other_id):
+            return _missing_session_response()
         linked = get_linked_sessions(data_dir, session_id)
         return render(
             "_linked_list.html.jinja2",
@@ -1379,11 +1548,12 @@ def create_webui_router(
                 f"❌ 删除失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        if redirect_to:
+        if redirect_to.strip():
             return JSONResponse(
                 {"ok": True},
                 headers={
-                    "HX-Redirect": redirect_to,
+                    "HX-Redirect": _safe_redirect_target(redirect_to, "/ruok/modules")
+                    or "/ruok/modules",
                     "HX-Trigger": '{"toast":"Module deleted","toastType":"info"}',
                 },
             )
@@ -1440,47 +1610,57 @@ def create_webui_router(
         name: str = Form(...),
         original_name: str = Form(""),
         enabled: bool = Form(False),
-        on_status: str = Form("pending,unsolved"),
+        on_status: list[str] = Form(default_factory=list),
         on_module: str = Form(""),
         selected_modules: list[str] = Form(default_factory=list),
         cooldown_minutes: float = Form(60.0),
-        channels: str = Form("bot_dm"),
+        channels: list[str] = Form(default_factory=list),
         webhook_url: str = Form(""),
         return_to_detail: bool = Form(False),
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse | JSONResponse:
         """Create or update a notification rule."""
+        statuses = _split_multi_values(on_status)
+        channel_list = _split_multi_values(channels)
+        if not statuses:
+            return _error_html("请至少选择一个触发状态")
+        if not channel_list:
+            return _error_html("请至少选择一个通知通道")
         try:
-            rules = _load_notification_rules()
-            normalized_name = name.strip()
-            normalized_original = original_name.strip()
-            if not normalized_name:
-                return HTMLResponse(
-                    '<p style="color:var(--pico-del-color);">❌ 规则名称不能为空</p>',
-                    status_code=400,
-                )
-            if normalized_original and normalized_original != normalized_name:
-                if any(r.name == normalized_name for r in rules):
+            from ..collectors.notifications import locked_rules
+
+            with locked_rules(data_dir):
+                rules = _load_notification_rules()
+                normalized_name = name.strip()
+                normalized_original = original_name.strip()
+                if not normalized_name:
                     return HTMLResponse(
-                        f'<p style="color:var(--pico-del-color);">'
-                        f'❌ 规则 "{normalized_name}" 已存在</p>',
+                        '<p style="color:var(--pico-del-color);">'
+                        "❌ 规则名称不能为空</p>",
                         status_code=400,
                     )
-            rule = NotificationRule(
-                name=normalized_name,
-                enabled=enabled,
-                on_status=[s.strip() for s in on_status.split(",") if s.strip()],
-                on_module=_parse_form_values(selected_modules, on_module),
-                cooldown_minutes=cooldown_minutes,
-                channels=[c.strip() for c in channels.split(",") if c.strip()],
-                webhook_url=webhook_url or None,
-            )
-            replace_name = normalized_original or normalized_name
-            rules = [r for r in rules if r.name != replace_name]
-            if replace_name != normalized_name:
-                rules = [r for r in rules if r.name != normalized_name]
-            rules.append(rule)
-            _save_notification_rules(rules)
+                if normalized_original and normalized_original != normalized_name:
+                    if any(r.name == normalized_name for r in rules):
+                        return HTMLResponse(
+                            f'<p style="color:var(--pico-del-color);">'
+                            f'❌ 规则 "{normalized_name}" 已存在</p>',
+                            status_code=400,
+                        )
+                rule = NotificationRule(
+                    name=normalized_name,
+                    enabled=enabled,
+                    on_status=statuses,
+                    on_module=_parse_form_values(selected_modules, on_module),
+                    cooldown_minutes=cooldown_minutes,
+                    channels=channel_list,
+                    webhook_url=webhook_url or None,
+                )
+                replace_name = normalized_original or normalized_name
+                rules = [r for r in rules if r.name != replace_name]
+                if replace_name != normalized_name:
+                    rules = [r for r in rules if r.name != normalized_name]
+                rules.append(rule)
+                _save_notification_rules(rules)
         except Exception as exc:
             sid = _handle_ruok_error(exc, "action_notification_upsert", data_dir)
             return HTMLResponse(
@@ -1517,9 +1697,12 @@ def create_webui_router(
     ) -> HTMLResponse | JSONResponse:
         """Delete a notification rule by name."""
         try:
+            from ..collectors.notifications import locked_rules
+
             delete_name = name.strip()
-            rules = [r for r in _load_notification_rules() if r.name != delete_name]
-            _save_notification_rules(rules)
+            with locked_rules(data_dir):
+                rules = [r for r in _load_notification_rules() if r.name != delete_name]
+                _save_notification_rules(rules)
         except Exception as exc:
             sid = _handle_ruok_error(exc, "action_notification_delete", data_dir)
             return HTMLResponse(
@@ -1527,11 +1710,14 @@ def create_webui_router(
                 f"❌ 删除失败 [{type(exc).__name__}] → Session: {sid}</p>",
                 status_code=500,
             )
-        if redirect_to:
+        if redirect_to.strip():
             return JSONResponse(
                 {"ok": True},
                 headers={
-                    "HX-Redirect": redirect_to,
+                    "HX-Redirect": _safe_redirect_target(
+                        redirect_to, "/ruok/notifications"
+                    )
+                    or "/ruok/notifications",
                     "HX-Trigger": '{"toast":"Rule deleted","toastType":"info"}',
                 },
             )

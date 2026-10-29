@@ -4,32 +4,27 @@
 
 {% block content %}
 
-<article class="hero-banner {% if module.status == 'available' %}ok{% elif module.status == 'degraded' %}warn{% else %}error{% endif %}"
-         style="margin-bottom:1.5rem;color:#fff;text-shadow:0 0 12px rgba(255,255,255,0.25);">
-    <div style="display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
-        <span style="font-size:2em;line-height:1;">
-            {% if module.status == 'available' %}🟢
-            {% elif module.status == 'degraded' %}🟡
-            {% elif module.status == 'unavailable' %}🔴
-            {% else %}⚪{% endif %}
-        </span>
-        <div>
-            <h3 style="margin:0;color:#fff;text-shadow:0 0 12px rgba(255,255,255,0.3);">
-                {{ module.display_name or module.name }}
-            </h3>
-            <small style="opacity:0.65;">{{ module.name }} · {{ module.status | _status_label }}</small>
-        </div>
+<article class="hero-banner {% if module.status == 'available' %}ok{% elif module.status == 'degraded' %}warn{% elif module.status == 'unavailable' %}error{% endif %}">
+    <div class="status-bar__main">
+        <strong class="status-bar__title">{{ module.display_name or module.name }}</strong>
+        <span class="badge badge-{{ module.status | _status_tone }}">{{ module.status | _status_label }}</span>
+        <span class="status-bar__sub">{{ module.name }}</span>
     </div>
     {% if module.description %}
-    <p style="margin-top:0.75rem;color:#fff;opacity:0.9;text-shadow:0 0 8px rgba(255,255,255,0.2);text-align:left;">
-        {{ module.description }}
-    </p>
+    <p class="status-bar__desc">{{ module.description }}</p>
+    {% endif %}
+    {% if module.status_reasons %}
+    <ul class="status-bar__reasons">
+        {% for reason in module.status_reasons %}
+        <li>{{ reason }}</li>
+        {% endfor %}
+    </ul>
     {% endif %}
 </article>
 
 <!-- Actions -->
-<div class="ruok-button-row" style="margin-bottom:1.5rem;">
-    <a href="/ruok/modules" role="button" class="secondary outline ruok-button">← 返回模块列表</a>
+<div class="ruok-button-row" style="margin-bottom:0.9rem;">
+    <a href="/ruok/modules" role="button" class="secondary outline ruok-button-compact">← 返回模块列表</a>
     <form hx-post="/ruok/_actions/module-delete"
           hx-target="body"
           hx-swap="none"
@@ -42,29 +37,31 @@
 </div>
 
 <!-- Edit Module -->
-<h4>✏️ 编辑模块</h4>
 {% include "_module_form.html.jinja2" %}
 
 <!-- Linked Plugins -->
+<h4>关联插件</h4>
 {% if linked_plugins %}
-<h4>🔌 关联插件</h4>
-<div class="grid" style="margin-bottom:1.5rem;">
+<div class="table-scroll">
+<table>
+    <thead><tr><th>插件</th><th>健康提示</th><th>说明</th></tr></thead>
+    <tbody>
     {% for p in linked_plugins %}
-    <article style="padding:0.6rem 1rem;">
-        <strong>{{ p.name }}</strong>
-        <small style="float:right;opacity:0.7;">{{ p.health_hint }}</small>
-        {% if p.metadata and p.metadata.description %}
-        <p style="margin:0.25rem 0 0;font-size:0.85em;">{{ p.metadata.description }}</p>
-        {% endif %}
-    </article>
+    <tr>
+        <td><strong>{{ p.name }}</strong></td>
+        <td class="cell-muted">{{ p.health_hint }}</td>
+        <td>{{ p.metadata.description if p.metadata and p.metadata.description else '—' }}</td>
+    </tr>
     {% endfor %}
+    </tbody>
+</table>
 </div>
 {% else %}
-<p style="opacity:0.6;">⚠️ 未关联插件</p>
+<p class="muted-text">未关联插件</p>
 {% endif %}
 
 <!-- Sessions -->
-<h4>📋 Sessions ({{ sessions | length }})</h4>
+<h4>相关 Sessions ({{ sessions | length }})</h4>
 {% include "_sessions_list.html.jinja2" %}
 
 {% endblock %}

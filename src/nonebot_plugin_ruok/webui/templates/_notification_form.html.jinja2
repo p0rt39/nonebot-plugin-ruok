@@ -1,10 +1,13 @@
 {% set current_rule = rule | default(none) %}
-<details open style="margin-bottom:1.5rem;">
-    <summary>{% if current_rule %}✏️ 编辑规则{% else %}➕ 添加规则{% endif %}</summary>
+{% set status_choices = [('pending', '待确认'), ('unsolved', '未解决'), ('solved', '已解决'), ('ignored', '已忽略')] %}
+{% set channel_choices = [('bot_dm', 'Bot 私聊 SUPERUSERS'), ('webhook', 'Webhook')] %}
+{% set selected_statuses = current_rule.on_status if current_rule else ['pending', 'unsolved'] %}
+{% set selected_channels = current_rule.channels if current_rule else ['bot_dm'] %}
+<details class="form-panel"{% if current_rule %} open{% endif %}>
+    <summary>{% if current_rule %}编辑规则{% else %}+ 新建规则{% endif %}</summary>
     <form hx-post="/ruok/_actions/notification-upsert"
-          hx-target="#notifications-container"
-          hx-swap="outerHTML"
-          style="margin-top:1rem;">
+          {% if current_rule %}hx-target="#notification-edit-result" hx-swap="innerHTML"{% else %}hx-target="#notifications-container" hx-swap="outerHTML"{% endif %}
+          data-notification-form>
         {% if current_rule %}
         <input type="hidden" name="original_name" value="{{ current_rule.name }}">
         <input type="hidden" name="return_to_detail" value="true">
@@ -23,21 +26,27 @@
                        min="1" step="1">
             </label>
         </div>
-        <label>
-            触发状态 (逗号分隔)
-            <input type="text" name="on_status"
-                   value="{{ current_rule.on_status | join(',') if current_rule else 'pending,unsolved' }}"
-                   placeholder="pending, unsolved">
-        </label>
+        <fieldset>
+            <legend>触发状态</legend>
+            <div class="choice-group">
+                {% for value, label in status_choices %}
+                <label>
+                    <input type="checkbox" name="on_status" value="{{ value }}"
+                           {% if value in selected_statuses %}checked{% endif %}>
+                    {{ label }}
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
         <fieldset>
             <legend>适用模块 (不选择=全部)</legend>
             {% if all_modules %}
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.35rem 0.75rem;max-height:240px;overflow:auto;padding:0.65rem;border:1px solid var(--pico-muted-border-color);border-radius:var(--radius-sm);">
+            <div class="choice-group choice-group--grid">
                 {% for m in all_modules %}
-                <label style="display:flex;align-items:center;gap:0.45rem;margin:0;min-width:0;">
+                <label>
                     <input type="checkbox" name="selected_modules" value="{{ m.name }}"
                            {% if current_rule and m.name in current_rule.on_module %}checked{% endif %}>
-                    <span style="overflow-wrap:anywhere;">{{ m.display_name or m.name }}</span>
+                    <span>{{ m.display_name or m.name }}</span>
                 </label>
                 {% endfor %}
             </div>
@@ -50,27 +59,32 @@
             <textarea name="on_module" rows="2"
                       placeholder="weather, music">{{ extra_modules | default([]) | join(',') }}</textarea>
         </label>
-        <div class="grid">
-            <label>
-                通知通道 (逗号分隔)
-                <input type="text" name="channels"
-                       value="{{ current_rule.channels | join(',') if current_rule else 'bot_dm' }}"
-                       placeholder="bot_dm, webhook">
-            </label>
-            <label>
-                Webhook URL (可选)
-                <input type="url" name="webhook_url"
-                       value="{{ current_rule.webhook_url or '' if current_rule else '' }}"
-                       placeholder="https://hooks.example.com/...">
-            </label>
-        </div>
+        <fieldset>
+            <legend>通知通道</legend>
+            <div class="choice-group">
+                {% for value, label in channel_choices %}
+                <label>
+                    <input type="checkbox" name="channels" value="{{ value }}"
+                           {% if value in selected_channels %}checked{% endif %}
+                           {% if value == 'webhook' %}data-webhook-toggle{% endif %}>
+                    {{ label }}
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+        <label data-webhook-field {% if 'webhook' not in selected_channels %}hidden{% endif %}>
+            Webhook URL
+            <input type="url" name="webhook_url"
+                   value="{{ current_rule.webhook_url or '' if current_rule else '' }}"
+                   placeholder="https://hooks.example.com/...">
+        </label>
         <label>
-            <input type="checkbox" name="enabled"
+            <input type="checkbox" name="enabled" role="switch"
                    {% if current_rule is none or current_rule.enabled %}checked{% endif %}>
             启用
         </label>
         <div class="ruok-form-actions">
-            <button type="submit" class="ruok-button">💾 保存规则</button>
+            <button type="submit" class="ruok-button">保存规则</button>
             {% if current_rule %}
             <button type="button" class="outline secondary ruok-button"
                     hx-get="/ruok/_actions/notification-edit-form?{{ {'name': current_rule.name} | urlencode }}"
@@ -80,5 +94,7 @@
             </button>
             {% endif %}
         </div>
+        <div id="notification-edit-result" class="ruok-form-status" data-form-status
+             role="status" aria-live="polite"></div>
     </form>
 </details>

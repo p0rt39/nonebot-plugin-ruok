@@ -83,6 +83,10 @@ async def sse_event_generator(
     # Cached values from the last full status collection
     cached_overall: str = "unknown"
     cached_connections: dict[str, int] = {"online": 0, "total": 0}
+    # Collection health, so clients can distinguish "nothing wrong" from
+    # "the last collection failed and this payload is stale".
+    last_status_ok = True
+    last_status_at = datetime.now(timezone.utc)
     tick_count = _tick_count_from_ttl(config_ttl)
     session_q = event_bus_ref.subscribe("session_update")
 
@@ -176,6 +180,7 @@ async def sse_event_generator(
         async def _collect_status_background() -> None:
             """Collect full status in background, update cache on completion."""
             nonlocal cached_overall, cached_connections, _cached_status
+            nonlocal last_status_ok, last_status_at
             try:
                 status = await collect_status_fn()
                 cached_overall = status.overall
@@ -183,15 +188,32 @@ async def sse_event_generator(
                     "online": sum(1 for c in status.connections if c.connected),
                     "total": len(status.connections),
                 }
+                last_status_ok = True
+                last_status_at = status.timestamp
                 _cached_status = {
                     "overall": cached_overall,
                     "timestamp": status.timestamp.isoformat(),
                     "connections_online": cached_connections["online"],
                     "connections_total": cached_connections["total"],
                     "status_reasons": status.status_reasons,
+                    "collection_ok": True,
+                    "collected_at": status.timestamp.isoformat(),
                 }
             except Exception as exc:
+                last_status_ok = False
                 logger.warning(f"RUOK SSE: status collection failed: {exc}")
+                # Report the failed collection once, keeping the last known
+                # overall value so the client can show stale data explicitly.
+                _cached_status = {
+                    "overall": cached_overall,
+                    "timestamp": last_status_at.isoformat(),
+                    "connections_online": cached_connections["online"],
+                    "connections_total": cached_connections["total"],
+                    "status_reasons": [],
+                    "collection_ok": False,
+                    "collection_error": str(exc) or exc.__class__.__name__,
+                    "collected_at": last_status_at.isoformat(),
+                }
 
         while True:
             # Fire background status collection when due and not already running
@@ -221,6 +243,7 @@ async def sse_event_generator(
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "connections_online": cached_connections["online"],
                         "connections_total": cached_connections["total"],
+                        "collection_ok": last_status_ok,
                     },
                 )
                 ticks_since_metrics += 1

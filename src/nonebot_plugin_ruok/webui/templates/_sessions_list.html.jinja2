@@ -1,102 +1,18 @@
-<!-- HTMX partial: session list -->
+<!-- HTMX partial: Session list (rows share _session_card.html.jinja2) -->
+<div class="session-list">
 {% if sessions %}
-{% for s in sessions %}
-<article id="session-{{ s.session_id }}" class="animate-in">
-    <header>
-        <span class="status-dot status-{{ s.status }}"></span>
-        <strong>{{ s.session_id }}</strong>
-        <small style="margin-left: auto;">
-            {{ s.source }} · {{ s.first_seen_at.astimezone().strftime('%m-%d %H:%M') }}
-        </small>
-    </header>
-
-    <div class="grid">
-        <div>
-            <p><strong>模块:</strong> {{ s.module_name }}</p>
-            <p><strong>状态:</strong>
-                <span class="badge badge-{% if s.status == 'solved' %}ok{% elif s.status in ('pending','unsolved') %}warn{% else %}error{% endif %}">
-                    {{ s.status | _status_label }}
-                </span>
-            </p>
-            {% if s.reporter.user_id %}
-            {% set reporter_label = reporter_display(s.reporter) if reporter_display is defined else s.reporter.user_id %}
-            <p><small>上报者: {{ reporter_label }}{% if s.reporter.group_id %} (群: {{ s.reporter.group_id }}){% endif %}</small></p>
-            {% endif %}
-        </div>
-        <div>
-            <p>{{ s.description[:300] }}{% if s.description|length > 300 %}...{% endif %}</p>
-            {% if s.affected_plugins %}
-            <p><small>影响插件: {{ s.affected_plugins | join(', ') }}</small></p>
-            {% endif %}
-        </div>
+    <div class="session-row session-row--head" aria-hidden="true">
+        <div>状态</div>
+        <div>Session</div>
+        <div>模块</div>
+        <div>摘要</div>
+        <div>最近发生</div>
+        <div></div>
     </div>
-
-    {% if s.link_group %}
-    <p><small>👥 关联组: <code>{{ s.link_group }}</code></small></p>
-    {% endif %}
-
-    {% if s.status in ('pending', 'unsolved') %}
-    <footer>
-        <div class="ruok-button-row--grid">
-            <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline ruok-button">
-                📋 详情
-            </a>
-            {% set plugin_options = session_plugin_options(s.module_name) if session_plugin_options is defined else [] %}
-            {% if s.status == 'pending' or plugin_options or s.affected_plugins %}
-            <form hx-post="/ruok/_actions/confirm/{{ s.session_id }}"
-                  hx-target="#session-{{ s.session_id }}"
-                  hx-swap="outerHTML"
-                  style="margin:0;">
-                {% if plugin_options %}
-                <details class="confirm-plugin-picker">
-                    <summary class="secondary outline ruok-button">
-                        {% if s.status == 'pending' %}✅ 确认{% else %}🧩 修改插件{% endif %}
-                    </summary>
-                    <div class="confirm-plugin-options">
-                        {% for plugin in plugin_options %}
-                        <label>
-                            <input type="checkbox" name="affected_plugins" value="{{ plugin }}"
-                                   {% if plugin in s.affected_plugins %}checked{% endif %}>
-                            {{ plugin }}
-                        </label>
-                        {% endfor %}
-                        <button type="submit" class="secondary outline ruok-button">
-                            {% if s.status == 'pending' %}确认 Session{% else %}保存插件关联{% endif %}
-                        </button>
-                    </div>
-                </details>
-                {% elif s.status == 'unsolved' and s.affected_plugins %}
-                <button type="submit" class="secondary outline">🧹 清空插件关联</button>
-                {% else %}
-                <button type="submit" class="secondary outline">✅ 确认</button>
-                {% endif %}
-            </form>
-            {% endif %}
-            <button class="secondary outline"
-                    hx-post="/ruok/_actions/solve/{{ s.session_id }}"
-                    hx-target="#session-{{ s.session_id }}"
-                    hx-swap="outerHTML">
-                🟢 解决
-            </button>
-            <button class="secondary outline ruok-button-danger"
-                    hx-post="/ruok/_actions/ignore/{{ s.session_id }}"
-                    hx-target="#session-{{ s.session_id }}"
-                    hx-swap="outerHTML">
-                ⚪ 忽略
-            </button>
-        </div>
-    </footer>
-    {% else %}
-    <footer>
-        <a href="/ruok/sessions/{{ s.session_id }}" role="button" class="secondary outline ruok-button ruok-button-full">
-            📋 查看详情
-        </a>
-    </footer>
-    {% endif %}
-</article>
-{% endfor %}
+    {% for s in sessions %}
+    {% include "_session_card.html.jinja2" %}
+    {% endfor %}
 {% else %}
-<article>
-    <p>🎉 没有匹配的 Session。</p>
-</article>
+    <p class="session-list__empty">没有匹配的 Session。</p>
 {% endif %}
+</div>

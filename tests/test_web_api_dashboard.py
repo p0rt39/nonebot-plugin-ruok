@@ -199,9 +199,109 @@ def test_dashboard_trends_partial_uses_webui_metrics_context(tmp_path: Path) -> 
 
     assert response.status_code == 200
     assert "fetch('/ruok/api/metrics/history?hours=1')" not in response.text
-    assert "/ruok/_partials/dashboard-trends-data?hours=1" in response.text
+    # The range is chosen at runtime, so the URL is built from a base path.
+    assert "'/ruok/_partials/dashboard-trends-data'" in response.text
+    assert "'?hours=' + encodeURIComponent(requestHours)" in response.text
     assert "var initialMetrics =" in response.text
     assert '"cpu_percent": 12.5' in response.text
+
+
+def test_dashboard_trends_expose_a_selectable_time_range(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    assert 'data-trend-hours="1"' in response.text
+    assert 'data-trend-hours="168"' in response.text
+    assert 'role="group"' in response.text
+    assert 'aria-label="时间尺度"' in response.text
+    assert 'aria-pressed="true"' in response.text
+    assert "[data-trend-hours]" in response.text
+    # History must survive live SSE samples instead of being trimmed away.
+    assert "MAX_LIVE_POINTS" in response.text
+    # Loading, empty and failure states are surfaced to the user.
+    assert "暂无历史数据" in response.text
+    assert "无法加载趋势数据" in response.text
+    assert 'data-trend-error role="alert"' in response.text
+    assert 'data-trend-status role="status"' in response.text
+
+
+def test_dashboard_trends_honor_a_requested_range(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import MetricPoint
+    from nonebot_plugin_ruok.collector import MetricsStore
+
+    now = datetime.now(timezone.utc)
+    MetricsStore.append(
+        tmp_path,
+        MetricPoint(ts=(now - timedelta(hours=5)).isoformat(), cpu_percent=11.0),
+    )
+    MetricsStore.append(
+        tmp_path,
+        MetricPoint(ts=now.isoformat(), cpu_percent=88.0),
+    )
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    short = client.get("/ruok?_partial=dashboard-trends&trend_hours=1")
+    long = client.get("/ruok?_partial=dashboard-trends&trend_hours=6")
+
+    assert short.status_code == 200
+    assert long.status_code == 200
+    # The rendered range seeds the initial inline series and the selected button.
+    assert "var initialHours = 1;" in short.text
+    assert "var initialHours = 6;" in long.text
+    assert '"cpu_percent": 88.0' in short.text
+    assert '"cpu_percent": 11.0' not in short.text
+    assert '"cpu_percent": 11.0' in long.text
+
+
+def test_dashboard_trends_reject_out_of_range_hours(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    assert (
+        client.get("/ruok/_partials/dashboard-trends-data?hours=0").status_code == 422
+    )
+    assert (
+        client.get("/ruok/_partials/dashboard-trends-data?hours=169").status_code == 422
+    )
+    assert (
+        client.get("/ruok?_partial=dashboard-trends&trend_hours=0").status_code == 422
+    )
+
+
+def test_trend_history_is_downsampled_for_long_ranges(tmp_path: Path) -> None:
+    now = datetime.now(timezone.utc)
+    metrics_dir = tmp_path / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    points = [
+        {
+            "ts": (now - timedelta(seconds=index * 10)).isoformat(),
+            "cpu_percent": float(index % 100),
+            "memory_percent": 50.0,
+            "sessions_unsolved": 3,
+        }
+        for index in range(4000)
+    ]
+    today_file = metrics_dir / f"{now.date().isoformat()}.json"
+    today_file.write_text(json.dumps(points), encoding="utf-8")
+
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    hourly = client.get("/ruok/_partials/dashboard-trends-data?hours=1")
+    weekly = client.get("/ruok/_partials/dashboard-trends-data?hours=168")
+
+    assert hourly.status_code == 200
+    assert weekly.status_code == 200
+    # A day-plus range must stay chartable rather than returning every sample.
+    assert 0 < len(weekly.json()) <= 360
+    assert len(hourly.json()) > len(weekly.json())
+    assert len({row["ts"] for row in weekly.json()}) == len(weekly.json())
+    # Counter fields carry forward instead of being averaged.
+    assert all(row["sessions_unsolved"] == 3 for row in weekly.json())
 
 
 def test_dashboard_trends_data_uses_webui_auth_not_api_key(tmp_path: Path) -> None:
@@ -253,3 +353,134 @@ def test_dashboard_sse_host_metadata_uses_text_content_rendering(
     assert "diskRow.textContent" in response.text
     assert "processRow.textContent" in response.text
     assert "document.createElement('div')" in response.text
+
+
+def test_dashboard_hero_reports_connection_context_and_reasons(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    assert 'id="live-status"' in response.text
+    assert 'data-state="connecting"' in response.text
+    assert 'role="status"' in response.text
+    assert 'aria-live="polite"' in response.text
+    # The hero states how many connections are online and when it collected.
+    assert "连接 0/0 在线" in response.text
+    assert "未报告异常原因" in response.text or "status-bar__reasons" in response.text
+
+
+def test_dashboard_marks_pollable_panels_for_refresh_feedback(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    for panel in ("dashboard-disk", "dashboard-connections", "dashboard-stats"):
+        assert f'id="{panel}" class="panel"' in response.text
+    assert "htmx:beforeRequest" in response.text
+    assert "htmx:afterRequest" in response.text
+    assert "panel-note--error" in response.text
+
+
+def test_dashboard_pauses_stream_when_tab_hidden(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    assert "visibilitychange" in response.text
+    assert "标签页不活跃，实时更新已暂停" in response.text
+    assert "ruokTrendRefreshNow" in response.text
+
+
+def test_dashboard_stats_partial_destroys_replaced_chart(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok?_partial=dashboard-stats")
+
+    assert response.status_code == 200
+    # The partial re-renders on every Session change, so it must release the
+    # previous Chart.js instance bound to the replaced canvas.
+    assert "window.ruokStatsChart.canvas !== ctx" in response.text
+    assert ".destroy()" in response.text
+
+
+def test_theme_prefers_system_scheme_without_a_stored_choice(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    # The pre-paint script must consult the OS setting and keep the
+    # color-scheme meta in sync with the resolved theme.
+    assert "prefers-color-scheme: dark" in response.text
+    assert 'name="color-scheme"' in response.text
+    assert ".setAttribute('data-theme', t)" in response.text
+    # An explicit choice still wins and is persisted.
+    assert "localStorage.setItem('ruok-theme', t)" in response.text
+
+
+def test_theme_toggle_reports_pressed_state(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules")
+
+    assert response.status_code == 200
+    assert 'id="theme-toggle"' in response.text
+    assert "aria-pressed" in response.text
+
+
+def test_metric_tiles_are_keyboard_operable(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    # Tiles expose button semantics and announce their expanded state.
+    assert "data-expandable" in response.text
+    assert 'role="button"' in response.text
+    assert 'aria-expanded="false"' in response.text
+    # The inline onclick handler is replaced by the shared keyboard handler.
+    assert "onclick=\"this.classList.toggle('expanded')\"" not in response.text
+    assert 'aria-label="内存详情"' in response.text
+    assert "toggleTile" in response.text
+    # role="button" inherits Pico's filled button styling, so the card surface
+    # and text colour must be restored explicitly.
+    assert '.sys-tile[role="button"]' in response.text
+    assert "--ruok-text:" in response.text
+
+
+def test_decorative_status_dots_are_hidden_from_assistive_tech(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collector import create_session
+
+    config = _webui_config()
+    create_session(
+        tmp_path,
+        module_name="ruok",
+        description="a11y check",
+        reporter=ReporterInfo(type="user", user_id="1", platform="webui"),
+    )
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    dashboard = client.get("/ruok")
+    users = client.get("/ruok/users")
+
+    assert dashboard.status_code == 200
+    assert '<span class="status-dot status-unavailable" aria-hidden="true">' in (
+        dashboard.text
+    )
+    # Screen-reader-only text carries the state that the dot only colours.
+    assert "visually-hidden" in dashboard.text
+    assert users.status_code == 200

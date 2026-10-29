@@ -60,3 +60,46 @@ def test_sse_tick_count_rejects_non_finite_values(cache_ttl: float) -> None:
 
     with pytest.raises(ValueError, match="finite"):
         _tick_count_from_ttl(cache_ttl)
+
+
+async def test_sse_reports_collection_failure_with_last_known_state() -> None:
+    """A failed collection must be visible to clients, not silently stale."""
+    import json
+    from datetime import datetime, timezone
+
+    from nonebot_plugin_ruok.webui.sse import EventBus, sse_event_generator
+
+    class _Status:
+        def __init__(self) -> None:
+            self.overall = "degraded"
+            self.timestamp = datetime.now(timezone.utc)
+            self.connections: list[object] = []
+            self.status_reasons = ["degraded for test"]
+
+    calls = {"count": 0}
+
+    async def collect():
+        calls["count"] += 1
+        if calls["count"] > 1:
+            raise RuntimeError("collector exploded")
+        return _Status()
+
+    events: list[tuple[str, dict]] = []
+    generator = sse_event_generator(0.5, collect, EventBus())
+    try:
+        async for chunk in generator:
+            name, payload = chunk.strip().split("\n", 1)
+            events.append((name.removeprefix("event: "), json.loads(payload[6:])))
+            if len([e for e in events if e[0] == "status"]) >= 2:
+                break
+    finally:
+        await generator.aclose()
+
+    statuses = [payload for name, payload in events if name == "status"]
+    assert statuses[0]["collection_ok"] is True
+    assert statuses[0]["overall"] == "degraded"
+    # The failure keeps the last known overall value and flags itself.
+    assert statuses[1]["collection_ok"] is False
+    assert statuses[1]["overall"] == "degraded"
+    assert "collector exploded" in statuses[1]["collection_error"]
+    assert statuses[1]["timestamp"] == statuses[0]["timestamp"]

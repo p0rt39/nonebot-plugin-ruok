@@ -1,4 +1,26 @@
-<!-- CPU + Memory trend charts (last 1 hour) -->
+<!-- CPU + Memory trend charts with a selectable time range -->
+{% set trend_ranges = [
+    {"hours": 1, "label": "1 小时"},
+    {"hours": 6, "label": "6 小时"},
+    {"hours": 24, "label": "24 小时"},
+    {"hours": 72, "label": "3 天"},
+    {"hours": 168, "label": "7 天"},
+] %}
+<div class="trend-toolbar">
+    <div class="trend-range" role="group" aria-label="时间尺度" data-trend-range>
+        {% for option in trend_ranges %}
+        <button type="button" class="trend-range__btn"
+                data-trend-hours="{{ option.hours }}"
+                aria-pressed="{{ 'true' if option.hours == 1 else 'false' }}">
+            {{ option.label }}
+        </button>
+        {% endfor %}
+    </div>
+    <p class="trend-status" data-trend-status role="status" aria-live="polite">
+        显示最近 1 小时（每 10 秒一个采样点）
+    </p>
+</div>
+<p class="panel-note panel-note--error" data-trend-error role="alert" hidden></p>
 <div class="grid">
     <article>
         <h4 style="margin-bottom:0.5rem;">CPU</h4>
@@ -17,13 +39,15 @@
 </div>
 <script>
 (function() {
-    var DATA_URL = '/ruok/_partials/dashboard-trends-data?hours=1';
-    var MAX_POINTS = 240;
+    var DATA_URL = '/ruok/_partials/dashboard-trends-data';
+    var DEFAULT_HOURS = 1;
+    // Live SSE samples append to the loaded window; they must not evict the
+    // history the user asked for, so keep a separate cap for them.
+    var MAX_LIVE_POINTS = 120;
+    var initialHours = {{ metrics_history_hours | default(1) | int }};
     var initialMetrics = {{ metrics_history | default([]) | tojson }};
     var cpuCanvas = document.getElementById('chart-cpu');
     var memCanvas = document.getElementById('chart-memory');
-    var cpuChart = null;
-    var memChart = null;
 
     if (!cpuCanvas && !memCanvas) return;
     if (typeof Chart === 'undefined') return;
@@ -37,6 +61,9 @@
     if (window.ruokTrendResizeListener) {
         window.removeEventListener('resize', window.ruokTrendResizeListener);
     }
+    if (window.ruokTrendRangeListener) {
+        document.removeEventListener('click', window.ruokTrendRangeListener);
+    }
     if (window.ruokTrendCharts) {
         if (window.ruokTrendCharts.cpu &&
                 window.ruokTrendCharts.cpu.canvas !== cpuCanvas) {
@@ -48,22 +75,61 @@
         }
     }
 
+    var hours = Number(initialHours) || DEFAULT_HOURS;
+    var inFlight = null;
+    var requestSeq = 0;
+
     function normalizeMetrics(metrics) {
         if (!Array.isArray(metrics)) return [];
-        return metrics.filter(function(m) { return m && m.ts; }).slice(-MAX_POINTS);
+        return metrics.filter(function(m) { return m && m.ts; });
+    }
+
+    function formatTs(ts) {
+        var d = new Date(ts);
+        if (isNaN(d.getTime())) return '';
+        if (hours >= 72) {
+            return (d.getMonth() + 1) + '/' + d.getDate() + ' ' +
+                pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+        }
+        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+
+    function pad2(n) { return String(n).padStart(2, '0'); }
+
+    function fullTs(ts) {
+        var d = new Date(ts);
+        if (isNaN(d.getTime())) return '';
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+            ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' +
+            pad2(d.getSeconds());
     }
 
     function labelsFrom(metrics) {
-        return metrics.map(function(m) {
-            return new Date(m.ts).toLocaleTimeString('zh-CN',
-                {hour:'2-digit', minute:'2-digit'});
-        });
+        return metrics.map(function(m) { return formatTs(m.ts); });
     }
 
     function valuesFrom(metrics, key) {
         return metrics.map(function(m) {
             return m[key] == null ? null : m[key];
         });
+    }
+
+    var RANGE_LABELS = {
+        1: '1 小时', 6: '6 小时', 24: '24 小时', 72: '3 天', 168: '7 天'
+    };
+
+    function rangeLabel(value) {
+        return RANGE_LABELS[value] || (value + ' 小时');
+    }
+
+    // Live SSE samples keep arriving even with no stored history, so report the
+    // absence of stored history instead of pretending the live points are one.
+    function describeRange(totalCount, historyCount) {
+        var name = rangeLabel(hours);
+        if (!historyCount) {
+            return '最近 ' + name + '内暂无历史数据，图表仅显示本次会话的实时采样。';
+        }
+        return '显示最近 ' + name + '（' + totalCount + ' 个采样点）';
     }
 
     function makeOptions() {
@@ -74,7 +140,18 @@
             interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: { display: false },
-                tooltip: { enabled: true, mode: 'index', intersect: false },
+                tooltip: {
+                    enabled: true,
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        title: function(items) {
+                            var idx = items.length ? items[0].dataIndex : -1;
+                            var rows = currentRows();
+                            return idx >= 0 && rows[idx] ? fullTs(rows[idx].ts) : '';
+                        },
+                    },
+                },
             },
             scales: {
                 y: {
@@ -82,7 +159,7 @@
                     max: 100,
                     ticks: { callback: function(v) { return v + '%'; } },
                 },
-                x: { ticks: { maxTicksLimit: 8 } },
+                x: { ticks: { maxTicksLimit: 8, autoSkip: true } },
             },
             animation: { duration: 200 },
         };
@@ -119,8 +196,37 @@
         });
     }
 
-    function renderMetrics(metrics) {
-        var rows = normalizeMetrics(metrics);
+    // ── Status + error surface ──
+    var statusEl = document.querySelector('[data-trend-status]');
+    var errorEl = document.querySelector('[data-trend-error]');
+
+    function setStatus(text) {
+        if (statusEl) statusEl.textContent = text;
+    }
+
+    function setError(text) {
+        if (!errorEl) return;
+        if (text) {
+            errorEl.textContent = text;
+            errorEl.hidden = false;
+        } else {
+            errorEl.textContent = '';
+            errorEl.hidden = true;
+        }
+    }
+
+    // ── Render ──
+    // The fetched window is kept whole; live samples accumulate beside it and
+    // are capped separately so they can never trim the loaded history away.
+    var historyRows = [];
+    var liveRows = [];
+
+    function currentRows() {
+        return historyRows.concat(liveRows);
+    }
+
+    function renderRows() {
+        var rows = currentRows();
         var labels = labelsFrom(rows);
 
         if (cpuChart) {
@@ -134,37 +240,85 @@
             memChart.update('none');
         }
         resizeCharts();
+        return rows.length;
+    }
+
+    function renderMetrics(metrics) {
+        historyRows = normalizeMetrics(metrics);
+        liveRows = [];
+        var total = renderRows();
+        setStatus(describeRange(total, historyRows.length));
     }
 
     function appendPoint(ts, cpu, mem) {
-        var label = new Date(ts).toLocaleTimeString('zh-CN',
-            {hour:'2-digit', minute:'2-digit'});
+        liveRows.push({ ts: ts, cpu_percent: cpu, memory_percent: mem });
+        while (liveRows.length > MAX_LIVE_POINTS) liveRows.shift();
+        var total = renderRows();
+        var text = describeRange(total, historyRows.length);
+        setStatus(historyRows.length ? text + '，实时更新中' : text);
+    }
 
-        [
-            { chart: cpuChart, value: cpu },
-            { chart: memChart, value: mem },
-        ].forEach(function(item) {
-            if (!item.chart) return;
-            item.chart.data.labels.push(label);
-            item.chart.data.datasets[0].data.push(
-                item.value == null ? null : item.value
-            );
-            if (item.chart.data.labels.length > MAX_POINTS) {
-                item.chart.data.labels.shift();
-                item.chart.data.datasets[0].data.shift();
-            }
-            item.chart.update('none');
-        });
+    // ── Data loading ──
+    // Every load carries a sequence number so a slow response for an abandoned
+    // range cannot overwrite the range the user is actually looking at.
+    function loadRange() {
+        requestSeq += 1;
+        var seq = requestSeq;
+        var requestHours = hours;
+        setError('');
+        setStatus('正在加载最近 ' + rangeLabel(requestHours) + '…');
+        return fetch(DATA_URL + '?hours=' + encodeURIComponent(requestHours), {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store',
+        })
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('趋势数据请求失败 HTTP ' + response.status);
+                }
+                return response.json();
+            })
+            .then(function(metrics) {
+                if (seq !== requestSeq) return;
+                renderMetrics(metrics);
+            })
+            .catch(function(err) {
+                if (seq !== requestSeq) return;
+                setError('无法加载趋势数据，图表显示的是上一次成功加载的结果。');
+                setStatus('趋势数据加载失败。');
+                if (window.console && console.warn) {
+                    console.warn('[RUOK] trend load failed', err);
+                }
+            });
     }
 
     function refreshHistory() {
-        fetch(DATA_URL, { headers: { Accept: 'application/json' }, cache: 'no-store' })
-            .then(function(response) {
-                if (!response.ok) throw new Error('Trend data HTTP ' + response.status);
-                return response.json();
-            })
-            .then(renderMetrics)
-            .catch(function() { /* trend refresh is best-effort */ });
+        var request = loadRange();
+        inFlight = request;
+        var clear = function() {
+            if (inFlight === request) inFlight = null;
+        };
+        request.then(clear, clear);
+        return request;
+    }
+
+    function selectRange(nextHours) {
+        hours = nextHours;
+        // Abandon any in-flight load and clear immediately, so the chart never
+        // shows the previous range's curve labelled as the new one.
+        requestSeq += 1;
+        historyRows = [];
+        liveRows = [];
+        updateRangeButtons();
+        renderRows();
+        refreshHistory();
+    }
+
+    function updateRangeButtons() {
+        var buttons = document.querySelectorAll('[data-trend-hours]');
+        Array.prototype.forEach.call(buttons, function(btn) {
+            var value = Number(btn.getAttribute('data-trend-hours'));
+            btn.setAttribute('aria-pressed', value === hours ? 'true' : 'false');
+        });
     }
 
     cpuChart = ensureChart(
@@ -180,7 +334,20 @@
         'rgba(17,153,142,0.1)'
     );
     window.ruokTrendCharts = { cpu: cpuChart, mem: memChart };
+
+    // Paint whatever the server already rendered, so the panel is never blank
+    // on first load, then load the selected range.
     renderMetrics(initialMetrics);
+    updateRangeButtons();
+
+    window.ruokTrendRangeListener = function(e) {
+        var btn = e.target.closest && e.target.closest('[data-trend-hours]');
+        if (!btn) return;
+        var next = Number(btn.getAttribute('data-trend-hours'));
+        if (!next || next === hours) return;
+        selectRange(next);
+    };
+    document.addEventListener('click', window.ruokTrendRangeListener);
 
     window.ruokTrendMetricsListener = function(e) {
         var m = e.detail || {};
@@ -190,6 +357,18 @@
 
     window.ruokTrendResizeListener = resizeCharts;
     window.addEventListener('resize', window.ruokTrendResizeListener);
-    window.ruokTrendRefreshTimer = window.setInterval(refreshHistory, 30000);
+    // Refresh on the same cadence the status loop collects history points.
+    window.ruokTrendRefreshTimer = window.setInterval(function() {
+        // The panel can be replaced or removed; stop polling once it is gone.
+        if (!cpuCanvas.isConnected) {
+            window.clearInterval(window.ruokTrendRefreshTimer);
+            return;
+        }
+        // Live samples already cover the newest minute; only refill the window
+        // once the previous load has settled.
+        if (!inFlight) refreshHistory();
+    }, 60000);
+    // Exposed so the dashboard can refetch once when the tab becomes visible.
+    window.ruokTrendRefreshNow = refreshHistory;
 })();
 </script>

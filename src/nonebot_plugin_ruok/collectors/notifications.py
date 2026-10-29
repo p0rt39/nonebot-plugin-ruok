@@ -7,6 +7,8 @@ import asyncio
 from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
+from contextlib import contextmanager
+from collections.abc import Iterator
 
 import httpx
 from nonebot import logger, get_driver
@@ -42,9 +44,25 @@ def _default_rule() -> NotificationRule:
     )
 
 
+def _rules_path(data_dir: Path) -> Path:
+    return data_dir / "notification_rules.json"
+
+
+@contextmanager
+def locked_rules(data_dir: Path) -> Iterator[None]:
+    """Hold the process-local rules lock across a read/modify/write sequence.
+
+    Callers that replace the whole rule list (the WebUI upsert and delete
+    actions) must wrap their load-then-save span in this so concurrent
+    management requests cannot overwrite each other.
+    """
+    with locked_file(_rules_path(data_dir)):
+        yield
+
+
 def _load_rules(data_dir: Path) -> list[NotificationRule]:
     """Load persisted notification rules, creating a default rule if needed."""
-    rules_file = data_dir / "notification_rules.json"
+    rules_file = _rules_path(data_dir)
     file_rules: list[dict[str, Any]] = []
     if rules_file.exists():
         try:
@@ -66,22 +84,21 @@ def _load_rules(data_dir: Path) -> list[NotificationRule]:
     if not rules:
         default = _default_rule()
         rules.append(default)
-        _save_rules(data_dir, rules)
+        with locked_rules(data_dir):
+            _save_rules(data_dir, rules)
 
     return rules
 
 
 def _save_rules(data_dir: Path, rules: list[NotificationRule]) -> None:
-    rules_file = data_dir / "notification_rules.json"
-    rules_file.parent.mkdir(parents=True, exist_ok=True)
-    rules_file.write_text(
-        json.dumps(
-            [r.model_dump(mode="json") for r in rules],
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    rules_file = _rules_path(data_dir)
+    content = json.dumps(
+        [r.model_dump(mode="json") for r in rules],
+        indent=2,
+        ensure_ascii=False,
     )
+    with locked_rules(data_dir):
+        atomic_write_text(rules_file, content)
 
 
 # ────────────────────────────────

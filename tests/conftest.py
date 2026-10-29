@@ -1,4 +1,8 @@
 import os
+import json
+import atexit
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -10,6 +14,16 @@ if Path(".env.dev").exists():
     os.environ["ENVIRONMENT"] = "dev"
 else:
     os.environ["ENVIRONMENT"] = "test"
+
+# Point the plugin data directory at a throwaway location before NoneBot loads
+# the plugin.  ``.env.test`` sets ``LOCALSTORE_USE_CWD=true``, which otherwise
+# resolves to the repository's ``data/`` directory and lets local runtime state
+# (leftover automatic Sessions, module status) decide test outcomes.
+_TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="ruok-test-data-"))
+atexit.register(shutil.rmtree, _TEST_DATA_DIR, True)
+os.environ["LOCALSTORE_PLUGIN_DATA_DIR"] = json.dumps(
+    {"nonebot_plugin_ruok": str(_TEST_DATA_DIR)}
+)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]):

@@ -9,11 +9,11 @@
     {% include "_dashboard_hero.html.jinja2" %}
 </div>
 
-<h3>📦 模块状态</h3>
+<h3>模块状态</h3>
 {% set module_links = false %}
 {% include "_modules_table.html.jinja2" %}
 
-<h3>📝 手动上报</h3>
+<h3>手动上报</h3>
 {% if current_user.is_bound %}
 <article>
     <p>
@@ -43,6 +43,7 @@
             <textarea name="description" rows="3" required placeholder="详细描述你遇到的问题..."></textarea>
         </label>
         <button type="submit">提交上报</button>
+        <p class="ruok-form-status" data-form-status role="status" aria-live="polite"></p>
     </form>
 </article>
 {% else %}
@@ -68,7 +69,7 @@
 </article>
 {% endif %}
 
-<h3>📋 我的上报</h3>
+<h3>我的上报</h3>
 {% include "_user_sessions.html.jinja2" %}
 
 {% endblock %}
