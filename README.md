@@ -602,12 +602,12 @@ src/nonebot_plugin_ruok/
 uv sync --all-groups
 ```
 
-常用检查：
+常用检查（先执行上面的 `uv sync --all-groups`；`uvx basedpyright` 自带工具，但仍按 `.venv` 解析导入）：
 
 ```powershell
 uv run ruff check .
 uv run ruff format --check .
-uv run pyright
+uvx basedpyright==1.40.0
 uv run pytest
 ```
 

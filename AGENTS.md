@@ -24,15 +24,17 @@
 实现类改动遵循以下顺序，除非用户明确收窄任务范围：
 
 ```text
-modify -> ruff -> pyright -> focused pytest -> (full pytest) -> [本地] 同步测试环境 -> git commit -s
+modify -> ruff -> basedpyright -> focused pytest -> (full pytest) -> [本地] 同步测试环境 -> git commit -s
 ```
 
-- 依次执行 `uv run ruff check .`、`uv run ruff format --check .`，再做类型检查：本地用 `uv run pyright`；
-   CI 对齐用 `uvx basedpyright==1.40.0`。修复全部报告项。
+- 依次执行 `uv run ruff check .`、`uv run ruff format --check .`，再做类型检查：`uvx basedpyright==1.40.0`
+  （与 CI 同一命令与版本）。`uvx` 自带该工具本身，因此无需把它加进 dev 依赖；但它仍按 `.venv` 解析导入，
+  **运行前须先 `uv sync --all-groups`**，否则依赖未解析会报 `reportMissingImports`。配置读 `pyproject.toml`
+  的 `[tool.pyright]`。修复全部报告项。
 - 先跑变更区域的聚焦 pytest；改动涉及共享行为、API 契约、WebUI 路由、认证、存储或 Session 状态语义时跑全量 pytest。
 - 用户环境包含一个本地测试 Bot；涉及运行时验证时按用户说明**本地**同步并人工验收（具体路径/方式属本地环境，不在本仓库指令中固化）。
 - 完成后本地 `git commit -s`；除非用户明确要求，不要 push 到远端。
-- 仅文档改动也至少跑 `ruff` 与 `pyright` 这两个能捕捉仓库级问题的低成本检查，并按用户要求决定是否提交。
+- 仅文档改动也至少跑 `ruff` 与 `basedpyright` 这两个能捕捉仓库级问题的低成本检查，并按用户要求决定是否提交。
 
 ## 编码规范
 

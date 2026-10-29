@@ -7,7 +7,8 @@
 
 项目使用 `uv`、`pytest`、`nonebug`、`ruff`、Pyright/BasedPyright、`prek` 与 `typos`。
 `prek` 读取 `.pre-commit-config.yaml`；不要假设 `pre-commit` 可执行文件已安装。
-Pyright/BasedPyright 与 prek 不是声明的 dev 依赖；CI 对齐的类型检查命令会自带工具。
+Pyright/BasedPyright 与 prek 不是声明的 dev 依赖；CI 对齐的类型检查命令用 `uvx` 自带工具本身。
+但它们只解析到项目已同步的环境，因此所有命令都要求先 `uv sync --all-groups`。
 
 常用命令：
 
@@ -15,8 +16,7 @@ Pyright/BasedPyright 与 prek 不是声明的 dev 依赖；CI 对齐的类型检
 uv sync --all-groups
 uv run ruff check .
 uv run ruff format --check .
-uv run pyright            # 需另行安装 pyright(未声明为 dev 依赖)；CI 对齐用下一条
-uvx basedpyright==1.40.0
+uvx basedpyright==1.40.0   # 先同步环境再跑；uvx 自带工具，但仍依赖 .venv 解析导入
 uv run pytest
 uv run poe test
 prek run --all-files
