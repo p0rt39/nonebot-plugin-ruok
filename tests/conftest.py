@@ -4,6 +4,7 @@ import atexit
 import shutil
 import tempfile
 from pathlib import Path
+from collections.abc import Iterator
 
 import pytest
 import nonebot
@@ -41,3 +42,23 @@ async def after_nonebot_init(after_nonebot_init: None):
 
     # 加载插件
     nonebot.load_from_toml("pyproject.toml")
+
+
+@pytest.fixture(autouse=True)
+def _reset_connection_history() -> Iterator[None]:
+    """Keep the plugin's process-global connection history out of test results.
+
+    ``_connection_history`` lives in the plugin module, so entries survive
+    across tests.  Every ``ctx.create_bot`` in ``plugin_test.py`` fires
+    ``on_bot_connect`` and leaves a ``"test"`` entry behind.  A later collector
+    run reports such a stale entry as a disconnected connection, which made
+    dashboard assertions depend on test order.  Clear it on both sides of every
+    test so only connections made within the test are visible.
+    """
+    from nonebot_plugin_ruok.collectors import metrics
+
+    metrics._connection_history.clear()
+    try:
+        yield
+    finally:
+        metrics._connection_history.clear()
