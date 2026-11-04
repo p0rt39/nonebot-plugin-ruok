@@ -106,6 +106,18 @@ def test_module_detail_reads_each_session_file_once(
     assert calls["count"] == 8
 
 
+def test_dashboard_reads_each_session_file_once(tmp_path: Path, monkeypatch) -> None:
+    _seed_sessions(tmp_path, 6, ["music", "news"])
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    calls = _count_session_validations(monkeypatch)
+    response = client.get("/ruok")
+
+    assert response.status_code == 200
+    assert calls["count"] == 6
+
+
 def test_sessions_page_does_not_rewrite_plugin_impacts(tmp_path: Path) -> None:
     _seed_sessions(tmp_path, 4, ["music"])
     impacts_path = tmp_path / "plugin_impacts.json"

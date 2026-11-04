@@ -16,7 +16,7 @@ from nonebot import get_driver
 
 from ..config import ScopedConfig
 from .modules import list_modules
-from .sessions import list_sessions
+from .sessions import SessionSnapshot, load_sessions
 from ..protocol import (
     CheckResult,
     MetricPoint,
@@ -25,6 +25,7 @@ from ..protocol import (
     StatusResult,
     ProcessSnapshot,
     AggregatedStatus,
+    ModuleDefinition,
     PluginHealthInfo,
     BotConnectionStatus,
     FastMetricsSnapshot,
@@ -382,9 +383,16 @@ _startup_time: float | None = None
 
 
 async def collect_all_statuses(
-    config: ScopedConfig, data_dir: Path
+    config: ScopedConfig,
+    data_dir: Path,
+    *,
+    snapshot: SessionSnapshot | None = None,
 ) -> AggregatedStatus:
-    """Gather all health data into a single AggregatedStatus."""
+    """Gather all health data into a single AggregatedStatus.
+
+    ``snapshot`` lets a caller that already read the sessions directory reuse
+    that read for module status and the appended metric point.
+    """
     global _startup_time
     if _startup_time is None:
         _startup_time = time.time()
@@ -425,9 +433,20 @@ async def collect_all_statuses(
         pass
     plugins = _collect_plugin_inventory()
 
+    # Module status derivation and the metric counters both need the session
+    # directory; load it once and keep that work off the event loop.
+    if snapshot is None:
+        try:
+            snapshot = await asyncio.to_thread(load_sessions, data_dir)
+        except (json.JSONDecodeError, OSError, ValueError):
+            snapshot = None
+
     # Load module definitions (with real-time derived status)
+    modules: list[ModuleDefinition] = []
     try:
-        modules = list_modules(data_dir, config)
+        modules = await asyncio.to_thread(
+            list_modules, data_dir, config, snapshot=snapshot
+        )
     except (json.JSONDecodeError, OSError, ValueError):
         modules = []
 
@@ -512,21 +531,20 @@ async def collect_all_statuses(
         cpu_pct = _extract_cpu_percent(sys_results)
         mem_pct = _extract_memory_percent(sys_results)
         disk_pct = _extract_disk_percent(sys_results)
-        sessions = list_sessions(data_dir)
-        MetricsStore.append(
-            data_dir,
-            MetricPoint(
-                ts=datetime.now(timezone.utc).isoformat(),
-                cpu_percent=cpu_pct,
-                memory_percent=mem_pct,
-                disk_percent=disk_pct,
-                sessions_total=len(sessions),
-                sessions_pending=sum(1 for s in sessions if s.status == "pending"),
-                sessions_unsolved=sum(1 for s in sessions if s.status == "unsolved"),
-                connections_total=len(connections),
-                connections_online=sum(1 for c in connections if c.connected),
-            ),
-            retention_days=config.metrics_retention_days,
+        sessions = snapshot.sessions if snapshot is not None else []
+        point = MetricPoint(
+            ts=datetime.now(timezone.utc).isoformat(),
+            cpu_percent=cpu_pct,
+            memory_percent=mem_pct,
+            disk_percent=disk_pct,
+            sessions_total=len(sessions),
+            sessions_pending=sum(1 for s in sessions if s.status == "pending"),
+            sessions_unsolved=sum(1 for s in sessions if s.status == "unsolved"),
+            connections_total=len(connections),
+            connections_online=sum(1 for c in connections if c.connected),
+        )
+        await asyncio.to_thread(
+            MetricsStore.append, data_dir, point, config.metrics_retention_days
         )
     except (json.JSONDecodeError, OSError, ValueError):
         pass  # Metrics are best-effort
