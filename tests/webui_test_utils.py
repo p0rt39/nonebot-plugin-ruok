@@ -3,18 +3,35 @@ from __future__ import annotations
 from pathlib import Path
 from collections.abc import Iterable
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 ADMIN_PASSWORD = "admin-secret"
 
 
-def _client(
+def _count_session_validations(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """Count stored Session parses so tests can assert a single directory scan."""
+    from nonebot_plugin_ruok.protocol import Session
+
+    calls = {"count": 0}
+    original = Session.model_validate_json.__func__
+
+    def counting(cls, *args, **kwargs):
+        calls["count"] += 1
+        return original(cls, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "model_validate_json", classmethod(counting))
+    return calls
+
+
+def _app(
     config,
     data_dir: Path,
     *,
     superusers: Iterable[str] = (),
-) -> TestClient:
+) -> FastAPI:
+    """Build the FastAPI app used by the WebUI/API tests."""
     from starlette.middleware.sessions import SessionMiddleware
 
     from nonebot_plugin_ruok.api import create_ruok_router
@@ -32,7 +49,18 @@ def _client(
     app.include_router(auth.create_router())
     app.include_router(create_ruok_router(config, data_dir))
     app.include_router(create_webui_router(config, data_dir, auth))
-    return TestClient(app)
+    return app
+
+
+def _client(
+    config,
+    data_dir: Path,
+    *,
+    superusers: Iterable[str] = (),
+) -> TestClient:
+    return TestClient(
+        _app(config, data_dir, superusers=superusers),
+    )
 
 
 def _webui_config(**kwargs):
