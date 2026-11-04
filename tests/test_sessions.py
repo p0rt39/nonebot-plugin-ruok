@@ -6,6 +6,8 @@ to avoid __init__.py's require() before NoneBot init.
 
 from __future__ import annotations
 
+import os
+from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -630,6 +632,62 @@ class TestLinkSessions:
         assert s2.session_id in ids
         assert s3.session_id not in ids
 
+    def test_merging_groups_moves_every_member(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            link_sessions,
+            create_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        sessions = [
+            create_session(tmp_path, "mod", f"issue {index}", reporter)
+            for index in range(4)
+        ]
+        first, second, third, fourth = sessions
+        link_sessions(tmp_path, first.session_id, second.session_id)
+        link_sessions(tmp_path, third.session_id, fourth.session_id)
+
+        assert link_sessions(tmp_path, second.session_id, third.session_id) is True
+
+        groups = []
+        for session in sessions:
+            stored = get_session(tmp_path, session.session_id)
+            assert stored is not None
+            groups.append(stored.link_group)
+        assert len(set(groups)) == 1
+        assert groups[0] is not None
+
+    def test_confirm_allows_plugins_from_modules_sharing_a_log_source(
+        self, tmp_path: Path
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import upsert_module
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            confirm_session_plugins,
+        )
+
+        upsert_module(
+            tmp_path, ModuleDefinition(name="music", plugins=["shared", "plugin-m"])
+        )
+        upsert_module(
+            tmp_path, ModuleDefinition(name="lyrics", plugins=["shared", "plugin-l"])
+        )
+        session = create_session(
+            tmp_path, "shared", "ambiguous log source", ReporterInfo(type="automatic")
+        )
+
+        confirmed = confirm_session_plugins(
+            tmp_path, ScopedConfig(), session.session_id, ["plugin-m", "plugin-l"]
+        )
+
+        assert confirmed is not None
+        assert confirmed.status == "unsolved"
+        assert confirmed.affected_plugins == ["plugin-m", "plugin-l"]
+
 
 class TestSessionStats:
     def test_empty(self, tmp_path: Path) -> None:
@@ -715,3 +773,126 @@ class TestHandleRuokError:
         sessions = list_sessions(tmp_path, module_name="ruok")
         assert len(sessions) == 1
         assert set(session_ids) == {sessions[0].session_id}
+
+
+def _fail_on_read(self: Path, *args: Any, **kwargs: Any) -> str:
+    raise AssertionError(f"unexpected file read: {self}")
+
+
+class TestSessionSnapshot:
+    """The read snapshot must behave exactly like a fresh directory scan."""
+
+    def test_snapshot_matches_directory_scan(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            load_sessions,
+            create_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        for index in range(3):
+            create_session(tmp_path, "mod", f"desc {index}", reporter)
+
+        snapshot = load_sessions(tmp_path)
+        from_snapshot = [
+            s.session_id for s in list_sessions(tmp_path, snapshot=snapshot)
+        ]
+        from_disk = [s.session_id for s in list_sessions(tmp_path)]
+
+        assert len(snapshot) == 3
+        assert from_snapshot == from_disk
+
+    def test_snapshot_avoids_extra_file_reads(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            load_sessions,
+            create_session,
+            get_session_stats,
+            build_plugin_impacts,
+        )
+
+        reporter = ReporterInfo(type="user")
+        create_session(tmp_path, "mod", "one", reporter)
+        create_session(tmp_path, "mod", "two", reporter)
+        snapshot = load_sessions(tmp_path)
+
+        monkeypatch.setattr(Path, "read_text", _fail_on_read)
+
+        assert len(list_sessions(tmp_path, snapshot=snapshot)) == 2
+        assert get_session_stats(tmp_path, snapshot=snapshot).total == 2
+        assert isinstance(build_plugin_impacts(tmp_path, snapshot=snapshot), dict)
+
+    def test_empty_snapshot_is_reused(self, tmp_path: Path, monkeypatch) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            SessionSnapshot,
+            list_sessions,
+            create_session,
+        )
+
+        create_session(tmp_path, "mod", "one", ReporterInfo(type="user"))
+        empty = SessionSnapshot(entries=())
+
+        monkeypatch.setattr(Path, "read_text", _fail_on_read)
+
+        # An empty snapshot is still a snapshot: it must not trigger a rescan.
+        assert list_sessions(tmp_path, snapshot=empty) == []
+
+    def test_preserves_mtime_ordering(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            load_sessions,
+            create_session,
+            update_session,
+        )
+
+        reporter = ReporterInfo(type="user")
+        first = create_session(tmp_path, "mod", "first", reporter)
+        second = create_session(tmp_path, "mod", "second", reporter)
+        same_moment = datetime.now(timezone.utc)
+        update_session(tmp_path, first.session_id, {"last_seen_at": same_moment})
+        update_session(tmp_path, second.session_id, {"last_seen_at": same_moment})
+
+        sessions_dir = tmp_path / "sessions"
+        older: tuple[int, int] = (1_000_000_000, 1_000_000_000)
+        newer: tuple[int, int] = (2_000_000_000, 2_000_000_000)
+        os.utime(sessions_dir / f"{first.session_id}.json", ns=older)
+        os.utime(sessions_dir / f"{second.session_id}.json", ns=newer)
+
+        from_disk = [s.session_id for s in list_sessions(tmp_path)]
+        snapshot = load_sessions(tmp_path)
+        from_snapshot = [
+            s.session_id for s in list_sessions(tmp_path, snapshot=snapshot)
+        ]
+
+        assert from_disk == [second.session_id, first.session_id]
+        assert from_snapshot == from_disk
+
+    def test_skips_corrupt_files_and_reads_legacy_ids(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import Session, ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import (
+            load_sessions,
+            create_session,
+        )
+
+        created = create_session(tmp_path, "mod", "current", ReporterInfo(type="user"))
+        sessions_dir = tmp_path / "sessions"
+        (sessions_dir / "ruok-broken.json").write_text("{not json", encoding="utf-8")
+        legacy = Session(
+            session_id="ruok-legacy_1",
+            source="manual",
+            status="pending",
+            module_name="legacy",
+        )
+        (sessions_dir / "ruok-legacy_1.json").write_text(
+            legacy.model_dump_json(), encoding="utf-8"
+        )
+
+        ids = {session.session_id for session in load_sessions(tmp_path).sessions}
+
+        assert ids == {created.session_id, "ruok-legacy_1"}
