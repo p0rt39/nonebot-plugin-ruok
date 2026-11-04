@@ -68,6 +68,14 @@
 
 锁只覆盖当前进程；WebUI 请求处理与后台任务共享它，但同一数据目录上的多进程并不互斥。
 
+### 读取路径
+
+WebUI 与 API 的只读入口（`/ruok/sessions`、`/ruok/_partials/sessions`、`/ruok`、模块详情、
+`/ruok/api/sessions*`、`/ruok/api/modules*`）在一次请求内只把 `sessions/` 读一遍，
+并把同一份快照复用于列表过滤、分页统计与模块状态推导；Session 文件的读取与校验统一在
+`asyncio.to_thread` 中执行，不占用事件循环。只读路径不写 `plugin_impacts.json`，
+该文件只由变更操作（创建/更新/确认/链接/日志捕获）重建。
+
 ## Session 与 Module 语义
 
 Session 状态：`pending`、`unsolved`、`solved`、`ignored`。
