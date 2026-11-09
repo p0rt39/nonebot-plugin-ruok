@@ -65,7 +65,7 @@ modify -> ruff -> basedpyright -> focused pytest -> (full pytest) -> [本地] �
 - CI 与发布：`prek` 与 `typos` 在 pre-commit/CI 中执行，勿跳过；CI 工作流只在 PR 上运行，
   master 的 push（含 bump 提交）不重跑矩阵。发布走 `gh workflow run release.yml -f bump=auto`
   （或手动推送 `v*` 标签），标签版本必须与 `pyproject.toml` 的 version 一致；workflow 会自行
-  提交 bump 并打标签，日常开发不要手动 bump。
+  提交 bump 并打标签，日常开发不要手动 bump。改动发布流程后先用 `-f dry_run=true` 演练。
 
 ## 全局不变量
 

@@ -43,6 +43,11 @@
   - `gh workflow run release.yml -f bump=auto`（日常路径）：workflow 自行 bump、
     提交、打标签、构建、发布并创建 GitHub Release；
   - 手动推送 `v*` 标签（旧的本地 bump 流程仍然可用）。
+- 演练用 `gh workflow run release.yml -f bump=patch -f dry_run=true`：bump、跑测试、
+  构建都会执行，但不推送、不发布、不建 Release。
+- 发布中途失败（如 PyPI 已上传、建 Release 失败）时，用
+  `gh workflow run release.yml -f tag=v0.4.3` 重跑该标签，不会再 bump 一次；
+  `uv publish --check-url` 会跳过已存在的文件。
 - bump 级别：`auto` 读取上一个标签之后合并的 PR 标签，出现 `breaking-change` 取
   major，否则出现 `enhancement` 取 minor，其余取 patch；也可用 `-f bump=patch` 等直接指定。
 - 标签版本必须与 `pyproject.toml` 的 `version` 一致，workflow 在发布前校验；bump 由
