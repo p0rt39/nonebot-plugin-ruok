@@ -40,6 +40,12 @@ Scope：`src/nonebot_plugin_ruok/collectors/`。先读根 `AGENTS.md` 与包级 
   pending 经当前插件传播 `degraded`；confirmed 仅经持久化 `affected_plugins` 传播 `unavailable`；
   `unavailable` 优先；`list_module_related_sessions()` 合并直接与经共享插件影响的 Session 并去重。
 - 设置 `affected_plugins` 必须走 `confirm_session_plugins(...)`。
+- 批量状态变更必须走 `bulk_update_sessions(...)`：单次 `_data_dir_lock`、结束时最多一次
+  `rebuild_plugin_impacts()`、只发一条聚合 SSE 事件。逐行调用 `update_session` 会按行重建
+  影响索引（每次全目录扫描），不得用于批量维护。
+- 批量只处理 `pending`/`unsolved`；目标状态与现状一致时不写盘，缺失/非法 id 记入返回值
+  而不是抛异常。
+- 陈旧判定用 `last_seen_at < cutoff`（与列表排序、行内时间一致），不用 `first_seen_at`。
 - 通知规则按状态与直接模块名匹配；冷却键为 `rule.name:session.module_name`；
   dispatch 先原子声明再发送，全通道失败才释放声明。
 - 指标/通知/自动采集保持 best-effort，不得拖垮主插件。

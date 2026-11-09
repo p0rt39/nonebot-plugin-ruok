@@ -25,7 +25,7 @@
 - 系统指标：CPU、内存、磁盘、网络、进程、运行时间。
 - 连接监控：Bot 连接/断开、适配器、自身 ID、可选深度延迟检查。
 - 插件内省：自动捕获已加载插件、元信息、Matcher、健康提示。
-- Session 追踪：自动捕获日志错误，支持手动上报、查找、备注、关联、确认、解决、忽略。
+- Session 追踪：自动捕获日志错误，支持手动上报、查找、备注、关联、确认、解决、忽略，可按筛选批量处理与清理陈旧积压。
 - 插件级影响传播：确认 Session 时可指定影响插件，相关模块自动进入 `unavailable`。
 - WebUI：完整鉴权、实时更新、关键指标实时显示、Bot用户/Bot开发者双显示模板。
 - 账号体系：内置 admin、普通用户注册、平台账号绑定、记住登录、自助重设密码。
@@ -176,7 +176,36 @@ SSE 每秒发送一次轻量 tick，并按此 TTL 触发完整状态采集；小
 | `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 上报白名单用户 ID |
 | `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 上报白名单群 ID |
 | `RUOK__CRISIS_MODE` | `bool` | `false` | 危机模式，跳过上报权限检查 |
+| `RUOK__STALE_PENDING_AFTER_HOURS` | `float` | `0.0` | 待确认 Session 超过该小时数未更新即视为陈旧；`0` 关闭陈旧统计、WebUI 陈旧面板与定时清理 |
+| `RUOK__STALE_PENDING_AUTO_RESOLVE` | `bool` | `false` | 是否启用定时清理陈旧待确认 Session（需要 `nonebot-plugin-apscheduler`） |
+| `RUOK__STALE_PENDING_RESOLVE_STATUS` | `"solved" \| "ignored"` | `"ignored"` | 自动处理陈旧 Session 时写入的状态 |
 | `RUOK__SUMMARY_INTERVAL_HOURS` | `float` | `4.0` | 未解决 Session 汇总通知间隔 |
+
+### 批量处理积压 Session
+
+长时间停留在「待确认」的 Session 会持续堆积。RUOK 提供两种批量入口，两者都只处理
+`pending` 与 `unsolved` 的 Session，已有的 `solved`/`ignored` 记录不会被改写。
+
+**WebUI 批量面板**（无需配置）：`/ruok/sessions` 的列表上方有「批量处理当前筛选结果」。
+它处理的是**当前筛选条件命中的全部 Session（跨分页）**，而不是仅当前页：
+
+- 先选择批量动作（确认为未解决 / 标记为已解决 / 标记为已忽略），提交按钮在选中动作后才启用；
+- 单次最多处理 500 条，超出时提示缩小筛选范围，不会部分执行；
+- 提交前有二次确认；操作不可撤销。
+
+批量确认等价于不带插件参数的确认：Session 变为 `unsolved`，但不会记录影响插件，
+因此不会向共享插件的模块传播 `unavailable`。需要插件级传播时请在详情页逐条确认。
+
+**陈旧待确认清理**（需配置）：设置 `RUOK__STALE_PENDING_AFTER_HOURS` 大于 `0` 后，
+Session 页面会出现陈旧面板，显示「`last_seen_at` 超过该小时数仍未更新」的待确认数量，
+并可一键处理。若同时把 `RUOK__STALE_PENDING_AUTO_RESOLVE` 设为 `true`，插件启动时会注册
+一个周期任务自动处理；该任务依赖 `nonebot-plugin-apscheduler`，未安装时自动清理不生效。
+
+判定陈旧使用 `last_seen_at`（与列表排序、页面显示一致）：反复出现的错误只要仍在更新就
+不会被视为陈旧。写入状态由 `RUOK__STALE_PENDING_RESOLVE_STATUS` 决定，默认 `ignored`
+（按误报处理），避免把真实缺陷误标为已修复。
+
+批量写入在单次请求内完成，只重建一次插件影响索引；处理后会即时更新状态计数与模块健康。
 
 上报权限顺序：
 
@@ -333,7 +362,7 @@ stateDiagram-v2
 | 页面 | 路由 | 说明 |
 | :--- | :--- | :--- |
 | 总览 | `/ruok` | 系统指标、连接、插件、模块、趋势、Session 统计 |
-| Sessions | `/ruok/sessions` | 按状态、模块、插件、时间筛选和搜索，每页 20 条；支持确认、解决、忽略 |
+| Sessions | `/ruok/sessions` | 按状态、模块、插件、时间筛选和搜索，每页 20 条；支持确认、解决、忽略，以及按当前筛选批量处理 |
 | Session 详情 | `/ruok/sessions/{id}` | 完整信息、用户说明、Traceback、关联 Session、影响插件、备注 |
 | 模块 | `/ruok/modules` | 模块列表与创建 |
 | 模块详情 | `/ruok/modules/{name}` | 编辑名称、显示名、描述、关联插件、删除 |
@@ -584,15 +613,16 @@ src/nonebot_plugin_ruok/
 - `webui_test_utils.py`：FastAPI `TestClient`、WebUI 登录、模块/通知测试辅助函数。
 - `plugin_test.py`：NoneBot `/ruok` 命令、绑定、重设密码、状态查询、确认/解决等交互测试。
 - `test_collector.py`：指标采集、进程快照、网络/磁盘速率追踪。
-- `test_sessions.py`：Session CRUD、筛选、搜索、关联、统计、插件影响索引。
+- `test_sessions.py`：Session CRUD、筛选、搜索、关联、统计、插件影响索引、批量状态变更与陈旧判定。
 - `test_modules.py`：模块 CRUD、直接/插件传播状态推导、相关 Session 查询。
 - `test_web_api.py`：API key 与路由优先级回归测试。
 - `test_web_api_auth.py`：登录、注册、绑定、记住登录、密码重设、鉴权边界。
 - `test_web_api_dashboard.py`：管理员/普通用户 Dashboard、趋势图和趋势数据端点。
-- `test_web_api_sessions.py`：Session WebUI、Session API、影响插件编辑。
+- `test_web_api_sessions.py`：Session WebUI、Session API、影响插件编辑、批量面板与批量 action。
 - `test_web_api_modules.py`：模块 WebUI 列表、详情、编辑、删除。
 - `test_web_api_notifications.py`：通知规则 WebUI 列表、详情、编辑、删除。
 - `test_web_api_users.py`：用户管理与普通用户自助账号操作。
+- `test_webui_sessions_perf.py`：Session 读取路径与批量 action 的单次目录扫描、事件循环不阻塞回归。
 
 ## 开发
 

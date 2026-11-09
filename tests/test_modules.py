@@ -699,3 +699,40 @@ class TestModuleReadPaths:
         assert mapping["music"] == ["plugin-a"]
         assert "nonebot_plugin_ruok" in mapping["ruok"]
         assert mapping.get("missing", []) == []
+
+    def test_bulk_confirm_marks_modules_unavailable_without_propagation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Bulk confirm mirrors single-row confirm without plugins."""
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            get_module,
+            upsert_module,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import (
+            create_session,
+            bulk_update_sessions,
+        )
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin_a"]))
+        upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["plugin_a"]))
+        session = create_session(
+            tmp_path, "music", "batch confirm", ReporterInfo(type="user")
+        )
+
+        music = get_module(tmp_path, config, "music")
+        assert music is not None
+        assert music.status == "degraded"
+
+        bulk_update_sessions(tmp_path, [session.session_id], status="unsolved")
+
+        music = get_module(tmp_path, config, "music")
+        lyrics = get_module(tmp_path, config, "lyrics")
+        assert music is not None
+        assert lyrics is not None
+        assert music.status == "unavailable"
+        # No plugin was recorded, so the shared plugin must not spread it.
+        assert lyrics.status == "available"

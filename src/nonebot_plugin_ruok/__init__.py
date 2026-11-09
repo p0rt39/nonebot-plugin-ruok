@@ -729,6 +729,14 @@ async def _startup() -> None:
     except Exception as exc:
         logger.warning(f"RUOK: summary job registration failed: {exc}")
 
+    # Register stale pending cleanup (best-effort, APScheduler optional)
+    try:
+        from .collectors.sessions import register_stale_cleanup_job
+
+        register_stale_cleanup_job(plugin_config, data_dir)
+    except Exception as exc:
+        logger.warning(f"RUOK: stale cleanup job registration failed: {exc}")
+
     logger.info("RUOK plugin started")
 
 

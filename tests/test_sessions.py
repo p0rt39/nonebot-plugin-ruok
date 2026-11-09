@@ -779,6 +779,300 @@ def _fail_on_read(self: Path, *args: Any, **kwargs: Any) -> str:
     raise AssertionError(f"unexpected file read: {self}")
 
 
+class TestBulkUpdateSessions:
+    """One bulk pass must cost one lock and one impact rebuild."""
+
+    @staticmethod
+    def _create(tmp_path: Path, count: int, *, module: str = "music") -> list[str]:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import create_session
+
+        return [
+            create_session(
+                tmp_path,
+                module,
+                f"bulk issue {index}",
+                ReporterInfo(type="user", user_id="u1"),
+                source="manual",
+            ).session_id
+            for index in range(count)
+        ]
+
+    def test_applies_target_status_to_open_sessions(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            bulk_update_sessions,
+        )
+
+        session_ids = self._create(tmp_path, 3)
+        result = bulk_update_sessions(tmp_path, session_ids, status="solved")
+
+        assert set(result.changed) == set(session_ids)
+        assert result.unchanged == ()
+        assert result.skipped == ()
+        statuses = {s.session_id: s for s in list_sessions(tmp_path)}
+        for session_id in session_ids:
+            assert statuses[session_id].status == "solved"
+            assert statuses[session_id].resolved_at is not None
+
+    def test_leaves_closed_sessions_untouched(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            get_session,
+            update_session,
+            bulk_update_sessions,
+        )
+
+        pending_id, ignored_id = self._create(tmp_path, 2)
+        update_session(tmp_path, ignored_id, {"status": "ignored"})
+        before = (tmp_path / "sessions" / f"{ignored_id}.json").read_bytes()
+
+        result = bulk_update_sessions(
+            tmp_path, [pending_id, ignored_id], status="solved"
+        )
+
+        assert result.changed == (pending_id,)
+        assert ignored_id in result.skipped
+        assert (tmp_path / "sessions" / f"{ignored_id}.json").read_bytes() == before
+        reloaded = get_session(tmp_path, ignored_id)
+        assert reloaded is not None
+        assert reloaded.status == "ignored"
+
+    def test_unchanged_rows_are_not_rewritten(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            update_session,
+            bulk_update_sessions,
+        )
+
+        (session_id,) = self._create(tmp_path, 1)
+        update_session(tmp_path, session_id, {"status": "solved"})
+        path = tmp_path / "sessions" / f"{session_id}.json"
+        before_mtime = path.stat().st_mtime_ns
+
+        # ``solved`` is terminal, so a second solve pass skips rather than
+        # rewrites; an ignored row re-ignored is reported as skipped too.
+        result = bulk_update_sessions(tmp_path, [session_id], status="solved")
+
+        assert result.changed == ()
+        assert path.stat().st_mtime_ns == before_mtime
+
+    def test_reports_missing_and_invalid_ids(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            bulk_update_sessions,
+        )
+
+        (session_id,) = self._create(tmp_path, 1)
+        result = bulk_update_sessions(
+            tmp_path,
+            ["ruok-missing1", "../escape", session_id, session_id],
+            status="ignored",
+        )
+
+        assert result.changed == (session_id,)
+        assert "ruok-missing1" in result.skipped
+        assert "../escape" in result.skipped
+        # A duplicated id is processed once.
+        assert list(result.changed).count(session_id) == 1
+        assert len(list_sessions(tmp_path)) == 1
+
+    def test_rebuilds_plugin_impacts_once(self, tmp_path: Path, monkeypatch) -> None:
+        from nonebot_plugin_ruok.collectors import sessions as sessions_module
+
+        session_ids = self._create(tmp_path, 5)
+        rebuilds = {"count": 0}
+        original = sessions_module.rebuild_plugin_impacts
+
+        def counting_rebuild(*args: Any, **kwargs: Any) -> Any:
+            rebuilds["count"] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(sessions_module, "rebuild_plugin_impacts", counting_rebuild)
+
+        sessions_module.bulk_update_sessions(tmp_path, session_ids, status="ignored")
+
+        assert rebuilds["count"] == 1
+
+    def test_publishes_one_aggregated_event(self, tmp_path: Path, monkeypatch) -> None:
+        from nonebot_plugin_ruok.collectors import sessions as sessions_module
+
+        session_ids = self._create(tmp_path, 4)
+        events: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            sessions_module, "_publish_bulk_event", lambda *a, **k: events.append({})
+        )
+
+        result = sessions_module.bulk_update_sessions(
+            tmp_path, session_ids, status="unsolved"
+        )
+
+        assert len(result.changed) == 4
+        assert len(events) == 1
+
+    def test_rejects_non_maintenance_target_status(self, tmp_path: Path) -> None:
+        import pytest
+
+        from nonebot_plugin_ruok.collectors.sessions import (
+            SessionUpdateValidationError,
+            bulk_update_sessions,
+        )
+
+        with pytest.raises(SessionUpdateValidationError):
+            bulk_update_sessions(tmp_path, ["ruok-any"], status="pending")
+
+    def test_no_op_batch_does_not_rebuild(self, tmp_path: Path, monkeypatch) -> None:
+        from nonebot_plugin_ruok.collectors import sessions as sessions_module
+
+        rebuilds = {"count": 0}
+        monkeypatch.setattr(
+            sessions_module,
+            "rebuild_plugin_impacts",
+            lambda *a, **k: rebuilds.__setitem__("count", rebuilds["count"] + 1),
+        )
+
+        result = sessions_module.bulk_update_sessions(
+            tmp_path, ["ruok-missing1"], status="ignored"
+        )
+
+        assert result.changed == ()
+        assert rebuilds["count"] == 0
+
+
+class TestStalePending:
+    """Staleness uses ``last_seen_at`` and closes pending rows only."""
+
+    @staticmethod
+    def _age(tmp_path: Path, session_id: str, *, hours: float) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            _load_session,
+            _save_session,
+        )
+
+        session = _load_session(tmp_path, session_id)
+        assert session is not None
+        session.last_seen_at = datetime.now(timezone.utc) - timedelta(hours=hours)
+        _save_session(tmp_path, session)
+
+    @staticmethod
+    def _create(tmp_path: Path, count: int) -> list[str]:
+        from nonebot_plugin_ruok.protocol import ReporterInfo
+        from nonebot_plugin_ruok.collectors.sessions import create_session
+
+        return [
+            create_session(
+                tmp_path, "music", f"stale {index}", ReporterInfo(type="user")
+            ).session_id
+            for index in range(count)
+        ]
+
+    def test_counts_and_resolves_only_stale_pending(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            list_sessions,
+            update_session,
+            stale_pending_ids,
+            count_stale_pending,
+            bulk_resolve_stale_pending,
+        )
+
+        session_ids = self._create(tmp_path, 4)
+        stale, fresh, confirmed, fresh_confirmed = session_ids
+        for session_id in (stale, confirmed):
+            self._age(tmp_path, session_id, hours=48)
+        update_session(tmp_path, confirmed, {"status": "unsolved"})
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        assert count_stale_pending(tmp_path, cutoff) == 1
+        assert stale_pending_ids(tmp_path, cutoff) == [stale]
+
+        result = bulk_resolve_stale_pending(tmp_path, cutoff, status="ignored")
+
+        assert result.changed == (stale,)
+        statuses = {s.session_id: s.status for s in list_sessions(tmp_path)}
+        assert statuses[stale] == "ignored"
+        assert statuses[fresh] == "pending"
+        assert statuses[confirmed] == "unsolved"
+        assert statuses[fresh_confirmed] == "pending"
+
+    def test_uses_last_seen_not_first_seen(self, tmp_path: Path) -> None:
+        """A recurring old Session stays young while it keeps reappearing."""
+        from nonebot_plugin_ruok.collectors.sessions import (
+            _load_session,
+            _save_session,
+            count_stale_pending,
+        )
+
+        (session_id,) = self._create(tmp_path, 1)
+        session = _load_session(tmp_path, session_id)
+        assert session is not None
+        session.first_seen_at = datetime.now(timezone.utc) - timedelta(days=30)
+        session.last_seen_at = datetime.now(timezone.utc)
+        _save_session(tmp_path, session)
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        assert count_stale_pending(tmp_path, cutoff) == 0
+
+    def test_count_reuses_snapshot_without_rescanning(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from nonebot_plugin_ruok.collectors.sessions import (
+            load_sessions,
+            count_stale_pending,
+        )
+
+        self._create(tmp_path, 2)
+        snapshot = load_sessions(tmp_path)
+        monkeypatch.setattr(Path, "read_text", _fail_on_read)
+
+        cutoff = datetime.now(timezone.utc) + timedelta(hours=1)
+        assert count_stale_pending(tmp_path, cutoff, snapshot=snapshot) == 2
+
+    def test_job_is_skipped_when_not_enabled(self, tmp_path: Path, monkeypatch) -> None:
+        import nonebot_plugin_apscheduler as aps
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors import sessions as sessions_module
+
+        scheduled: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            aps.scheduler,
+            "scheduled_job",
+            lambda *a, **k: lambda fn: scheduled.append(k) and fn,
+        )
+
+        # Default: threshold 0 disables it.
+        sessions_module.register_stale_cleanup_job(ScopedConfig(), tmp_path)
+        # Threshold set but auto-resolve still off.
+        sessions_module.register_stale_cleanup_job(
+            ScopedConfig(stale_pending_after_hours=24.0), tmp_path
+        )
+        assert scheduled == []
+
+    def test_job_interval_is_bounded_when_enabled(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        import nonebot_plugin_apscheduler as aps
+
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.collectors import sessions as sessions_module
+
+        scheduled: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            aps.scheduler,
+            "scheduled_job",
+            lambda *a, **k: lambda fn: scheduled.append(k) and fn,
+        )
+        config = ScopedConfig(
+            stale_pending_after_hours=0.01,
+            stale_pending_auto_resolve=True,
+        )
+
+        sessions_module.register_stale_cleanup_job(config, tmp_path)
+
+        assert len(scheduled) == 1
+        # Sub-quarter-hour thresholds still sweep at a sane floor.
+        assert scheduled[0]["hours"] == 0.25
+
+
 class TestSessionSnapshot:
     """The read snapshot must behave exactly like a fresh directory scan."""
 

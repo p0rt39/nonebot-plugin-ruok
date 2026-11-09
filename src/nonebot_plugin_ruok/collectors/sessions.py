@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import re
 import json
+import asyncio
 import hashlib
 import secrets
 import threading
 import traceback
 from typing import Any
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
+from collections.abc import Sequence
 
 from nonebot import logger
 
@@ -22,6 +24,7 @@ from ..protocol import (
     ReporterInfo,
     SessionStats,
     SessionSource,
+    SessionStatus,
 )
 
 
@@ -31,6 +34,36 @@ class SessionPluginValidationError(ValueError):
 
 class SessionUpdateValidationError(ValueError):
     """Raised when requested session updates would make persisted data invalid."""
+
+
+# Upper bound for one bulk pass.  Bulk writes hold the data-directory lock, so
+# the limit is what keeps a single maintenance request short enough that log
+# capture and WebUI reads do not stall behind it.
+BULK_MAX_SESSIONS = 500
+# Bulk actions are maintenance passes over backlog: they close (or re-confirm)
+# Sessions that are still open.  Rows that are already terminal stay untouched.
+BULK_SOURCE_STATUSES = frozenset({"pending", "unsolved"})
+BULK_TARGET_STATUSES = frozenset({"unsolved", "solved", "ignored"})
+_BULK_EVENT_ID_LIMIT = 50
+
+
+@dataclass(frozen=True)
+class BulkSessionResult:
+    """Outcome of one bulk Session pass.
+
+    ``changed`` rows were written, ``unchanged`` rows already had the target
+    status (so they keep their file mtime), and ``skipped`` rows were missing,
+    had an invalid id, or were already closed.
+    """
+
+    changed: tuple[str, ...] = ()
+    unchanged: tuple[str, ...] = ()
+    skipped: tuple[str, ...] = ()
+
+    @property
+    def total(self) -> int:
+        """Return the number of rows the pass looked at."""
+        return len(self.changed) + len(self.unchanged) + len(self.skipped)
 
 
 def parse_filter_datetime(value: str) -> datetime:
@@ -410,6 +443,191 @@ def _module_plugins(
             if plugin not in plugins:
                 plugins.append(plugin)
     return plugins
+
+
+def _apply_bulk_status(session: Session, status: SessionStatus) -> bool:
+    """Return whether *session* needs a write to reach *status*."""
+    if session.status == status:
+        return False
+    session.status = status
+    if status in ("solved", "ignored"):
+        session.resolved_at = datetime.now(timezone.utc)
+    else:
+        session.resolved_at = None
+    return True
+
+
+def bulk_update_sessions(
+    data_dir: Path,
+    session_ids: Sequence[str],
+    *,
+    status: SessionStatus,
+) -> BulkSessionResult:
+    """Apply one status to many Sessions with a single lock and index rebuild.
+
+    ``update_session`` rebuilds ``plugin_impacts.json`` per call, so looping it
+    over a backlog costs one full directory scan per row.  This pass holds the
+    data-directory lock once, writes only rows whose status actually changes,
+    and rebuilds the derived index at most once.
+
+    Rows that are already ``solved``/``ignored`` are left untouched: a bulk
+    maintenance pass closes backlog, it does not reopen or rewrite closed work.
+    Missing and malformed ids are reported instead of raising.
+    """
+    if status not in BULK_TARGET_STATUSES:
+        raise SessionUpdateValidationError(
+            f"bulk sessions can only be set to one of "
+            f"{', '.join(sorted(BULK_TARGET_STATUSES))}, not {status!r}"
+        )
+
+    changed: list[Session] = []
+    unchanged: list[str] = []
+    skipped: list[str] = []
+    seen: set[str] = set()
+
+    with _data_dir_lock(data_dir):
+        for session_id in session_ids:
+            if not isinstance(session_id, str) or session_id in seen:
+                continue
+            seen.add(session_id)
+
+            session = _load_session(data_dir, session_id)
+            if session is None or session.status not in BULK_SOURCE_STATUSES:
+                skipped.append(session_id)
+                continue
+            if not _apply_bulk_status(session, status):
+                unchanged.append(session_id)
+                continue
+            _save_session(data_dir, session)
+            changed.append(session)
+
+        if changed:
+            rebuild_plugin_impacts(data_dir)
+
+    if changed:
+        _publish_bulk_event(status, changed)
+
+    return BulkSessionResult(
+        changed=tuple(session.session_id for session in changed),
+        unchanged=tuple(unchanged),
+        skipped=tuple(skipped),
+    )
+
+
+def _publish_bulk_event(status: str, changed: list[Session]) -> None:
+    """Publish one aggregated event for a bulk pass (best-effort).
+
+    A per-row event would make every open dashboard issue one stats refresh per
+    processed Session; the payload is bounded so the queue item stays small.
+    """
+    try:
+        from ..webui.sse import event_bus
+
+        event_bus.publish(
+            "session_update",
+            {
+                "action": "bulk_updated",
+                "status": status,
+                "changed": len(changed),
+                "session_ids": [
+                    session.session_id for session in changed[:_BULK_EVENT_ID_LIMIT]
+                ],
+            },
+        )
+    except (ImportError, RuntimeError):
+        pass  # SSE is best-effort, never crash the collector
+
+
+def count_stale_pending(
+    data_dir: Path,
+    cutoff: datetime,
+    *,
+    snapshot: SessionSnapshot | None = None,
+) -> int:
+    """Count pending Sessions last seen before *cutoff*.
+
+    ``last_seen_at`` matches the list order and the row timestamp, so "stale"
+    means the same thing on the page and in the cleanup job.  ``first_seen_at``
+    would keep a recurring error permanently young.
+    """
+    return sum(
+        1
+        for session in _resolve_snapshot(data_dir, snapshot).sessions
+        if session.status == "pending" and session.last_seen_at < cutoff
+    )
+
+
+def stale_pending_ids(
+    data_dir: Path,
+    cutoff: datetime,
+    *,
+    snapshot: SessionSnapshot | None = None,
+) -> list[str]:
+    """Return ids of pending Sessions last seen before *cutoff*."""
+    return [
+        session.session_id
+        for session in _resolve_snapshot(data_dir, snapshot).sessions
+        if session.status == "pending" and session.last_seen_at < cutoff
+    ]
+
+
+def bulk_resolve_stale_pending(
+    data_dir: Path,
+    cutoff: datetime,
+    *,
+    status: SessionStatus = "ignored",
+) -> BulkSessionResult:
+    """Close every pending Session last seen before *cutoff*."""
+    return bulk_update_sessions(
+        data_dir,
+        stale_pending_ids(data_dir, cutoff),
+        status=status,
+    )
+
+
+def register_stale_cleanup_job(config: ScopedConfig, data_dir: Path) -> None:
+    """Register the periodic stale-pending cleanup, if enabled (best-effort)."""
+    hours = config.stale_pending_after_hours
+    if (
+        not config.session_enabled
+        or not config.stale_pending_auto_resolve
+        or hours <= 0
+    ):
+        return
+
+    try:
+        from nonebot import require
+
+        require("nonebot_plugin_apscheduler")
+        from nonebot_plugin_apscheduler import scheduler
+    except Exception:
+        logger.info("RUOK: APScheduler not available, stale pending cleanup disabled")
+        return
+
+    status = config.stale_pending_resolve_status
+    # Sweep often enough to act on the configured age, but never busy-loop.
+    interval_hours = min(max(hours, 0.25), 24.0)
+
+    @scheduler.scheduled_job("interval", hours=interval_hours, misfire_grace_time=300)
+    async def _ruok_stale_cleanup_job() -> None:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        try:
+            result = await asyncio.to_thread(
+                bulk_resolve_stale_pending, data_dir, cutoff, status=status
+            )
+        except Exception as exc:
+            logger.warning(f"RUOK: stale pending cleanup failed: {exc}")
+            return
+        if result.changed:
+            logger.info(
+                f"RUOK: stale pending cleanup resolved "
+                f"{len(result.changed)} Session(s) as {status}"
+            )
+
+    logger.info(
+        f"RUOK: stale pending cleanup job registered "
+        f"(every {interval_hours}h, older than {hours}h → {status})"
+    )
 
 
 def _publish_session_event(

@@ -97,6 +97,16 @@ Module 状态在查询时推导：
 
 `update_session()` 在保存前校验整个候选模型；`solved`/`ignored` 设置 `resolved_at`，
 `pending`/`unsolved` 清空。存储层不强制迁移图。
+
+`bulk_update_sessions(data_dir, ids, status=...)` 是批量维护的唯一写入口：它在一次
+`_data_dir_lock` 内逐条写入，结束后最多重建一次 `plugin_impacts.json`，并只发布一条
+聚合 SSE 事件。只处理 `pending`/`unsolved`（已关闭的行跳过），目标状态与现状相同时不写盘。
+逐行调用 `update_session` 会按行触发全目录重建，用于清积压会退化为 O(rows) 次扫描。
+
+`count_stale_pending` / `bulk_resolve_stale_pending` 以 `last_seen_at < cutoff` 判定陈旧
+（与列表排序字段一致）；自动清理由 `register_stale_cleanup_job` 按
+`stale_pending_after_hours` / `stale_pending_auto_resolve` 注册，APScheduler 缺失时跳过。
+
 列表按 `(last_seen_at, file mtime_ns, session_id)` 降序。HTTP 日期过滤用
 `parse_filter_datetime()`：naive 视为 UTC，带偏移归一到 UTC，非法输入返回 400。搜索包含
 持久化的 affected plugins。链接合并组、拒绝自链接、不合并状态。
@@ -191,6 +201,11 @@ WebUI 页面：
 
 HTMX 路由在 `/ruok/_partials/*` 与 `/ruok/_actions/*` 下。改动 WebUI action 时要显式验证角色守卫；
 admin-only action 依赖 admin 守卫，普通用户账号/报告 action 用对应的 login/bound-user 守卫。
+
+Session 批量维护有两个 admin-only action：`/ruok/_actions/sessions-bulk`（按当前筛选处理整批）
+与 `/ruok/_actions/sessions-stale`（处理陈旧待确认）。两者都以 `#session-content` 为 inner
+swap 目标——容器本身即目标，用 `outerHTML` 会删掉筛选表单与后续所有目标。缺少 action、
+超过 `BULK_MAX_SESSIONS`、未启用陈旧阈值时返回 400；`session_enabled=False` 时返回 403。
 
 对缺失 Session 的 Session action 返回 404（与详情页同一 fragment），而不是抛给全局处理器；
 `session-note`/`unlink` 对未触达目标不得报告成功。模块与通知删除的 `redirect_to` 经

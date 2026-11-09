@@ -45,6 +45,39 @@ def test_cache_ttl_accepts_supported_values(cache_ttl: float) -> None:
     assert ScopedConfig(cache_ttl=cache_ttl).cache_ttl == cache_ttl
 
 
+def test_stale_pending_defaults_to_disabled() -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    config = ScopedConfig()
+
+    assert config.stale_pending_after_hours == 0.0
+    assert config.stale_pending_auto_resolve is False
+    assert config.stale_pending_resolve_status == "ignored"
+
+
+def test_stale_pending_after_hours_rejects_negative_values() -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    with pytest.raises(ValidationError):
+        ScopedConfig(stale_pending_after_hours=-1)
+
+
+@pytest.mark.parametrize("hours", [0.0, 0.5, 24.0, 720.0])
+def test_stale_pending_after_hours_accepts_non_negative_values(hours: float) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    config = ScopedConfig(stale_pending_after_hours=hours)
+
+    assert config.stale_pending_after_hours == hours
+
+
+def test_stale_pending_resolve_status_rejects_non_terminal_values() -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    with pytest.raises(ValidationError):
+        ScopedConfig.model_validate({"stale_pending_resolve_status": "pending"})
+
+
 def test_sse_tick_count_has_at_least_one_tick() -> None:
     from nonebot_plugin_ruok.webui.sse import _tick_count_from_ttl
 

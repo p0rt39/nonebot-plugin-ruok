@@ -8,7 +8,7 @@ import asyncio
 import posixpath
 from typing import Any
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import quote, urlsplit, urlencode, urlunsplit
 from collections.abc import Callable
 
@@ -36,14 +36,17 @@ from ..protocol import (
     NetworkRate,
     ReporterInfo,
     SessionStats,
+    SessionStatus,
     ModuleDefinition,
     NotificationRule,
     PluginHealthInfo,
     FastMetricsSnapshot,
 )
 from ..collector import (
+    BULK_MAX_SESSIONS,
     MetricsStore,
     SessionSnapshot,
+    BulkSessionResult,
     SessionPluginValidationError,
     get_module,
     get_session,
@@ -60,12 +63,15 @@ from ..collector import (
     get_session_stats,
     module_plugin_map,
     _handle_ruok_error,
+    count_stale_pending,
     get_linked_sessions,
+    bulk_update_sessions,
     collect_all_statuses,
     collect_fast_metrics,
     parse_filter_datetime,
     confirm_session_plugins,
     _collect_plugin_inventory,
+    bulk_resolve_stale_pending,
     list_module_related_sessions,
 )
 
@@ -357,6 +363,15 @@ SESSION_PAGE_SIZE_DEFAULT = 20
 SESSION_PAGE_SIZE_MIN = 10
 SESSION_PAGE_SIZE_MAX = 100
 
+# Bulk action → persisted status.  Confirm maps to ``unsolved`` because that is
+# the "confirmed, still broken" state; any other target would skip the state
+# machine the single-row actions follow.
+BULK_ACTIONS: dict[str, SessionStatus] = {
+    "confirm": "unsolved",
+    "solve": "solved",
+    "ignore": "ignored",
+}
+
 
 def _paginate(items: list[Any], page: int, page_size: int) -> dict[str, Any]:
     """Clamp paging input and return the visible slice plus paging metadata."""
@@ -441,6 +456,7 @@ def create_webui_router(
         before: str = "",
         page: int = 1,
         page_size: int = SESSION_PAGE_SIZE_DEFAULT,
+        bulk_notice: str = "",
     ) -> tuple[dict[str, Any], SessionSnapshot]:
         """Build the Session list context; raises ValueError on bad dates.
 
@@ -469,6 +485,14 @@ def create_webui_router(
             "before": before,
         }
         paging = _paginate(sessions, page, page_size)
+        # Status spread of the filtered set itself. The global ``stats`` would
+        # claim "25 unsolved" next to a pending-only filter, which reads as if
+        # the batch would touch them.
+        matched_by_status: dict[str, int] = {}
+        for session in sessions:
+            matched_by_status[session.status] = (
+                matched_by_status.get(session.status, 0) + 1
+            )
 
         def query_for(**overrides: Any) -> str:
             """Encode the active filters plus overrides, dropping empty values."""
@@ -478,6 +502,16 @@ def create_webui_router(
             if params.get("page") == 1:
                 params.pop("page")
             return urlencode({k: v for k, v in params.items() if v not in ("", None)})
+
+        stale_after_hours = config.stale_pending_after_hours
+        stale_pending_count = 0
+        if stale_after_hours > 0:
+            stale_cutoff = datetime.now(timezone.utc) - timedelta(
+                hours=stale_after_hours
+            )
+            stale_pending_count = count_stale_pending(
+                data_dir, stale_cutoff, snapshot=snapshot
+            )
 
         return (
             {
@@ -493,6 +527,16 @@ def create_webui_router(
                 "current_before": before,
                 "reporter_display": _reporter_display_factory(auth.list_users()),
                 "session_plugin_options": _session_plugin_options_factory(),
+                "bulk_max": BULK_MAX_SESSIONS,
+                "bulk_notice": bulk_notice,
+                "matched_by_status": matched_by_status,
+                # The complete filtered set (every page). Templates render the
+                # ``sessions`` page slice; the bulk action uses this list so it
+                # acts on exactly what the filters describe.
+                "matched_sessions": sessions,
+                "stale_pending_count": stale_pending_count,
+                "stale_pending_after_hours": stale_after_hours,
+                "stale_pending_resolve_status": (config.stale_pending_resolve_status),
             },
             snapshot,
         )
@@ -1448,6 +1492,197 @@ def create_webui_router(
         if s is None:
             return _missing_session_response()
         return _render_session_action(s, view, "Session ignored", "info")
+
+    # ── Bulk maintenance ─────────
+    # Both actions render ``#session-content`` (inner swap): the container is
+    # the swap target itself, so replacing it with ``outerHTML`` would delete
+    # the filter form and every later target.
+
+    def _bulk_result_notice(
+        result: BulkSessionResult,
+        action: str,
+    ) -> str:
+        labels = {
+            "confirm": "确认为未解决",
+            "solve": "标记为已解决",
+            "ignore": "标记为已忽略",
+        }
+        label = labels.get(action, action)
+        return (
+            f"✅ 已批量{label} {len(result.changed)} 条"
+            f"，已处于目标状态 {len(result.unchanged)} 条"
+            f"，跳过 {len(result.skipped)} 条。"
+        )
+
+    def _bulk_result_toast(result: BulkSessionResult, action: str) -> str:
+        """Return an ASCII toast payload.
+
+        HTMX passes ``HX-Trigger`` through an HTTP header, so the localized
+        wording stays in the rendered body.
+        """
+        return json.dumps(
+            {
+                "toast": (
+                    f"Bulk {action}: {len(result.changed)} changed, "
+                    f"{len(result.unchanged)} unchanged, "
+                    f"{len(result.skipped)} skipped"
+                ),
+                "toastType": "success" if result.changed else "info",
+            }
+        )
+
+    async def _render_bulk_container(
+        filters: dict[str, str], page: int, page_size: int, notice: str
+    ) -> HTMLResponse:
+        context, _snapshot = await _load_session_list_context(
+            **filters,
+            page=page,
+            page_size=page_size,
+            bulk_notice=notice,
+        )
+        query = context["query_for"](page=context["page"])
+        push_url = "/ruok/sessions" + (f"?{query}" if query else "")
+        return render(
+            "_session_container.html.jinja2",
+            **context,
+            headers={"HX-Push-Url": push_url},
+        )
+
+    @router.post("/ruok/_actions/sessions-bulk")
+    async def action_sessions_bulk(
+        action: str = Form(""),
+        status: str = Form(""),
+        search: str = Form(""),
+        module: str = Form(""),
+        plugin: str = Form(""),
+        after: str = Form(""),
+        before: str = Form(""),
+        page: int = Form(1),
+        page_size: int = Form(SESSION_PAGE_SIZE_DEFAULT),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
+    ) -> HTMLResponse:
+        """Apply one status to every Session matching the current filters."""
+        if not config.session_enabled:
+            return HTMLResponse("Session system disabled", status_code=403)
+        target_status = BULK_ACTIONS.get(action)
+        if target_status is None:
+            return _error_html(
+                "请选择批量操作：确认为未解决 / 标记为已解决 / 标记为已忽略"
+            )
+
+        filters = {
+            "status": status,
+            "search": search,
+            "module": module,
+            "plugin": plugin,
+            "after": after,
+            "before": before,
+        }
+        try:
+            matched, _snapshot = await asyncio.to_thread(
+                _session_list_context, **filters, page=page, page_size=page_size
+            )
+        except ValueError:
+            return _error_html("Invalid ISO datetime filter", status_code=400)
+
+        # Bulk acts on the whole filtered set, not only the visible page.
+        all_matched: list[Session] = matched["matched_sessions"]
+        total = len(all_matched)
+        if total == 0:
+            return await _render_bulk_container(
+                filters, page, page_size, "没有匹配当前筛选条件的 Session。"
+            )
+        if total > BULK_MAX_SESSIONS:
+            return _error_html(
+                f"匹配 {total} 条，超过单次上限 {BULK_MAX_SESSIONS} 条。"
+                "请缩小筛选范围后重试。"
+            )
+
+        try:
+            result = await asyncio.to_thread(
+                bulk_update_sessions,
+                data_dir,
+                [session.session_id for session in all_matched],
+                status=target_status,
+            )
+        except Exception as exc:
+            sid = await asyncio.to_thread(
+                _handle_ruok_error, exc, "action_sessions_bulk", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f"❌ 批量操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
+                status_code=500,
+            )
+
+        response = await _render_bulk_container(
+            filters, page, page_size, _bulk_result_notice(result, action)
+        )
+        response.headers["HX-Trigger"] = _bulk_result_toast(result, action)
+        return response
+
+    @router.post("/ruok/_actions/sessions-stale")
+    async def action_sessions_stale(
+        status: str = Form(""),
+        search: str = Form(""),
+        module: str = Form(""),
+        plugin: str = Form(""),
+        after: str = Form(""),
+        before: str = Form(""),
+        page: int = Form(1),
+        page_size: int = Form(SESSION_PAGE_SIZE_DEFAULT),
+        _user: CurrentWebUIUser = Depends(_admin_guard),
+    ) -> HTMLResponse:
+        """Close pending Sessions older than the configured stale age."""
+        if not config.session_enabled:
+            return HTMLResponse("Session system disabled", status_code=403)
+        hours = config.stale_pending_after_hours
+        if hours <= 0:
+            return _error_html(
+                "陈旧 Session 维护未启用（设置 RUOK__STALE_PENDING_AFTER_HOURS > 0）"
+            )
+
+        filters = {
+            "status": status,
+            "search": search,
+            "module": module,
+            "plugin": plugin,
+            "after": after,
+            "before": before,
+        }
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        try:
+            result = await asyncio.to_thread(
+                bulk_resolve_stale_pending,
+                data_dir,
+                cutoff,
+                status=config.stale_pending_resolve_status,
+            )
+        except Exception as exc:
+            sid = await asyncio.to_thread(
+                _handle_ruok_error, exc, "action_sessions_stale", data_dir
+            )
+            return HTMLResponse(
+                f'<p style="color:var(--pico-del-color);">'
+                f"❌ 批量操作失败 [{type(exc).__name__}] → Session: {sid}</p>",
+                status_code=500,
+            )
+
+        target_label = (
+            "已解决" if config.stale_pending_resolve_status == "solved" else "已忽略"
+        )
+        notice = (
+            f"🧹 已处理 {len(result.changed)} 个陈旧待确认 Session"
+            f"（标记为{target_label}），跳过 {len(result.skipped)} 条。"
+        )
+        response = await _render_bulk_container(filters, page, page_size, notice)
+        response.headers["HX-Trigger"] = json.dumps(
+            {
+                "toast": f"Stale cleanup: {len(result.changed)} changed",
+                "toastType": "success" if result.changed else "info",
+            }
+        )
+        return response
 
     @router.post("/ruok/_actions/session-note/{session_id}")
     async def action_session_note(
