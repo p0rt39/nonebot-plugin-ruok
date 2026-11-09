@@ -70,12 +70,37 @@ jobs:
       - name: Install Dependencies
         run: uv sync --locked
 
+      # Two triggers in a row would otherwise publish a version with no changes.
+      # Only guards a fresh bump; an explicit tag is always published on purpose.
+      - name: Check for changes since the last release
+        id: guard
+        if: github.event_name == 'workflow_dispatch' && inputs.tag == ''
+        run: |
+          set -euo pipefail
+          LAST_TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous release tag; everything counts as new."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          COUNT=$(git rev-list --count "$LAST_TAG"..HEAD)
+          echo "Commits since $LAST_TAG: $COUNT"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Nothing to release: HEAD is already at $LAST_TAG."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "### Nothing to release" >> "$GITHUB_STEP_SUMMARY"
+            echo "HEAD is already at \`$LAST_TAG\`; no new commits since that release." \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # auto: any merged breaking-change PR -> major, otherwise any merged
       # enhancement PR -> minor, otherwise patch. Labels come from the
       # release-drafter autolabeler (branch names and titles).
       - name: Resolve bump level
         id: bump
-        if: github.event_name == 'workflow_dispatch' && inputs.tag == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.tag == '' && steps.guard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -100,7 +125,7 @@ jobs:
 
       - name: Bump version and tag
         id: bumped
-        if: github.event_name == 'workflow_dispatch' && inputs.tag == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.tag == '' && steps.guard.outputs.skip != 'true'
         env:
           LEVEL: ${{ steps.bump.outputs.level }}
         run: |
@@ -133,6 +158,7 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Check Version
+        if: steps.guard.outputs.skip != 'true'
         env:
           EXPECTED: ${{ steps.bumped.outputs.version || steps.tagged.outputs.version }}
         run: |
@@ -146,19 +172,21 @@ jobs:
       # Pull request CI already ran the full matrix; this re-check uses one
       # version to cover the bumped tree that gets published.
       - name: Run Tests
+        if: steps.guard.outputs.skip != 'true'
         run: uv run poe test
 
       - name: Build
+        if: steps.guard.outputs.skip != 'true'
         run: uv build
 
       - name: Publish to PyPI
-        if: inputs.dry_run != true
+        if: inputs.dry_run != true && steps.guard.outputs.skip != 'true'
         # Skip files that already reached the index so a retry after a late
         # failure (e.g. creating the GitHub Release) can finish the job.
         run: uv publish --check-url https://pypi.org/simple/
 
       - name: Create Release and Upload Assets
-        if: inputs.dry_run != true
+        if: inputs.dry_run != true && steps.guard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.bumped.outputs.tag || steps.tagged.outputs.tag }}

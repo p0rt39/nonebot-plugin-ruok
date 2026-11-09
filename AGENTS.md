@@ -87,6 +87,8 @@ gh workflow run release.yml -f tag=v0.4.3
 - `bump=auto` 取上一个标签之后合并的 PR 标签：出现 `breaking-change` 取 major，
   否则 `enhancement` 取 minor，其余 patch；也可直接传 `patch`/`minor`/`major`。
 - 手动推送 `v*` 标签仍可用，但标签版本必须与 `pyproject.toml` 的 version 一致。
+- 自上一个标签以来没有新提交时，workflow 以 `Nothing to release` 结束，不产生空版本；
+  补发入口 `-f tag=...` 不受该守卫影响。
 - 发布作业经 `release` environment 运行，该 environment 目前没有 required reviewers：
   拥有 write 权限即等于拥有发布能力，新增 collaborator 前要意识到这一点。
 - 改动 `.github/workflows/**` 后先跑 `-f dry_run=true` 演练，再正式发布。
