@@ -37,6 +37,7 @@ uv run pytest tests/test_web_api_sessions.py
 uv run pytest tests/test_web_api_modules.py
 uv run pytest tests/test_web_api_notifications.py
 uv run pytest tests/test_web_api_users.py
+uv run pytest tests/test_webui_sessions_perf.py
 ```
 
 ## 测试布局
@@ -45,12 +46,13 @@ uv run pytest tests/test_web_api_users.py
 - `test_chat_render.py`：图片模板字段与 HTML 转义；命令测试 mock 渲染/发送，
   因此该套件不验证真实浏览器后端。
 - `test_collector.py`：指标、tracker、进程/系统采集。
-- `test_sessions.py`：Session CRUD、过滤、链接、统计、插件影响索引。
+- `test_sessions.py`：Session CRUD、过滤、链接、统计、插件影响索引、批量状态变更与陈旧判定。
 - `test_modules.py`：模块 CRUD 与直接/传播状态推导。
+- `test_webui_sessions_perf.py`：Session 读取路径与批量 action 的单次扫描/不阻塞事件循环回归。
 - `test_web_api.py`：通用 API key 与路由回归测试。
 - `test_web_api_auth.py`：login/register/bind/remember/reset/auth 守卫。
 - `test_web_api_dashboard.py`：admin/user 仪表盘与趋势端点。
-- `test_web_api_sessions.py`：Session WebUI/API 行为。
+- `test_web_api_sessions.py`：Session WebUI/API 行为，含批量面板与批量 action 的守卫/边界。
 - `test_web_api_modules.py`：模块 WebUI 行为。
 - `test_web_api_notifications.py`：通知规则 WebUI 行为。
 - `test_web_api_users.py`：用户管理与自助。

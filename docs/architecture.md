@@ -106,6 +106,7 @@ Module 状态在查询时推导：
 `count_stale_pending` / `bulk_resolve_stale_pending` 以 `last_seen_at < cutoff` 判定陈旧
 （与列表排序字段一致）；自动清理由 `register_stale_cleanup_job` 按
 `stale_pending_after_hours` / `stale_pending_auto_resolve` 注册，APScheduler 缺失时跳过。
+
 列表按 `(last_seen_at, file mtime_ns, session_id)` 降序。HTTP 日期过滤用
 `parse_filter_datetime()`：naive 视为 UTC，带偏移归一到 UTC，非法输入返回 400。搜索包含
 持久化的 affected plugins。链接合并组、拒绝自链接、不合并状态。

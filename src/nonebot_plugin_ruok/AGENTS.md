@@ -30,6 +30,7 @@ Scope：`src/nonebot_plugin_ruok/`（Python 包根）。在进入子目录前请
 
 - Startup 必须零配置可用；非 ASGI 驱动跳过 ASGI 挂载。
 - APScheduler、监控、通知、指标、摘要调度均为 **best-effort**；失败要记录日志且不得拖垮主 Bot。
+  陈旧待确认自动清理由 `register_stale_cleanup_job` 在 startup 注册，同样受此约束。
 - 配置统一走 `ScopedConfig`，dotenv 键保持 `RUOK__...`。
 - API key（`/ruok/api/*`）与 WebUI 认证相互独立；改动任一侧时不要串用另一侧的守卫。
 - 健康聚合值（`available`/`degraded`/`unavailable`）与单项检查值
@@ -42,6 +43,9 @@ Scope：`src/nonebot_plugin_ruok/`（Python 包根）。在进入子目录前请
 ## 配置约束（config.py）
 
 - `cache_ttl` 必须为有限值且 `>= 0.5` 秒；`webui_session_ttl` 必须为正整数。
+- `stale_pending_after_hours` 用 `ge=0.0` 保留零值语义：`0` 同时关闭陈旧计数、WebUI 陈旧入口
+  与定时清理；`stale_pending_resolve_status` 只接受 `solved`/`ignored`（终态），默认
+  `ignored`，避免自动清理把真实缺陷标为已修复。
 - 空值语义：`webui_admin_password` 为空会禁用**整个 WebUI 登录**（含内置 admin 与普通用户，
   见 `webui/auth.py` `admin_configured` 分支）；`api_key` 为空时受保护的 `/ruok/api/*` 端点
   返回 401 而非公开（`/health` 除外）。

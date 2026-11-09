@@ -26,6 +26,8 @@ Scope：`tests/`。先读根 `AGENTS.md`。
 
 - 改动涉及 Session 状态语义、模块状态传播、持久化形状、API 契约、WebUI 路由/守卫、认证或
   通知冷却/持久化时，**新增或更新相应回归测试**并跑全量 pytest。
+- 批量 Session 变更（`bulk_update_sessions`）与陈旧清理属于 Session 状态语义：回归测试要断言
+  单次 `rebuild_plugin_impacts` 与单条聚合事件，避免退回按行重建的实现。
 - 测试命名与现有文件对齐（`test_<subsystem>.py`、`test_web_api_<surface>.py`）。
 
 ## 描述性参考

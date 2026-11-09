@@ -25,7 +25,7 @@
 - 系统指标：CPU、内存、磁盘、网络、进程、运行时间。
 - 连接监控：Bot 连接/断开、适配器、自身 ID、可选深度延迟检查。
 - 插件内省：自动捕获已加载插件、元信息、Matcher、健康提示。
-- Session 追踪：自动捕获日志错误，支持手动上报、查找、备注、关联、确认、解决、忽略。
+- Session 追踪：自动捕获日志错误，支持手动上报、查找、备注、关联、确认、解决、忽略，可按筛选批量处理与清理陈旧积压。
 - 插件级影响传播：确认 Session 时可指定影响插件，相关模块自动进入 `unavailable`。
 - WebUI：完整鉴权、实时更新、关键指标实时显示、Bot用户/Bot开发者双显示模板。
 - 账号体系：内置 admin、普通用户注册、平台账号绑定、记住登录、自助重设密码。
@@ -613,15 +613,16 @@ src/nonebot_plugin_ruok/
 - `webui_test_utils.py`：FastAPI `TestClient`、WebUI 登录、模块/通知测试辅助函数。
 - `plugin_test.py`：NoneBot `/ruok` 命令、绑定、重设密码、状态查询、确认/解决等交互测试。
 - `test_collector.py`：指标采集、进程快照、网络/磁盘速率追踪。
-- `test_sessions.py`：Session CRUD、筛选、搜索、关联、统计、插件影响索引。
+- `test_sessions.py`：Session CRUD、筛选、搜索、关联、统计、插件影响索引、批量状态变更与陈旧判定。
 - `test_modules.py`：模块 CRUD、直接/插件传播状态推导、相关 Session 查询。
 - `test_web_api.py`：API key 与路由优先级回归测试。
 - `test_web_api_auth.py`：登录、注册、绑定、记住登录、密码重设、鉴权边界。
 - `test_web_api_dashboard.py`：管理员/普通用户 Dashboard、趋势图和趋势数据端点。
-- `test_web_api_sessions.py`：Session WebUI、Session API、影响插件编辑。
+- `test_web_api_sessions.py`：Session WebUI、Session API、影响插件编辑、批量面板与批量 action。
 - `test_web_api_modules.py`：模块 WebUI 列表、详情、编辑、删除。
 - `test_web_api_notifications.py`：通知规则 WebUI 列表、详情、编辑、删除。
 - `test_web_api_users.py`：用户管理与普通用户自助账号操作。
+- `test_webui_sessions_perf.py`：Session 读取路径与批量 action 的单次目录扫描、事件循环不阻塞回归。
 
 ## 开发
 
