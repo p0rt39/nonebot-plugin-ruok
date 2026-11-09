@@ -62,8 +62,10 @@ modify -> ruff -> basedpyright -> focused pytest -> (full pytest) -> [本地] �
 - 插件须零配置可加载；缺少配置时优雅降级。
 - 异步路径禁同步阻塞；跨插件依赖先 `require()`。
 - 保留 `__init__.py` 的 `PluginMetadata`；README 继续提供 `nb plugin install`。
-- CI 与发布：`prek` 与 `typos` 在 pre-commit/CI 中执行，勿跳过；打 `v*` 标签触发 release，
-  标签版本必须与 `pyproject.toml` 的 version 一致，版本号工具会自动提交并打标签。
+- CI 与发布：`prek` 与 `typos` 在 pre-commit/CI 中执行，勿跳过；CI 工作流只在 PR 上运行，
+  master 的 push（含 bump 提交）不重跑矩阵。发布走 `gh workflow run release.yml -f bump=auto`
+  （或手动推送 `v*` 标签），标签版本必须与 `pyproject.toml` 的 version 一致；workflow 会自行
+  提交 bump 并打标签，日常开发不要手动 bump。
 
 ## 全局不变量
 

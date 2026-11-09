@@ -75,7 +75,9 @@ uv run pytest tests/test_webui_sessions_perf.py
   检查环境选择。
 - `uv run poe test` 以 xdist（`-n auto`）跑 pytest，产出 XML 覆盖率与 JUnit 报告；
   覆盖率门槛 >= 70%。裸 `uv run pytest` 在未启用覆盖率时不强制该门槛。
-  CI 在 Linux 的 Python 3.10–3.14 上跑测试；其类型检查任务在 `uv sync --locked` 后用
-  Python 3.12 + `uvx basedpyright==1.40.0`。
+  CI 工作流只在 PR 上运行（master 的 push 与 bump 提交不再重复跑矩阵），测试覆盖 Linux 的
+  Python 3.10、3.12、3.14；类型检查任务在 `uv sync --locked` 后用 Python 3.12 +
+  `uvx basedpyright==1.40.0`。发布 workflow 会对被打标签的树用单个 Python 版本再跑一次
+  `uv run poe test`。
 - 构建用 `uv build`；改动包数据/依赖时检查 Jinja 模板、vendor 静态资源与许可证是否随包分发。
   保持 `uv.lock` 与项目元数据同步。

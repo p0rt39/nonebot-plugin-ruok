@@ -1,31 +1,25 @@
 name: CI
 
+# Pull requests are the only place the test matrix runs. A merge on an
+# up-to-date branch produces the tree that was just tested, and the release
+# workflow checks the exact tree it publishes. Pushes to master start no CI, so
+# version-bump commits no longer re-run the whole matrix.
 on:
-  push:
-    branches:
-      - master
   pull_request:
-    paths:
-      - "src/**"
-      - "tests/**"
-      - "uv.lock"
-      - "pyproject.toml"
-      - ".pre-commit-config.yaml"
-      - ".github/workflows/**"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # Ruff, typos, uv-lock and uv-sync all live in .pre-commit-config.yaml, so one
+  # prek job covers them; separate jobs would repeat the same work.
   prek:
     name: Prek
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: j178/prek-action@v2
-
-  typos:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: crate-ci/typos@dbe52f72499cd4ab666928e4d14ecfa9ddbb6852 # v1.48.0
 
   basedpyright:
     name: BasedPyright
@@ -48,25 +42,20 @@ jobs:
 
   test:
     name: Coverage
-    # runs-on: ${{ matrix.os }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    concurrency:
-      # group: test-coverage-${{ github.ref }}-${{ matrix.python-version }}-${{ matrix.os }}
-      group: coverage-${{ github.ref }}-${{ matrix.python-version }}
-      cancel-in-progress: true
 
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        # os: [ubuntu-latest, windows-latest, macos-latest]
-        # pydantic-version: ["v1", "v2"]
+        # Both supported endpoints plus one middle version; 3.11 and 3.13 have
+        # rarely differed from their neighbours. Add them back if a regression
+        # turns out to be version-specific.
+        python-version: ["3.10", "3.12", "3.14"]
 
     env:
-      # OS: ${{ matrix.os }}
       PYTHON: ${{ matrix.python-version }}
       UV_NO_SYNC: 1
 

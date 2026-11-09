@@ -37,9 +37,17 @@
 
 ## 版本与发布
 
-- 版本由 `pyproject.toml` 的 `version` 与 bump 配置维护；`v*` 标签触发
-  `.github/workflows/release.yml`（标签需与项目版本一致，锁定依赖与覆盖率测试通过
-  后才构建、发布并创建 GitHub Release）。
-- 版本 bump 工具会自动提交与打标签；普通开发/文档工作不要手动调用它。
+- CI 只在 `pull_request` 上运行（`.github/workflows/ci.yml`）。master 的 push 与
+  bump 提交不再触发测试矩阵；合并前的 PR 检查就是对合并结果的检查。
+- 发布统一走 `.github/workflows/release.yml`，两种入口：
+  - `gh workflow run release.yml -f bump=auto`（日常路径）：workflow 自行 bump、
+    提交、打标签、构建、发布并创建 GitHub Release；
+  - 手动推送 `v*` 标签（旧的本地 bump 流程仍然可用）。
+- bump 级别：`auto` 读取上一个标签之后合并的 PR 标签，出现 `breaking-change` 取
+  major，否则出现 `enhancement` 取 minor，其余取 patch；也可用 `-f bump=patch` 等直接指定。
+- 标签版本必须与 `pyproject.toml` 的 `version` 一致，workflow 在发布前校验；bump 由
+  自动化完成，普通开发/文档工作不要手动调用 bump 工具。
+- workflow 用 `GITHUB_TOKEN` 推送 bump 提交与标签，因此 master 若启用保护规则，需要给
+  GitHub Actions 留 bypass，否则推送会被拒绝。
 - 构建后端为 `uv_build`；改动包数据/依赖时用 `uv build` 并检查模板、vendor 静态资源
   与许可证是否随包分发。

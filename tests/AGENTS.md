@@ -20,7 +20,8 @@ Scope：`tests/`。先读根 `AGENTS.md`。
 
 - `uv run pytest` 跑全量；`uv run poe test` 以 xdist 并产出覆盖率/JUnit（coverage 门槛 >= 70%）。
 - 裸 `uv run pytest` 未启用覆盖率时不强制该门槛。
-- CI 在 Linux Python 3.10–3.14 上跑测试；类型任务用 Python 3.12 + `uvx basedpyright==1.40.0`。
+- CI 只在 PR 上跑矩阵（Linux Python 3.10、3.12、3.14）；类型任务用 Python 3.12 +
+  `uvx basedpyright==1.40.0`。发布 workflow 用单个 Python 版本复跑 `uv run poe test`。
 
 ## 变更约束
 
