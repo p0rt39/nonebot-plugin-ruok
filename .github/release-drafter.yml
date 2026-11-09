@@ -36,12 +36,16 @@ categories:
 change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
 change-title-escapes: '\<*_&' # You can add # and @ to disable mentions, and add ` to disable code blocks.
 version-resolver:
+  # Mirrors the precedence in .github/workflows/release.yml: major > minor >
+  # patch, with breaking-change/enhancement as aliases used by the autolabeler.
   major:
     labels:
       - "major"
+      - "breaking-change"
   minor:
     labels:
       - "minor"
+      - "enhancement"
   patch:
     labels:
       - "patch"

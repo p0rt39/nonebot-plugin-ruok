@@ -5,7 +5,9 @@ on:
     branches:
       - master
   pull_request:
-    types: [opened, reopened, synchronize]
+    # `edited` and `labeled` keep the draft in step when a title gains "!:"
+    # or a maintainer adds an explicit version label after the PR opened.
+    types: [opened, reopened, synchronize, edited, labeled]
 
 permissions:
   contents: read

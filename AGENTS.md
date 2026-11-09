@@ -84,8 +84,11 @@ gh workflow run release.yml -f bump=patch -f dry_run=true
 gh workflow run release.yml -f tag=v0.4.3
 ```
 
-- `bump=auto` 取上一个标签之后合并的 PR 标签：出现 `breaking-change` 取 major，
-  否则 `enhancement` 取 minor，其余 patch；也可直接传 `patch`/`minor`/`major`。
+- `bump=auto` 取上一个标签之后合并的 PR 标签，按 major > minor > patch 取最高档：
+  `breaking-change` 与 `major` 都算 major，`enhancement` 与 `minor` 都算 minor；也可直接传
+  `patch`/`minor`/`major`。
+- Release 说明优先取同名 release-drafter 草稿正文；草稿缺失、为空或只有 `* No changes` 时回退到
+  GitHub 自动生成说明。定级规则与 `release-drafter.yml` 的 `version-resolver` 必须同步修改。
 - 手动推送 `v*` 标签仍可用，但标签版本必须与 `pyproject.toml` 的 version 一致。
 - 自上一个标签以来没有新提交时，workflow 以 `Nothing to release` 结束，不产生空版本；
   补发入口 `-f tag=...` 不受该守卫影响。

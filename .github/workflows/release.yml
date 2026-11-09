@@ -95,8 +95,10 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # auto: any merged breaking-change PR -> major, otherwise any merged
-      # enhancement PR -> minor, otherwise patch. Labels come from the
+      # auto: any merged major/breaking-change PR -> major, otherwise any
+      # merged minor/enhancement PR -> minor, otherwise patch. Keep this
+      # precedence in step with version-resolver in release-drafter.yml, so the
+      # draft tag and the published version agree. Labels come from the
       # release-drafter autolabeler (branch names and titles).
       - name: Resolve bump level
         id: bump
@@ -117,9 +119,13 @@ jobs:
               --json mergedAt,labels \
               --jq ".[] | select((.mergedAt | fromdateiso8601) > $SINCE) | .labels[].name")
             echo "Labels merged after ${LAST_TAG:-<no previous tag>}: ${LABELS:-<none>}"
-            LEVEL=patch
-            if printf '%s\n' "$LABELS" | grep -qx 'enhancement'; then LEVEL=minor; fi
-            if printf '%s\n' "$LABELS" | grep -qx 'breaking-change'; then LEVEL=major; fi
+            if printf '%s\n' "$LABELS" | grep -qxE 'major|breaking-change'; then
+              LEVEL=major
+            elif printf '%s\n' "$LABELS" | grep -qxE 'minor|enhancement'; then
+              LEVEL=minor
+            else
+              LEVEL=patch
+            fi
           fi
           echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
 
@@ -192,18 +198,43 @@ jobs:
           TAG: ${{ steps.bumped.outputs.tag || steps.tagged.outputs.tag }}
         run: |
           set -euo pipefail
-          # Release Drafter keeps a draft on the upcoming version name. Delete that
-          # draft by id so an already published release with the same tag is never
-          # touched (drafts and real releases can share a tag name).
+          # Release Drafter keeps a draft on the upcoming version name, and that
+          # body carries the categories and template from release-drafter.yml.
+          # Capture it before deleting the draft, so it can become the notes of
+          # the published release.
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" \
+            --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .body" \
+            > release-notes.md
+
+          # Delete that draft by id so an already published release with the
+          # same tag is never touched (drafts and real releases can share a tag
+          # name). `gh release view` resolves drafts too, so this has to happen
+          # before the existence check below.
           DRAFT_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" \
             --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" | head -n 1)
           if [ -n "$DRAFT_ID" ]; then
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$DRAFT_ID"
           fi
-          if gh release view "$TAG" > /dev/null 2>&1; then
+
+          PUBLISHED=$(gh release view "$TAG" --json isDraft --jq '.isDraft' \
+            2>/dev/null || echo missing)
+          if [ "$PUBLISHED" = "false" ]; then
             # Retry of a run that already created the release.
             gh release upload "$TAG" dist/*.tar.gz dist/*.whl --clobber
+            exit 0
+          fi
+
+          # An empty draft, or the "* No changes" body Release Drafter writes
+          # when nothing was merged, would make useless notes; fall back to
+          # GitHub's generated notes in that case.
+          BODY=$(tr -d '[:space:]' < release-notes.md 2>/dev/null || true)
+          if [ -n "$BODY" ] && [ "$BODY" != "*Nochanges" ]; then
+            gh release create "$TAG" dist/*.tar.gz dist/*.whl \
+              --title "$TAG" \
+              --notes-file release-notes.md
           else
+            echo "No usable draft notes for $TAG; falling back to generated notes." \
+              >> "$GITHUB_STEP_SUMMARY"
             gh release create "$TAG" dist/*.tar.gz dist/*.whl \
               --title "$TAG" \
               --generate-notes

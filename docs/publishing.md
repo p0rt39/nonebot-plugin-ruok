@@ -68,11 +68,15 @@ gh workflow run release.yml -f bump=patch -f dry_run=true       # 演练：不�
 gh workflow run release.yml -f tag=v0.4.3                       # 补发失败的那次发布，不会再 bump
 ```
 
-- bump 级别：`auto` 读取上一个标签之后合并的 PR 标签，出现 `breaking-change` 取 major，
-  否则出现 `enhancement` 取 minor，其余取 patch；也可用 `-f bump=patch` 等直接指定。
+- bump 级别：`auto` 读取上一个标签之后合并的 PR 标签，按 major > minor > patch 取最高档：
+  `breaking-change` 与 `major` 都算 major，`enhancement` 与 `minor` 都算 minor，其余取 patch
+  （`patch` 标签只在没有更高档标签时生效）。也可用 `-f bump=patch` 等直接指定。
 - 标签版本必须与 `pyproject.toml` 的 `version` 一致，workflow 在发布前校验。
 - workflow 用 `GITHUB_TOKEN` 推送 bump 提交与标签；这类推送不会触发新的 workflow run。
-- release-drafter 会占用下一个版本名的草稿；发布步骤按 id 删除同名**草稿**，正式 Release 不受影响。
+- release-drafter 会占用下一个版本名的草稿；发布时优先把草稿正文作为 Release 说明，再按 id
+  删除该**草稿**（同名正式 Release 不受影响）。草稿缺失、正文为空或只有 `* No changes` 时回退到
+  GitHub 自动生成的说明。PR 打开、同步、标题编辑与打标签都会刷新草稿与自动标签；合并后先等
+  Release Drafter 运行完成，草稿才包含该 PR。
 - 重复触发有守卫：自上一个标签以来没有新提交时，workflow 以 `Nothing to release` 结束，
   后续步骤全部跳过，不会产出空版本；`-f tag=...` 的补发入口不受该守卫影响。
 - 重试安全：`uv publish --check-url` 跳过已存在的文件，已存在的 Release 走 `gh release upload --clobber`。
