@@ -6,6 +6,7 @@ from webui_test_utils import (
     _client,
     _login_admin,
     _webui_config,
+    _count_session_validations,
 )
 
 
@@ -431,6 +432,34 @@ def _create_many_sessions(data_dir: Path, count: int) -> list[str]:
     ]
 
 
+def test_api_sessions_reads_each_session_file_once(tmp_path: Path, monkeypatch) -> None:
+    _create_many_sessions(tmp_path, 6)
+    client = _client(_webui_config(api_key="secret"), tmp_path)
+
+    calls = _count_session_validations(monkeypatch)
+    response = client.get("/ruok/api/sessions", headers={"x-ruok-api-key": "secret"})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 6
+    assert calls["count"] == 6
+
+
+def test_api_session_stats_reads_each_session_file_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _create_many_sessions(tmp_path, 4)
+    client = _client(_webui_config(api_key="secret"), tmp_path)
+
+    calls = _count_session_validations(monkeypatch)
+    response = client.get(
+        "/ruok/api/sessions/stats", headers={"x-ruok-api-key": "secret"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 4
+    assert calls["count"] == 4
+
+
 def test_webui_sessions_list_paginates_and_pushes_url(tmp_path: Path) -> None:
     _create_many_sessions(tmp_path, 25)
     client = _client(_webui_config(), tmp_path)
@@ -750,3 +779,13 @@ def test_detail_actions_still_return_the_detail_fragment(tmp_path: Path) -> None
     assert 'class="timeline"' in response.text
     assert 'id="notes-area"' in response.text
     assert 'id="linked-container"' in response.text
+
+
+def test_session_detail_page_returns_404_for_unknown_session(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions/ruok-deadbeef")
+
+    assert response.status_code == 404
+    assert "Session not found" in response.text

@@ -11,6 +11,7 @@ import traceback
 from typing import Any
 from pathlib import Path
 from datetime import datetime, timezone
+from dataclasses import dataclass
 
 from nonebot import logger
 
@@ -115,6 +116,56 @@ def _plugin_impacts_path(data_dir: Path) -> Path:
     return data_dir / "plugin_impacts.json"
 
 
+@dataclass(frozen=True)
+class SessionSnapshot:
+    """One consistent read of the sessions directory.
+
+    ``entries`` pairs every Session with its file mtime so a snapshot-backed
+    listing keeps the documented ``(last_seen_at, mtime_ns, session_id)`` order
+    without touching the filesystem again.
+    """
+
+    entries: tuple[tuple[Session, int], ...]
+
+    @property
+    def sessions(self) -> list[Session]:
+        """Return the loaded Sessions in directory order."""
+        return [session for session, _mtime in self.entries]
+
+    def __len__(self) -> int:
+        return len(self.entries)
+
+
+def load_sessions(data_dir: Path) -> SessionSnapshot:
+    """Read every Session file once, skipping rows that fail validation.
+
+    Read, pagination, statistics and module derivation all use the same
+    snapshot so a single page render costs one pass over the directory instead
+    of one pass per module and per rendered row.
+    """
+    entries: list[tuple[Session, int]] = []
+    for f in _sessions_dir(data_dir).glob("*.json"):
+        try:
+            session = Session.model_validate_json(f.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError, OSError):
+            continue
+        except Exception as exc:
+            _handle_ruok_error(exc, f"list_sessions 读取文件: {f.name}", data_dir)
+            continue
+        try:
+            mtime_ns = f.stat().st_mtime_ns
+        except OSError:
+            mtime_ns = 0
+        entries.append((session, mtime_ns))
+    return SessionSnapshot(entries=tuple(entries))
+
+
+def _resolve_snapshot(
+    data_dir: Path, snapshot: SessionSnapshot | None
+) -> SessionSnapshot:
+    return snapshot if snapshot is not None else load_sessions(data_dir)
+
+
 def _save_session(data_dir: Path, session: Session) -> None:
     path = _session_path(data_dir, session.session_id)
     with locked_file(path):
@@ -194,6 +245,8 @@ def list_sessions(
     first_seen_before: datetime | None = None,
     plugin_name: str | None = None,
     reporter_platform: str | None = None,
+    *,
+    snapshot: SessionSnapshot | None = None,
 ) -> list[Session]:
     """List sessions with optional advanced filters.
 
@@ -205,6 +258,8 @@ def list_sessions(
         first_seen_before: Only sessions first seen before this time.
         plugin_name: Only sessions whose module_name matches a ModuleDefinition
                      that includes this plugin in its ``plugins`` list.
+        snapshot: Reuse an already loaded directory read instead of scanning
+                  again.
     """
     session_rows: list[tuple[Session, int]] = []
     statuses = {s.strip() for s in status.split(",")} if status else None
@@ -213,14 +268,7 @@ def list_sessions(
     if plugin_name:
         module_plugin_names = _build_module_plugin_map(data_dir)
 
-    for f in _sessions_dir(data_dir).glob("*.json"):
-        try:
-            s = Session.model_validate_json(f.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, ValueError, OSError):
-            continue
-        except Exception as exc:
-            _handle_ruok_error(exc, f"list_sessions 读取文件: {f.name}", data_dir)
-            continue
+    for s, mtime_ns in _resolve_snapshot(data_dir, snapshot).entries:
         if statuses and s.status not in statuses:
             continue
         if module_name and s.module_name != module_name:
@@ -245,10 +293,6 @@ def list_sessions(
             q = search.lower()
             if not _session_matches_search(s, q):
                 continue
-        try:
-            mtime_ns = f.stat().st_mtime_ns
-        except OSError:
-            mtime_ns = 0
         session_rows.append((s, mtime_ns))
     session_rows.sort(
         key=lambda row: (row[0].last_seen_at, row[1], row[0].session_id),
@@ -522,23 +566,22 @@ def unlink_session(data_dir: Path, session_id: str) -> bool:
     return True
 
 
-def get_linked_sessions(data_dir: Path, session_id: str) -> list[Session]:
+def get_linked_sessions(
+    data_dir: Path,
+    session_id: str,
+    *,
+    snapshot: SessionSnapshot | None = None,
+) -> list[Session]:
     """Return all sessions in the same link_group (excluding self)."""
     s = _load_session(data_dir, session_id)
     if s is None or s.link_group is None:
         return []
     group = s.link_group
-    linked: list[Session] = []
-    for f in _sessions_dir(data_dir).glob("*.json"):
-        try:
-            other = Session.model_validate_json(f.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, ValueError, OSError):
-            continue
-        except Exception as exc:
-            _handle_ruok_error(exc, f"get_linked_sessions 读取文件: {f.name}", data_dir)
-            continue
-        if other.link_group == group and other.session_id != session_id:
-            linked.append(other)
+    linked = [
+        other
+        for other in _resolve_snapshot(data_dir, snapshot).sessions
+        if other.link_group == group and other.session_id != session_id
+    ]
     linked.sort(key=lambda x: x.last_seen_at, reverse=True)
     return linked
 
@@ -589,7 +632,11 @@ def _build_module_plugin_map(data_dir: Path) -> dict[str, set[str]]:
     return mapping
 
 
-def build_plugin_impacts(data_dir: Path) -> dict[str, dict[str, list[str]]]:
+def build_plugin_impacts(
+    data_dir: Path,
+    *,
+    snapshot: SessionSnapshot | None = None,
+) -> dict[str, dict[str, list[str]]]:
     """Build plugin impact index from active sessions.
 
     This index is derived from Session JSON and is not the authoritative state.
@@ -602,7 +649,7 @@ def build_plugin_impacts(data_dir: Path) -> dict[str, dict[str, list[str]]]:
                 module_to_plugins.setdefault(module_name, set()).add(plugin_name)
 
         impacts: dict[str, dict[str, list[str]]] = {}
-        for session in list_sessions(data_dir):
+        for session in _resolve_snapshot(data_dir, snapshot).sessions:
             if session.status == "pending":
                 plugin_names = set(module_to_plugins.get(session.module_name, set()))
                 # A shared/ambiguous log source is stored under its plugin ID
@@ -659,9 +706,13 @@ def _session_matches_search(s: Session, q: str) -> bool:
 # ────────────────────────────────
 
 
-def get_session_stats(data_dir: Path) -> SessionStats:
+def get_session_stats(
+    data_dir: Path,
+    *,
+    snapshot: SessionSnapshot | None = None,
+) -> SessionStats:
     """Compute aggregate session statistics."""
-    all_sessions = list_sessions(data_dir)
+    all_sessions = _resolve_snapshot(data_dir, snapshot).sessions
     stats = SessionStats(total=len(all_sessions))
     by_module: dict[str, int] = {}
     for s in all_sessions:

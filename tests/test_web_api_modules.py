@@ -326,3 +326,13 @@ def test_session_rows_keep_the_compact_grid(tmp_path: Path) -> None:
     # shared script skips them so the compact grid is preserved.
     assert "form.closest('.session-row')" in client.get("/ruok/modules").text
     assert ".session-row [data-form-status]" not in response.text
+
+
+def test_module_detail_returns_404_for_unknown_module(tmp_path: Path) -> None:
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/modules/does-not-exist")
+
+    assert response.status_code == 404
+    assert "Module not found" in response.text

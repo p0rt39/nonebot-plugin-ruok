@@ -7,6 +7,7 @@ to avoid __init__.py's require() before NoneBot init.
 from __future__ import annotations
 
 import json
+from typing import Any
 from pathlib import Path
 
 
@@ -608,3 +609,93 @@ class TestResolveLogSource:
 
         assert derive_module_status(tmp_path, "music") == "degraded"
         assert derive_module_status(tmp_path, "lyrics") == "degraded"
+
+
+class TestModuleReadPaths:
+    """Module reads must derive every status from one session snapshot."""
+
+    def test_statuses_match_per_module_derivation(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            list_modules,
+            upsert_module,
+            derive_module_status_with_reasons,
+        )
+        from nonebot_plugin_ruok.collectors.sessions import create_session
+
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["shared"]))
+        upsert_module(tmp_path, ModuleDefinition(name="lyrics", plugins=["shared"]))
+        create_session(tmp_path, "music", "pending issue", ReporterInfo(type="user"))
+
+        modules = list_modules(tmp_path, ScopedConfig())
+
+        for module in modules:
+            status, reasons = derive_module_status_with_reasons(tmp_path, module.name)
+            assert (module.status, module.status_reasons) == (status, reasons)
+
+    def test_does_not_rewrite_plugin_impacts_file(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import list_modules, upsert_module
+        from nonebot_plugin_ruok.collectors.sessions import create_session
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin-a"]))
+        create_session(tmp_path, "music", "pending issue", ReporterInfo(type="user"))
+        list_modules(tmp_path, config)  # first run persists the built-in module
+
+        impacts_path = tmp_path / "plugin_impacts.json"
+        sentinel = json.dumps({"sentinel": {"pending": [], "unsolved": []}})
+        impacts_path.write_text(sentinel, encoding="utf-8")
+
+        list_modules(tmp_path, config)
+
+        assert impacts_path.read_text(encoding="utf-8") == sentinel
+
+    def test_list_modules_reuses_snapshot_without_session_reads(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from nonebot_plugin_ruok.config import ScopedConfig
+        from nonebot_plugin_ruok.protocol import ReporterInfo, ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import list_modules, upsert_module
+        from nonebot_plugin_ruok.collectors.sessions import (
+            load_sessions,
+            create_session,
+        )
+
+        config = ScopedConfig()
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin-a"]))
+        create_session(tmp_path, "music", "pending issue", ReporterInfo(type="user"))
+        list_modules(tmp_path, config)  # persist the built-in module first
+        snapshot = load_sessions(tmp_path)
+
+        original_read_text = Path.read_text
+        session_reads = {"count": 0}
+
+        def counting_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+            if self.parent.name == "sessions":
+                session_reads["count"] += 1
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+        modules = list_modules(tmp_path, config, snapshot=snapshot)
+
+        assert session_reads["count"] == 0
+        assert next(m for m in modules if m.name == "music").status == "degraded"
+
+    def test_module_plugin_map_exposes_definitions(self, tmp_path: Path) -> None:
+        from nonebot_plugin_ruok.protocol import ModuleDefinition
+        from nonebot_plugin_ruok.collectors.modules import (
+            upsert_module,
+            module_plugin_map,
+        )
+
+        upsert_module(tmp_path, ModuleDefinition(name="music", plugins=["plugin-a"]))
+
+        mapping = module_plugin_map(tmp_path)
+
+        assert mapping["music"] == ["plugin-a"]
+        assert "nonebot_plugin_ruok" in mapping["ruok"]
+        assert mapping.get("missing", []) == []

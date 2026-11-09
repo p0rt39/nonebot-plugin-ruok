@@ -202,3 +202,86 @@ def test_api_rejects_invalid_module_bodies_with_400(tmp_path: Path) -> None:
 
     assert [response.status_code for response in responses] == [400] * len(responses)
     assert list_sessions(tmp_path) == []
+
+
+def test_api_module_crud_roundtrip(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+
+    headers = {"X-RUOK-API-Key": "secret"}
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+
+    created = client.put(
+        "/ruok/api/modules/music",
+        headers=headers,
+        json={"display_name": "Music", "plugins": ["plugin-music"]},
+    )
+    listed = client.get("/ruok/api/modules", headers=headers)
+    fetched = client.get("/ruok/api/modules/music", headers=headers)
+    missing = client.get("/ruok/api/modules/does-not-exist", headers=headers)
+
+    assert created.status_code == 200
+    assert created.json()["display_name"] == "Music"
+    assert listed.status_code == 200
+    assert "music" in [module["name"] for module in listed.json()]
+    assert fetched.status_code == 200
+    assert fetched.json()["plugins"] == ["plugin-music"]
+    assert missing.status_code == 404
+
+    deleted = client.delete("/ruok/api/modules/music", headers=headers)
+    deleted_again = client.delete("/ruok/api/modules/music", headers=headers)
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True}
+    assert deleted_again.status_code == 404
+
+
+def test_api_linked_sessions_returns_group_members(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import (
+        link_sessions,
+        create_session,
+    )
+
+    headers = {"X-RUOK-API-Key": "secret"}
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+    reporter = ReporterInfo(type="user", user_id="u1")
+    first = create_session(tmp_path, "music", "first", reporter)
+    second = create_session(tmp_path, "music", "second", reporter)
+    link_sessions(tmp_path, first.session_id, second.session_id)
+
+    response = client.get(
+        f"/ruok/api/sessions/{first.session_id}/linked", headers=headers
+    )
+    missing = client.get("/ruok/api/sessions/ruok-deadbeef/linked", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["link_group"].startswith("ruok-grp-")
+    assert [item["session_id"] for item in response.json()["linked"]] == [
+        second.session_id
+    ]
+    assert missing.status_code == 404
+
+
+def test_api_metrics_history_returns_points_and_validates_hours(
+    tmp_path: Path,
+) -> None:
+    from nonebot_plugin_ruok.config import ScopedConfig
+    from nonebot_plugin_ruok.protocol import MetricPoint
+    from nonebot_plugin_ruok.collector import MetricsStore
+
+    headers = {"X-RUOK-API-Key": "secret"}
+    client = _client(ScopedConfig(api_key="secret"), tmp_path)
+    MetricsStore.append(
+        tmp_path,
+        MetricPoint(ts="2026-07-01T00:00:00+00:00", cpu_percent=12.5),
+    )
+
+    response = client.get("/ruok/api/metrics/history", headers=headers)
+    too_long = client.get(
+        "/ruok/api/metrics/history", headers=headers, params={"hours": 500}
+    )
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    assert too_long.status_code == 422

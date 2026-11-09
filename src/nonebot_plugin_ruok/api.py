@@ -168,7 +168,8 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
                 status_code=400,
                 detail="Invalid ISO datetime filter",
             ) from exc
-        sessions = list_sessions(
+        sessions = await asyncio.to_thread(
+            list_sessions,
             data_dir,
             status=status,
             module_name=module,
@@ -239,7 +240,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
     @router.get("/sessions/stats")
     async def api_session_stats(_: None = Depends(_require_api_key)) -> dict[str, Any]:
         """Return aggregate session statistics."""
-        stats = get_session_stats(data_dir)
+        stats = await asyncio.to_thread(get_session_stats, data_dir)
         return stats.model_dump(mode="json")
 
     @router.get("/sessions/{session_id}")
@@ -354,10 +355,10 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         _: None = Depends(_require_api_key),
     ) -> dict[str, Any]:
         """Get all sessions in the same link_group."""
-        session = get_session(data_dir, session_id)
+        session = await asyncio.to_thread(get_session, data_dir, session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        linked = get_linked_sessions(data_dir, session_id)
+        linked = await asyncio.to_thread(get_linked_sessions, data_dir, session_id)
         return {
             "link_group": session.link_group,
             "linked": [s.model_dump(mode="json") for s in linked],
@@ -370,7 +371,8 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         _: None = Depends(_require_api_key),
     ) -> list[dict[str, Any]]:
         """List modules with real-time status."""
-        return [m.model_dump(mode="json") for m in list_modules(data_dir, config)]
+        modules = await asyncio.to_thread(list_modules, data_dir, config)
+        return [m.model_dump(mode="json") for m in modules]
 
     @router.get("/modules/{name}")
     async def api_get_module(
@@ -378,7 +380,7 @@ def create_ruok_router(config: ScopedConfig, data_dir: Path) -> APIRouter:
         _: None = Depends(_require_api_key),
     ) -> dict[str, Any]:
         """Get one module."""
-        mod = get_module(data_dir, config, name)
+        mod = await asyncio.to_thread(get_module, data_dir, config, name)
         if mod is None:
             raise HTTPException(status_code=404, detail="Module not found")
         return mod.model_dump(mode="json")

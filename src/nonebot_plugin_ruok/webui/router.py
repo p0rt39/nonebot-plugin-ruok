@@ -35,12 +35,15 @@ from ..protocol import (
     MetricPoint,
     NetworkRate,
     ReporterInfo,
+    SessionStats,
     ModuleDefinition,
     NotificationRule,
+    PluginHealthInfo,
     FastMetricsSnapshot,
 )
 from ..collector import (
     MetricsStore,
+    SessionSnapshot,
     SessionPluginValidationError,
     get_module,
     get_session,
@@ -48,12 +51,14 @@ from ..collector import (
     delete_module,
     link_sessions,
     list_sessions,
+    load_sessions,
     upsert_module,
     create_session,
     unlink_session,
     update_session,
     _network_tracker,
     get_session_stats,
+    module_plugin_map,
     _handle_ruok_error,
     get_linked_sessions,
     collect_all_statuses,
@@ -245,14 +250,15 @@ def _account_reporter_platform(user: CurrentWebUIUser) -> str | None:
     return user.bound_platform
 
 
-def _module_plugin_options(
-    data_dir: Path,
-    config: ScopedConfig,
-    module_name: str,
-) -> list[str]:
-    """Return plugin options for a module without failing unknown modules."""
-    module = get_module(data_dir, config, module_name)
-    return module.plugins if module else []
+def _plugin_options_factory(data_dir: Path) -> Callable[[str], list[str]]:
+    """Build a module→plugins lookup for Session rows.
+
+    Reading the module definitions directly keeps the plugin picker cheap: the
+    row template asks for options once per rendered Session, and status
+    derivation would scan every Session file for each of those calls.
+    """
+    plugin_map = module_plugin_map(data_dir)
+    return lambda module_name: plugin_map.get(module_name, [])
 
 
 def _reporter_identity(user_id: str, platform: str | None) -> str:
@@ -422,8 +428,8 @@ def create_webui_router(
 
     # ── Shared render contexts ──
 
-    def _session_plugin_options(module_name: str) -> list[str]:
-        return _module_plugin_options(data_dir, config, module_name)
+    def _session_plugin_options_factory() -> Callable[[str], list[str]]:
+        return _plugin_options_factory(data_dir)
 
     def _session_list_context(
         *,
@@ -435,10 +441,15 @@ def create_webui_router(
         before: str = "",
         page: int = 1,
         page_size: int = SESSION_PAGE_SIZE_DEFAULT,
-    ) -> dict[str, Any]:
-        """Build the Session list context; raises ValueError on bad dates."""
+    ) -> tuple[dict[str, Any], SessionSnapshot]:
+        """Build the Session list context; raises ValueError on bad dates.
+
+        The returned snapshot lets callers reuse the same directory read for
+        module status derivation instead of scanning the sessions again.
+        """
         first_seen_after = parse_filter_datetime(after) if after else None
         first_seen_before = parse_filter_datetime(before) if before else None
+        snapshot = load_sessions(data_dir)
         sessions = list_sessions(
             data_dir,
             status=status or None,
@@ -447,6 +458,7 @@ def create_webui_router(
             first_seen_after=first_seen_after,
             first_seen_before=first_seen_before,
             plugin_name=plugin or None,
+            snapshot=snapshot,
         )
         filters = {
             "status": status,
@@ -467,22 +479,35 @@ def create_webui_router(
                 params.pop("page")
             return urlencode({k: v for k, v in params.items() if v not in ("", None)})
 
-        return {
-            **paging,
-            "stats": get_session_stats(data_dir),
-            "filters": filters,
-            "query_for": query_for,
-            "current_status": status,
-            "current_search": search,
-            "current_module": module,
-            "current_plugin": plugin,
-            "current_after": after,
-            "current_before": before,
-            "reporter_display": _reporter_display_factory(auth.list_users()),
-            "session_plugin_options": _session_plugin_options,
-        }
+        return (
+            {
+                **paging,
+                "stats": get_session_stats(data_dir, snapshot=snapshot),
+                "filters": filters,
+                "query_for": query_for,
+                "current_status": status,
+                "current_search": search,
+                "current_module": module,
+                "current_plugin": plugin,
+                "current_after": after,
+                "current_before": before,
+                "reporter_display": _reporter_display_factory(auth.list_users()),
+                "session_plugin_options": _session_plugin_options_factory(),
+            },
+            snapshot,
+        )
 
-    def _session_detail_context(session: Session) -> dict[str, Any]:
+    async def _load_session_list_context(
+        **filters: Any,
+    ) -> tuple[dict[str, Any], SessionSnapshot]:
+        """Build the Session list context outside the event loop."""
+        return await asyncio.to_thread(_session_list_context, **filters)
+
+    def _session_detail_context(
+        session: Session,
+        *,
+        snapshot: SessionSnapshot | None = None,
+    ) -> dict[str, Any]:
         session_description, session_traceback = _split_session_description(
             session.description
         )
@@ -495,9 +520,11 @@ def create_webui_router(
                 else {}
             ),
             "session_traceback": session_traceback,
-            "linked_sessions": get_linked_sessions(data_dir, session.session_id),
+            "linked_sessions": get_linked_sessions(
+                data_dir, session.session_id, snapshot=snapshot
+            ),
             "reporter_display": _reporter_display_factory(auth.list_users()),
-            "session_plugin_options": _session_plugin_options,
+            "session_plugin_options": _session_plugin_options_factory(),
         }
 
     def _render_session_action(
@@ -515,7 +542,7 @@ def create_webui_router(
             "_session_card.html.jinja2",
             s=session,
             reporter_display=_reporter_display_factory(auth.list_users()),
-            session_plugin_options=_session_plugin_options,
+            session_plugin_options=_session_plugin_options_factory(),
             headers=headers,
         )
 
@@ -562,27 +589,74 @@ def create_webui_router(
         ),
         user: CurrentWebUIUser = Depends(_login_guard),
     ) -> HTMLResponse:
+        snapshot: SessionSnapshot | None = None
         try:
-            status = await collect_all_statuses(config, data_dir)
+            snapshot = await asyncio.to_thread(load_sessions, data_dir)
+            status = await collect_all_statuses(config, data_dir, snapshot=snapshot)
         except (asyncio.TimeoutError, RuntimeError, OSError):
             from ..protocol import AggregatedStatus
 
+            snapshot = None
             status = AggregatedStatus(overall="unavailable")
         except Exception as exc:
-            _handle_ruok_error(exc, "page_dashboard 状态采集", data_dir)
+            await asyncio.to_thread(
+                _handle_ruok_error, exc, "page_dashboard 状态采集", data_dir
+            )
             from ..protocol import AggregatedStatus
 
+            snapshot = None
             status = AggregatedStatus(overall="unavailable")
-        modules = list_modules(data_dir, config)
-        stats = get_session_stats(data_dir)
 
-        # Hero banner partial (SSE-driven refresh)
+        # Hero banner partial (SSE-driven refresh).  It only needs the
+        # aggregated status, so it must not pay for module derivation.
         if _partial == "dashboard-hero":
             return render("_dashboard_hero.html.jinja2", status=status)
 
+        # Non-admins may read the hero banner and their own dashboard only.
+        if not user.is_admin and _partial:
+            raise HTTPException(status_code=403, detail="Admin required")
+
+        # SSE/polling partials that only render the aggregated status.
+        if _partial == "dashboard-metrics":
+            return render("_dashboard_metrics.html.jinja2", status=status)
+        if _partial == "dashboard-disk":
+            return render("_dashboard_disk.html.jinja2", status=status)
+        if _partial == "dashboard-connections":
+            return render("_dashboard_connections.html.jinja2", status=status)
+        if _partial == "dashboard-trends":
+            return render(
+                "_dashboard_trends.html.jinja2",
+                metrics_history=_query_metrics_history(data_dir, hours=trend_hours),
+                metrics_history_hours=trend_hours,
+            )
+
+        bound_user_id = user.bound_user_id
+        bound_platform = user.bound_platform
+        is_bound = user.is_bound
+
+        def _build_overview() -> tuple[
+            list[ModuleDefinition], SessionStats, list[Session]
+        ]:
+            resolved = snapshot if snapshot is not None else load_sessions(data_dir)
+            bound_sessions = (
+                list_sessions(
+                    data_dir,
+                    reporter_user_id=bound_user_id,
+                    reporter_platform=bound_platform,
+                    snapshot=resolved,
+                )
+                if is_bound
+                else []
+            )
+            return (
+                list_modules(data_dir, config, snapshot=resolved),
+                get_session_stats(data_dir, snapshot=resolved),
+                bound_sessions,
+            )
+
+        modules, stats, bound_sessions = await asyncio.to_thread(_build_overview)
+
         if not user.is_admin:
-            if _partial:
-                raise HTTPException(status_code=403, detail="Admin required")
             stored_user = auth.get_user(user.username)
             auth_key = auth.active_auth_key(stored_user)
             auth_key_expired = auth.auth_key_expired(stored_user)
@@ -600,15 +674,7 @@ def create_webui_router(
                 current_user=user,
                 status=status,
                 modules=modules,
-                sessions=(
-                    list_sessions(
-                        data_dir,
-                        reporter_user_id=user.bound_user_id,
-                        reporter_platform=user.bound_platform,
-                    )
-                    if user.is_bound
-                    else []
-                ),
+                sessions=bound_sessions,
                 all_modules=modules,
                 auth_key=auth_key,
                 auth_key_expired=auth_key_expired,
@@ -616,21 +682,8 @@ def create_webui_router(
                 reporter_display=_reporter_display_factory(auth.list_users()),
             )
 
-        # SSE/polling partial renders (other panels)
-        if _partial == "dashboard-metrics":
-            return render("_dashboard_metrics.html.jinja2", status=status)
-        if _partial == "dashboard-disk":
-            return render("_dashboard_disk.html.jinja2", status=status)
-        if _partial == "dashboard-connections":
-            return render("_dashboard_connections.html.jinja2", status=status)
         if _partial == "dashboard-stats":
             return render("_dashboard_stats.html.jinja2", stats=stats)
-        if _partial == "dashboard-trends":
-            return render(
-                "_dashboard_trends.html.jinja2",
-                metrics_history=_query_metrics_history(data_dir, hours=trend_hours),
-                metrics_history_hours=trend_hours,
-            )
 
         # Initial data for full page render
         try:
@@ -704,7 +757,7 @@ def create_webui_router(
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            context = _session_list_context(
+            context, snapshot = await _load_session_list_context(
                 status=status,
                 search=search,
                 module=module,
@@ -714,7 +767,9 @@ def create_webui_router(
                 page=page,
                 page_size=page_size,
             )
-            all_modules = list_modules(data_dir, config)
+            all_modules = await asyncio.to_thread(
+                list_modules, data_dir, config, snapshot=snapshot
+            )
             return render(
                 "sessions.html.jinja2",
                 request=request,
@@ -725,7 +780,9 @@ def create_webui_router(
         except ValueError:
             return _error_html("Invalid ISO datetime filter", status_code=400)
         except Exception as exc:
-            sid = _handle_ruok_error(exc, "page_sessions", data_dir)
+            sid = await asyncio.to_thread(
+                _handle_ruok_error, exc, "page_sessions", data_dir
+            )
             return HTMLResponse(
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
@@ -739,17 +796,20 @@ def create_webui_router(
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            session = get_session(data_dir, session_id)
+            session = await asyncio.to_thread(get_session, data_dir, session_id)
             if session is None:
                 return HTMLResponse("<p>Session not found</p>", status_code=404)
+            context = await asyncio.to_thread(_session_detail_context, session)
             return render(
                 "sessions_detail.html.jinja2",
                 request=request,
                 current_user=user,
-                **_session_detail_context(session),
+                **context,
             )
         except Exception as exc:
-            sid = _handle_ruok_error(exc, f"page_session_detail {session_id}", data_dir)
+            sid = await asyncio.to_thread(
+                _handle_ruok_error, exc, f"page_session_detail {session_id}", data_dir
+            )
             return HTMLResponse(
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
@@ -762,9 +822,9 @@ def create_webui_router(
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            modules = list_modules(data_dir, config)
-            # Gather loaded plugin names for datalist suggestions
-            plugin_names = _plugin_names()
+            modules, plugin_names = await asyncio.to_thread(
+                lambda: (list_modules(data_dir, config), _plugin_names())
+            )
             return render(
                 "modules.html.jinja2",
                 request=request,
@@ -775,7 +835,9 @@ def create_webui_router(
                 module=None,
             )
         except Exception as exc:
-            sid = _handle_ruok_error(exc, "page_modules", data_dir)
+            sid = await asyncio.to_thread(
+                _handle_ruok_error, exc, "page_modules", data_dir
+            )
             return HTMLResponse(
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
@@ -789,15 +851,32 @@ def create_webui_router(
         user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            mod = get_module(data_dir, config, name)
+
+            def _build() -> tuple[
+                ModuleDefinition | None,
+                list[Session],
+                list[PluginHealthInfo],
+                list[str],
+            ]:
+                snapshot = load_sessions(data_dir)
+                mod = get_module(data_dir, config, name, snapshot=snapshot)
+                if mod is None:
+                    return None, [], [], []
+                related = list_module_related_sessions(
+                    data_dir, name, snapshot=snapshot
+                )
+                all_plugins = _collect_plugin_inventory(skip_ruok=False)
+                plugin_names = [plugin.name for plugin in all_plugins]
+                linked_plugins = [
+                    plugin for plugin in all_plugins if plugin.name in mod.plugins
+                ]
+                return mod, related, linked_plugins, plugin_names
+
+            mod, sessions, linked_plugins, plugin_names = await asyncio.to_thread(
+                _build
+            )
             if mod is None:
                 return HTMLResponse("<p>Module not found</p>", status_code=404)
-            # Sessions for this module
-            sessions = list_module_related_sessions(data_dir, name)
-            # Plugin health for associated plugins
-            all_plugins = _collect_plugin_inventory(skip_ruok=False)
-            plugin_names = [plugin.name for plugin in all_plugins]
-            linked_plugins = [p for p in all_plugins if p.name in mod.plugins]
             return render(
                 "modules_detail.html.jinja2",
                 request=request,
@@ -808,12 +887,12 @@ def create_webui_router(
                 all_plugins=plugin_names,
                 extra_plugins=_extra_module_plugins(mod, plugin_names),
                 reporter_display=_reporter_display_factory(auth.list_users()),
-                session_plugin_options=lambda module_name: _module_plugin_options(
-                    data_dir, config, module_name
-                ),
+                session_plugin_options=_session_plugin_options_factory(),
             )
         except Exception as exc:
-            sid = _handle_ruok_error(exc, f"page_module_detail {name}", data_dir)
+            sid = await asyncio.to_thread(
+                _handle_ruok_error, exc, f"page_module_detail {name}", data_dir
+            )
             return HTMLResponse(
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
@@ -922,7 +1001,7 @@ def create_webui_router(
         _user: CurrentWebUIUser = Depends(_admin_guard),
     ) -> HTMLResponse:
         try:
-            context = _session_list_context(
+            context, _snapshot = await _load_session_list_context(
                 status=status,
                 search=search,
                 module=module,
@@ -943,7 +1022,9 @@ def create_webui_router(
         except ValueError:
             return _error_html("Invalid ISO datetime filter", status_code=400)
         except Exception as exc:
-            sid = _handle_ruok_error(exc, "partial_sessions", data_dir)
+            sid = await asyncio.to_thread(
+                _handle_ruok_error, exc, "partial_sessions", data_dir
+            )
             return HTMLResponse(
                 f'<p style="color:var(--pico-del-color);">'
                 f"❌ 加载失败 [{type(exc).__name__}] → Session: {sid}</p>",
@@ -1013,7 +1094,7 @@ def create_webui_router(
                     },
                 )
             # Refresh session list
-            context = _session_list_context()
+            context, _snapshot = await asyncio.to_thread(_session_list_context)
             # Return session-content partial (stats + count + list)
             return render(
                 "_session_container.html.jinja2",

@@ -11,10 +11,10 @@ from nonebot import logger
 from ..config import ScopedConfig
 from .storage import locked_file, atomic_write_text
 from .sessions import (
-    list_sessions,
+    SessionSnapshot,
+    load_sessions,
     _data_dir_lock,
     build_plugin_impacts,
-    rebuild_plugin_impacts,
 )
 from ..protocol import Session, ModuleStatus, ModuleDefinition
 
@@ -70,11 +70,34 @@ def _builtin_module() -> ModuleDefinition:
 # ────────────────────────────────
 
 
-def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]:
+def module_plugin_map(data_dir: Path) -> dict[str, list[str]]:
+    """Return ``module name -> plugins`` without deriving module status.
+
+    UI code needs the plugin picker options for every rendered Session row.
+    Reading the definitions directly avoids the session scan that status
+    derivation performs.
+    """
+    return {
+        name: list(module.plugins)
+        for name, module in _load_module_definitions(data_dir).items()
+    }
+
+
+def list_modules(
+    data_dir: Path,
+    config: ScopedConfig,
+    *,
+    snapshot: SessionSnapshot | None = None,
+) -> list[ModuleDefinition]:
     """Return all defined modules with real-time derived status.
 
     Always includes a built-in «ruok» module representing RUOK itself.
     On first run, this module is persisted to modules.json.
+
+    All statuses are derived from one session snapshot, so the cost is one
+    directory read plus in-memory work regardless of module count.  This is a
+    read path and therefore never rewrites ``plugin_impacts.json``; the
+    mutating session operations rebuild that cache themselves.
     """
     with _data_dir_lock(data_dir):
         path = _modules_path(data_dir)
@@ -104,18 +127,28 @@ def list_modules(data_dir: Path, config: ScopedConfig) -> list[ModuleDefinition]
             if changed:
                 _path_write_json(path, [mod.model_dump() for mod in modules])
 
-        rebuild_plugin_impacts(data_dir)
+        resolved = snapshot if snapshot is not None else load_sessions(data_dir)
+        modules_by_name = {module.name: module for module in modules}
+        impacts = build_plugin_impacts(data_dir, snapshot=resolved)
         for mod in modules:
             mod.status, mod.status_reasons = derive_module_status_with_reasons(
-                data_dir, mod.name
+                data_dir,
+                mod.name,
+                snapshot=resolved,
+                impacts=impacts,
+                modules_by_name=modules_by_name,
             )
     return modules
 
 
 def get_module(
-    data_dir: Path, config: ScopedConfig, name: str
+    data_dir: Path,
+    config: ScopedConfig,
+    name: str,
+    *,
+    snapshot: SessionSnapshot | None = None,
 ) -> ModuleDefinition | None:
-    for m in list_modules(data_dir, config):
+    for m in list_modules(data_dir, config, snapshot=snapshot):
         if m.name == name:
             return m
     return None
@@ -167,18 +200,25 @@ def derive_module_status(data_dir: Path, module_name: str) -> ModuleStatus:
 def derive_module_status_with_reasons(
     data_dir: Path,
     module_name: str,
+    *,
+    snapshot: SessionSnapshot | None = None,
+    impacts: dict[str, dict[str, list[str]]] | None = None,
+    modules_by_name: dict[str, ModuleDefinition] | None = None,
 ) -> tuple[ModuleStatus, list[str]]:
     """Return module status and human-readable derivation reasons."""
-    direct_sessions = list_sessions(data_dir, module_name=module_name)
+    resolved = snapshot if snapshot is not None else load_sessions(data_dir)
+    direct_sessions = [s for s in resolved.sessions if s.module_name == module_name]
     reasons: list[str] = []
     if any(session.status == "unsolved" for session in direct_sessions):
         reasons.append("存在已确认未解决的本模块 Session")
         return "unavailable", reasons
 
-    modules_by_name = _load_module_definitions(data_dir)
+    if modules_by_name is None:
+        modules_by_name = _load_module_definitions(data_dir)
     module = modules_by_name.get(module_name)
     module_plugins = module.plugins if module else []
-    impacts = build_plugin_impacts(data_dir)
+    if impacts is None:
+        impacts = build_plugin_impacts(data_dir, snapshot=resolved)
     for plugin_name in module_plugins:
         unsolved_ids = impacts.get(plugin_name, {}).get("unsolved", [])
         if unsolved_ids:
@@ -203,9 +243,14 @@ def derive_module_status_with_reasons(
     return "available", reasons
 
 
-def list_module_related_sessions(data_dir: Path, module_name: str) -> list[Session]:
+def list_module_related_sessions(
+    data_dir: Path,
+    module_name: str,
+    *,
+    snapshot: SessionSnapshot | None = None,
+) -> list[Session]:
     """Return direct and plugin-propagated sessions related to a module."""
-    sessions = list_sessions(data_dir)
+    sessions = (snapshot if snapshot is not None else load_sessions(data_dir)).sessions
     modules_by_name = _load_module_definitions(data_dir)
     module = modules_by_name.get(module_name)
     module_plugins = set(module.plugins if module else [])
