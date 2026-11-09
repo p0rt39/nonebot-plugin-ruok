@@ -28,6 +28,10 @@ on:
         description: "Re-publish this tag instead of bumping; leave empty for a new release"
         type: string
         default: ""
+      dry_run:
+        description: "Bump, test and build without pushing, publishing or creating a release"
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -106,8 +110,12 @@ jobs:
             exit 1
           fi
           uv run bump-my-version bump "$LEVEL"
-          git push origin "HEAD:master"
-          git push origin "v$NEXT"
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            git push origin "HEAD:master"
+            git push origin "v$NEXT"
+          else
+            echo "Dry run: not pushing v$NEXT"
+          fi
           echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
 
@@ -141,11 +149,13 @@ jobs:
         run: uv build
 
       - name: Publish to PyPI
+        if: inputs.dry_run != true
         # Skip files that already reached the index so a retry after a late
         # failure (e.g. creating the GitHub Release) can finish the job.
         run: uv publish --check-url https://pypi.org/simple/
 
       - name: Create Release and Upload Assets
+        if: inputs.dry_run != true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.bumped.outputs.tag || steps.tagged.outputs.tag }}
