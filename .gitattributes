@@ -1,0 +1,10 @@
+# Normalize line endings: LF in the repository and in every checkout.
+#
+# ``core.autocrlf`` is machine-wide on some Windows setups (here it is true),
+# which writes CRLF into the working tree while the index stores LF. That made
+# ``git status`` report a dozen untouched files as modified and failed
+# ``ruff format --check`` (``[tool.ruff.format] line-ending = "lf"``) on an
+# otherwise clean checkout. Per-file attributes take precedence over
+# ``core.autocrlf``, so pinning ``eol=lf`` here fixes both without asking every
+# contributor to change their Git configuration.
+* text=auto eol=lf
