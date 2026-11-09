@@ -5,6 +5,9 @@ name: Release
 #     and publishes. This is the normal path after a feature PR merges.
 #   - push a v* tag by hand, which keeps the previous local-bump flow working.
 #
+# Scope: both entry points need repository write access. Contributors work up to
+# opening a pull request; pull request CI is read-only and cannot reach this job.
+#
 # The test matrix lives in the pull request workflow. Here one Python version is
 # enough: the only untested change since the PR is the version strings.
 # Pushes made with GITHUB_TOKEN do not trigger further workflow runs, so the tag

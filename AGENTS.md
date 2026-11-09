@@ -62,10 +62,35 @@ modify -> ruff -> basedpyright -> focused pytest -> (full pytest) -> [本地] �
 - 插件须零配置可加载；缺少配置时优雅降级。
 - 异步路径禁同步阻塞；跨插件依赖先 `require()`。
 - 保留 `__init__.py` 的 `PluginMetadata`；README 继续提供 `nb plugin install`。
-- CI 与发布：`prek` 与 `typos` 在 pre-commit/CI 中执行，勿跳过；CI 工作流只在 PR 上运行，
-  master 的 push（含 bump 提交）不重跑矩阵。发布走 `gh workflow run release.yml -f bump=auto`
-  （或手动推送 `v*` 标签），标签版本必须与 `pyproject.toml` 的 version 一致；workflow 会自行
-  提交 bump 并打标签，日常开发不要手动 bump。改动发布流程后先用 `-f dry_run=true` 演练。
+- CI 只在 PR 上运行；master 的 push（含 bump 提交）不重跑测试矩阵。这一步对所有贡献者生效：
+  一般贡献者完成到「创建 PR」即可，PR 检查就是合并前唯一的测试矩阵。
+
+### 发布操作（仅 write 权限维护者）
+
+**作用域**：本节只有拥有仓库 write 权限的 `owner`/`collaborator` 需要执行。一般贡献者到创建 PR
+为止，不参与合并与发布；没有 write 权限时 `gh workflow run` 与推送 `v*` 标签都会被拒绝。
+外部贡献者的 fork PR 使用只读 token，无法触发本仓库的任何发布步骤。
+
+发布由 `.github/workflows/release.yml` 完成，本地不跑 bump：
+
+```powershell
+# 日常发布：按上一个标签之后合并的 PR 标签自动定版本
+gh workflow run release.yml -f bump=auto
+
+# 演练：bump、测试、构建都会执行，但不推送、不发布、不建 Release
+gh workflow run release.yml -f bump=patch -f dry_run=true
+
+# 补发：发布中途失败（如 PyPI 已上传、建 Release 失败）时重跑该标签，不会二次 bump
+gh workflow run release.yml -f tag=v0.4.3
+```
+
+- `bump=auto` 取上一个标签之后合并的 PR 标签：出现 `breaking-change` 取 major，
+  否则 `enhancement` 取 minor，其余 patch；也可直接传 `patch`/`minor`/`major`。
+- 手动推送 `v*` 标签仍可用，但标签版本必须与 `pyproject.toml` 的 version 一致。
+- 发布作业经 `release` environment 运行，该 environment 目前没有 required reviewers：
+  拥有 write 权限即等于拥有发布能力，新增 collaborator 前要意识到这一点。
+- 改动 `.github/workflows/**` 后先跑 `-f dry_run=true` 演练，再正式发布。
+- 日常开发/文档工作不要本地调用 bump 工具；版本提交由 workflow 生成。
 
 ## 全局不变量
 

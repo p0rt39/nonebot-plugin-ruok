@@ -649,6 +649,11 @@ uv run pytest
 prek run --all-files
 ```
 
+CI 只在 Pull Request 上运行。**贡献者的流程到创建 PR 为止**：fork → 开 PR → 看 PR 上的检查结果，
+不需要跑发布相关步骤。合并、打标签、发布到 PyPI 与创建 GitHub Release 需要仓库 write 权限
+（`owner`/`collaborator`），由维护者执行；命令与作用域说明见
+[docs/publishing.md](docs/publishing.md#版本与发布)。
+
 ## 鸣谢
 
 ### [NoneBot2](https://nonebot.dev/) 及其社区生态

@@ -37,22 +37,44 @@
 
 ## 版本与发布
 
-- CI 只在 `pull_request` 上运行（`.github/workflows/ci.yml`）。master 的 push 与
-  bump 提交不再触发测试矩阵；合并前的 PR 检查就是对合并结果的检查。
-- 发布统一走 `.github/workflows/release.yml`，两种入口：
-  - `gh workflow run release.yml -f bump=auto`（日常路径）：workflow 自行 bump、
-    提交、打标签、构建、发布并创建 GitHub Release；
-  - 手动推送 `v*` 标签（旧的本地 bump 流程仍然可用）。
-- 演练用 `gh workflow run release.yml -f bump=patch -f dry_run=true`：bump、跑测试、
-  构建都会执行，但不推送、不发布、不建 Release。
-- 发布中途失败（如 PyPI 已上传、建 Release 失败）时，用
-  `gh workflow run release.yml -f tag=v0.4.3` 重跑该标签，不会再 bump 一次；
-  `uv publish --check-url` 会跳过已存在的文件。
-- bump 级别：`auto` 读取上一个标签之后合并的 PR 标签，出现 `breaking-change` 取
-  major，否则出现 `enhancement` 取 minor，其余取 patch；也可用 `-f bump=patch` 等直接指定。
-- 标签版本必须与 `pyproject.toml` 的 `version` 一致，workflow 在发布前校验；bump 由
-  自动化完成，普通开发/文档工作不要手动调用 bump 工具。
-- workflow 用 `GITHUB_TOKEN` 推送 bump 提交与标签，因此 master 若启用保护规则，需要给
-  GitHub Actions 留 bypass，否则推送会被拒绝。
+### 作用域
+
+- **贡献者（无 write 权限）**：工作到「创建 PR」为止。PR 上的 CI 使用只读 token，只做检查，
+  不能合并、打标签或发布；本地检查命令与 PR 检查一致，可直接在 fork 中运行。
+- **维护者（`owner`/`collaborator`，仓库 write 权限）**：负责合并、打标签与发布。下文「发布」
+  小节的命令只适用于这一范围；没有 write 权限时 `gh workflow run` 与推送 `v*` 标签都会被拒绝。
+- 发布作业经 `release` environment 运行，该 environment 目前没有 required reviewers：
+  拥有 write 权限即等于拥有发布到 PyPI 的能力。
+
+### CI 与合并
+
+- CI 只在 `pull_request` 上运行（`.github/workflows/ci.yml`）。master 的 push 与 bump 提交
+  不再触发测试矩阵；合并前的 PR 检查就是对合并结果的检查。
+- 这条等价关系要求合并时 PR 与 master 同步。当前 master 未启用分支保护，合并前需由维护者
+  保证：`gh pr update-branch <n>`（或本地 rebase 后推送）。
+- 矩阵为 Linux 的 Python 3.10 / 3.12 / 3.14，另有 `Prek` 与 `BasedPyright` 两个 job。
+
+### 发布
+
+发布统一走 `.github/workflows/release.yml`，两种入口（均需 write 权限）：
+
+- `gh workflow run release.yml -f bump=auto`（日常路径）：workflow 自行 bump、提交、打标签、
+  构建、发布到 PyPI，并创建 GitHub Release；
+- 手动推送 `v*` 标签（旧的本地 bump 流程仍然可用）。
+
+```powershell
+gh workflow run release.yml -f bump=auto                        # 日常发布
+gh workflow run release.yml -f bump=patch -f dry_run=true       # 演练：不推送、不发布、不建 Release
+gh workflow run release.yml -f tag=v0.4.3                       # 补发失败的那次发布，不会再 bump
+```
+
+- bump 级别：`auto` 读取上一个标签之后合并的 PR 标签，出现 `breaking-change` 取 major，
+  否则出现 `enhancement` 取 minor，其余取 patch；也可用 `-f bump=patch` 等直接指定。
+- 标签版本必须与 `pyproject.toml` 的 `version` 一致，workflow 在发布前校验。
+- workflow 用 `GITHUB_TOKEN` 推送 bump 提交与标签；这类推送不会触发新的 workflow run。
+- release-drafter 会占用下一个版本名的草稿；发布步骤按 id 删除同名**草稿**，正式 Release 不受影响。
+- 重试安全：`uv publish --check-url` 跳过已存在的文件，已存在的 Release 走 `gh release upload --clobber`。
+- 改动 `.github/workflows/**` 后先跑 `-f dry_run=true` 演练，再正式发布。
+- bump 由自动化完成，普通开发/文档工作不要手动调用 bump 工具。
 - 构建后端为 `uv_build`；改动包数据/依赖时用 `uv build` 并检查模板、vendor 静态资源
   与许可证是否随包分发。
