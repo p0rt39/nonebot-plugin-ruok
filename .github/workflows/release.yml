@@ -141,7 +141,9 @@ jobs:
         run: uv build
 
       - name: Publish to PyPI
-        run: uv publish
+        # Skip files that already reached the index so a retry after a late
+        # failure (e.g. creating the GitHub Release) can finish the job.
+        run: uv publish --check-url https://pypi.org/simple/
 
       - name: Create Release and Upload Assets
         env:
@@ -157,6 +159,11 @@ jobs:
           if [ -n "$DRAFT_ID" ]; then
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$DRAFT_ID"
           fi
-          gh release create "$TAG" dist/*.tar.gz dist/*.whl \
-            --title "$TAG" \
-            --generate-notes
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # Retry of a run that already created the release.
+            gh release upload "$TAG" dist/*.tar.gz dist/*.whl --clobber
+          else
+            gh release create "$TAG" dist/*.tar.gz dist/*.whl \
+              --title "$TAG" \
+              --generate-notes
+          fi
