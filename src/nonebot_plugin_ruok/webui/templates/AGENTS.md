@@ -8,6 +8,10 @@ Scope：`src/nonebot_plugin_ruok/webui/templates/`（SSR Jinja 模板）。先�
 - 列表与详情 partial 的卡片/操作按钮行为保持一致；Session 插件影响编辑需同时更新
   `_session_card.html.jinja2`（被 `_sessions_list.html.jinja2` 引入的行模板）与
   `_session_detail_content.html.jinja2`。
+- 批量维护面板在 `_session_bulk.html.jinja2`（由 `_session_container.html.jinja2` 引入）。
+  它把 `filters` 渲染成隐藏输入，保证「看到的筛选即处理范围」；批量提交以 `#session-content`
+  为 inner swap 目标，禁止 `outerHTML`（会删掉容器与筛选表单）。动作单选无默认值，
+  `[data-bulk-submit]` 初始 disabled，由 `sessions.html.jinja2` 的委托脚本在选中后启用。
 - 使用共享 Jinja 环境（`autoescape=True`）；状态徽章用 `_status_tone`，列表摘要用 `_session_summary`
   （均在 `../jinja.py`）。
 

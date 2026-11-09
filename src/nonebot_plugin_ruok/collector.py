@@ -19,11 +19,13 @@ from .protocol import MetricPoint
 
 # ── Re-export everything from the collectors subpackage ──
 from .collectors import (
+    BULK_MAX_SESSIONS,
     # monitor
     LogMonitor,
     # trackers
     DiskRateTracker,
     SessionSnapshot,
+    BulkSessionResult,
     NetworkRateTracker,
     SessionPluginValidationError,
     SessionUpdateValidationError,
@@ -45,11 +47,14 @@ from .collectors import (
     _network_tracker,
     get_session_stats,
     module_plugin_map,
+    stale_pending_ids,
     _handle_ruok_error,
     resolve_log_source,
     _connection_history,
+    count_stale_pending,
     get_linked_sessions,
     build_plugin_impacts,
+    bulk_update_sessions,
     collect_all_statuses,
     collect_fast_metrics,
     derive_module_status,
@@ -61,12 +66,16 @@ from .collectors import (
     collect_process_snapshot,
     # metrics (webui/router)
     _collect_plugin_inventory,
+    bulk_resolve_stale_pending,
+    register_stale_cleanup_job,
     list_module_related_sessions,
     derive_module_status_with_reasons,
 )
 from .collectors.storage import locked_file, atomic_write_text
 
 __all__ = [
+    "BULK_MAX_SESSIONS",
+    "BulkSessionResult",
     "DiskRateTracker",
     "LogMonitor",
     "MetricsStore",
@@ -80,10 +89,13 @@ __all__ = [
     "_network_tracker",
     "_startup_time",
     "build_plugin_impacts",
+    "bulk_resolve_stale_pending",
+    "bulk_update_sessions",
     "collect_all_statuses",
     "collect_fast_metrics",
     "collect_process_snapshot",
     "confirm_session_plugins",
+    "count_stale_pending",
     "create_session",
     "delete_module",
     "derive_module_status",
@@ -101,8 +113,10 @@ __all__ = [
     "module_plugin_map",
     "parse_filter_datetime",
     "rebuild_plugin_impacts",
+    "register_stale_cleanup_job",
     "resolve_log_source",
     "resolve_module_display",
+    "stale_pending_ids",
     "unlink_session",
     "update_session",
     "upsert_module",

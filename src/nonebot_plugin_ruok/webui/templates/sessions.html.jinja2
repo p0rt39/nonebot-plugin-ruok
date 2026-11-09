@@ -73,13 +73,16 @@
         margin: 0;
         padding: 0.2rem 0.65rem;
         font-size: 0.85em;
-        color: var(--pico-color);
+        /* Pico paints buttons with ``--pico-color`` set to the inverse colour,
+           so the chip must use the surface's own foreground token. */
+        color: var(--ruok-text);
         background: var(--ruok-surface);
         border: 1px solid var(--ruok-border);
         border-radius: 999px;
     }
     .status-chip:hover {
         background: var(--ruok-surface-2);
+        color: var(--ruok-text);
     }
     .status-chip.is-active {
         border-color: var(--pico-primary);
@@ -107,6 +110,84 @@
     .pagination__info {
         color: var(--ruok-text-muted);
         font-size: 0.85em;
+    }
+    .bulk-panel {
+        margin-bottom: 0.75rem;
+        padding: 0.5rem 0.8rem;
+        background: var(--ruok-surface);
+        border: 1px solid var(--ruok-border);
+        border-radius: var(--radius-md);
+    }
+    .bulk-panel > summary {
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .bulk-form {
+        margin: 0.6rem 0 0;
+    }
+    .bulk-panel__hint {
+        margin: 0 0 0.6rem;
+        color: var(--ruok-text-muted);
+        font-size: 0.88em;
+    }
+    .bulk-panel__hint--warn {
+        color: var(--ruok-text);
+    }
+    .bulk-actions {
+        display: grid;
+        gap: 0.35rem;
+        margin: 0 0 0.6rem;
+        padding: 0.5rem 0.7rem;
+        border: 1px solid var(--ruok-border);
+        border-radius: var(--radius-sm);
+    }
+    .bulk-actions legend {
+        padding: 0 0.35rem;
+        font-size: 0.85em;
+        color: var(--ruok-text-muted);
+    }
+    .bulk-actions label {
+        display: flex;
+        align-items: baseline;
+        gap: 0.45rem;
+        margin: 0;
+        font-size: 0.9em;
+        cursor: pointer;
+    }
+    .bulk-actions input[type="radio"] {
+        margin: 0;
+        flex: none;
+    }
+    .bulk-actions__label {
+        flex: none;
+        white-space: nowrap;
+    }
+    .bulk-actions__desc {
+        color: var(--ruok-text-muted);
+        font-size: 0.85em;
+    }
+    @media (max-width: 600px) {
+        /* Stack the label above its explanation so neither wraps mid-word. */
+        .bulk-actions label {
+            flex-wrap: wrap;
+        }
+        .bulk-actions__desc {
+            flex-basis: 100%;
+            padding-left: 1.6rem;
+        }
+    }
+    .bulk-panel .bulk-form > button[type="submit"] {
+        width: auto;
+        margin: 0;
+    }
+    .bulk-notice {
+        margin: 0 0 0.75rem;
+        padding: 0.45rem 0.7rem;
+        color: var(--ruok-text);
+        background: var(--ruok-accent-bg);
+        border: 1px solid var(--pico-primary);
+        border-radius: var(--radius-sm);
+        font-size: 0.9em;
     }
     @media (max-width: 1100px) {
         .filter-bar {
@@ -256,6 +337,24 @@
         if (!select) return;
         select.value = chip.getAttribute('data-status-filter');
         select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+})();
+
+// Bulk panel: a batch action has no default, so the submit button stays
+// disabled until an action is chosen. Delegated because HTMX replaces the
+// whole #session-content subtree after every filter and bulk response.
+(function() {
+    function syncBulkForm(input) {
+        var bulkForm = input.closest('.bulk-form');
+        if (!bulkForm) return;
+        var submit = bulkForm.querySelector('[data-bulk-submit]');
+        if (submit) submit.disabled = false;
+        var hint = bulkForm.querySelector('[data-bulk-confirm-hint]');
+        if (hint) hint.hidden = input.value !== 'confirm';
+    }
+    document.addEventListener('change', function(event) {
+        var input = event.target.closest('[data-bulk-action]');
+        if (input && input.checked) syncBulkForm(input);
     });
 })();
 </script>

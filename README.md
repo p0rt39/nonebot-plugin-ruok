@@ -176,7 +176,36 @@ SSE 每秒发送一次轻量 tick，并按此 TTL 触发完整状态采集；小
 | `RUOK__REPORT_WHITELIST_USERS` | `list[str]` | `[]` | 上报白名单用户 ID |
 | `RUOK__REPORT_WHITELIST_GROUPS` | `list[str]` | `[]` | 上报白名单群 ID |
 | `RUOK__CRISIS_MODE` | `bool` | `false` | 危机模式，跳过上报权限检查 |
+| `RUOK__STALE_PENDING_AFTER_HOURS` | `float` | `0.0` | 待确认 Session 超过该小时数未更新即视为陈旧；`0` 关闭陈旧统计、WebUI 陈旧面板与定时清理 |
+| `RUOK__STALE_PENDING_AUTO_RESOLVE` | `bool` | `false` | 是否启用定时清理陈旧待确认 Session（需要 `nonebot-plugin-apscheduler`） |
+| `RUOK__STALE_PENDING_RESOLVE_STATUS` | `"solved" \| "ignored"` | `"ignored"` | 自动处理陈旧 Session 时写入的状态 |
 | `RUOK__SUMMARY_INTERVAL_HOURS` | `float` | `4.0` | 未解决 Session 汇总通知间隔 |
+
+### 批量处理积压 Session
+
+长时间停留在「待确认」的 Session 会持续堆积。RUOK 提供两种批量入口，两者都只处理
+`pending` 与 `unsolved` 的 Session，已有的 `solved`/`ignored` 记录不会被改写。
+
+**WebUI 批量面板**（无需配置）：`/ruok/sessions` 的列表上方有「批量处理当前筛选结果」。
+它处理的是**当前筛选条件命中的全部 Session（跨分页）**，而不是仅当前页：
+
+- 先选择批量动作（确认为未解决 / 标记为已解决 / 标记为已忽略），提交按钮在选中动作后才启用；
+- 单次最多处理 500 条，超出时提示缩小筛选范围，不会部分执行；
+- 提交前有二次确认；操作不可撤销。
+
+批量确认等价于不带插件参数的确认：Session 变为 `unsolved`，但不会记录影响插件，
+因此不会向共享插件的模块传播 `unavailable`。需要插件级传播时请在详情页逐条确认。
+
+**陈旧待确认清理**（需配置）：设置 `RUOK__STALE_PENDING_AFTER_HOURS` 大于 `0` 后，
+Session 页面会出现陈旧面板，显示「`last_seen_at` 超过该小时数仍未更新」的待确认数量，
+并可一键处理。若同时把 `RUOK__STALE_PENDING_AUTO_RESOLVE` 设为 `true`，插件启动时会注册
+一个周期任务自动处理；该任务依赖 `nonebot-plugin-apscheduler`，未安装时自动清理不生效。
+
+判定陈旧使用 `last_seen_at`（与列表排序、页面显示一致）：反复出现的错误只要仍在更新就
+不会被视为陈旧。写入状态由 `RUOK__STALE_PENDING_RESOLVE_STATUS` 决定，默认 `ignored`
+（按误报处理），避免把真实缺陷误标为已修复。
+
+批量写入在单次请求内完成，只重建一次插件影响索引；处理后会即时更新状态计数与模块健康。
 
 上报权限顺序：
 
@@ -333,7 +362,7 @@ stateDiagram-v2
 | 页面 | 路由 | 说明 |
 | :--- | :--- | :--- |
 | 总览 | `/ruok` | 系统指标、连接、插件、模块、趋势、Session 统计 |
-| Sessions | `/ruok/sessions` | 按状态、模块、插件、时间筛选和搜索，每页 20 条；支持确认、解决、忽略 |
+| Sessions | `/ruok/sessions` | 按状态、模块、插件、时间筛选和搜索，每页 20 条；支持确认、解决、忽略，以及按当前筛选批量处理 |
 | Session 详情 | `/ruok/sessions/{id}` | 完整信息、用户说明、Traceback、关联 Session、影响插件、备注 |
 | 模块 | `/ruok/modules` | 模块列表与创建 |
 | 模块详情 | `/ruok/modules/{name}` | 编辑名称、显示名、描述、关联插件、删除 |

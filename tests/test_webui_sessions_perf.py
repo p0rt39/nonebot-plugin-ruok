@@ -179,6 +179,100 @@ def test_sessions_page_renders_without_modules_file(tmp_path: Path) -> None:
     assert "unconfigured-module" in response.text
 
 
+async def test_bulk_sessions_action_does_not_block_event_loop(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A slow bulk pass must not stop the loop from running other tasks."""
+    from nonebot_plugin_ruok.webui import router as router_module
+
+    _seed_sessions(tmp_path, 3, ["music"])
+    app = _app(_webui_config(), tmp_path)
+    transport = httpx.ASGITransport(app=app)
+
+    original_bulk = router_module.bulk_update_sessions
+
+    def slow_bulk(*args, **kwargs):
+        time.sleep(0.2)
+        return original_bulk(*args, **kwargs)
+
+    monkeypatch.setattr(router_module, "bulk_update_sessions", slow_bulk)
+
+    ticks = 0
+    running = True
+
+    async def probe() -> None:
+        nonlocal ticks
+        while running:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        login = await client.post(
+            "/ruok/login",
+            data={"username": "admin", "password": ADMIN_PASSWORD},
+            follow_redirects=False,
+        )
+        assert login.status_code == 302
+
+        probe_task = asyncio.create_task(probe())
+        try:
+            response = await client.post(
+                "/ruok/_actions/sessions-bulk", data={"action": "ignore"}
+            )
+        finally:
+            running = False
+            await probe_task
+
+    assert response.status_code == 200
+    # Without the thread offload the probe cannot run during the 200 ms pass.
+    assert ticks >= 5
+
+
+def test_bulk_sessions_action_rebuilds_impacts_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Processing N rows must not rebuild the impact index N times."""
+    from nonebot_plugin_ruok.collectors import sessions as sessions_module
+
+    _seed_sessions(tmp_path, 60, ["music", "news"])
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    rebuilds = {"count": 0}
+    original = sessions_module.rebuild_plugin_impacts
+
+    def counting_rebuild(*args, **kwargs):
+        rebuilds["count"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sessions_module, "rebuild_plugin_impacts", counting_rebuild)
+
+    response = client.post("/ruok/_actions/sessions-bulk", data={"action": "ignore"})
+
+    assert response.status_code == 200
+    assert rebuilds["count"] == 1
+
+
+def test_bulk_sessions_action_reads_do_not_scale_per_row(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The passes stay constant: filter, per-row write, impact rebuild, render.
+
+    A per-row ``rebuild_plugin_impacts`` (the naive loop) would add one full
+    directory scan per changed Session, so the count would be ~24x higher.
+    """
+    _seed_sessions(tmp_path, 24, ["music", "news"])
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    calls = _count_session_validations(monkeypatch)
+    response = client.post("/ruok/_actions/sessions-bulk", data={"action": "ignore"})
+
+    assert response.status_code == 200
+    passes = calls["count"] / 24
+    assert passes <= 5, f"{passes:.1f} directory reads per row"
+
+
 async def test_sessions_page_does_not_block_event_loop(
     tmp_path: Path, monkeypatch
 ) -> None:

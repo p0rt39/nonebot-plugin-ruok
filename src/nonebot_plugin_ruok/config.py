@@ -24,6 +24,13 @@ class ScopedConfig(BaseModel):
     # False: stdlib logging handler only captures framework logs
     #   (uvicorn, starlette, fastapi, asyncio, multipart).
     # True: captures ALL stdlib ERROR/CRITICAL from any logger.
+    # Pending Sessions older than this are treated as stale.  ``0`` disables
+    # the stale count, the WebUI bulk entry point and the scheduled cleanup.
+    stale_pending_after_hours: float = Field(default=0.0, ge=0.0)
+    stale_pending_auto_resolve: bool = False
+    # ``ignored`` is the safer default: it is the existing "false alarm" state,
+    # so the cleanup cannot silently mark a real defect as fixed.
+    stale_pending_resolve_status: Literal["solved", "ignored"] = "ignored"
     report_whitelist_users: list[str] = []
     report_whitelist_groups: list[str] = []
     crisis_mode: bool = False  # 开启后跳过所有上报权限检查（测试/紧急用）

@@ -23,8 +23,13 @@
     </div>
 </div>
 
-{% include "_sessions_list.html.jinja2" %}
+{% if bulk_notice | default('') %}
+<p class="bulk-notice" role="status" aria-live="polite">{{ bulk_notice }}</p>
+{% endif %}
 
+{% include "_session_bulk.html.jinja2" %}
+
+{% include "_sessions_list.html.jinja2" %}
 {% if total_pages > 1 %}
 <nav class="pagination" aria-label="Session 分页">
     {% if page > 1 %}

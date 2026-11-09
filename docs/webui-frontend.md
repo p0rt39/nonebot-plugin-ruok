@@ -15,7 +15,8 @@
 - `dashboard.html.jinja2`、`dashboard_user.html.jinja2`：管理员/普通用户仪表盘。
 - `_dashboard_*.html.jinja2`：仪表盘卡片、系统指标、图表。
 - `sessions.html.jinja2`、`sessions_detail.html.jinja2`、`_sessions_list.html.jinja2`、
-  `_session_card.html.jinja2`、`_linked_list.html.jinja2`：Session 列表/详情/操作。
+  `_session_card.html.jinja2`、`_session_bulk.html.jinja2`、`_linked_list.html.jinja2`：
+  Session 列表/批量维护/详情/操作。
 - `modules.html.jinja2`、`modules_detail.html.jinja2`、`_module_form.html.jinja2`、
   `_modules_table.html.jinja2`：模块列表/详情/编辑。
 - `notifications.html.jinja2`、`notifications_detail.html.jinja2`、
@@ -37,6 +38,12 @@ Session 列表在路由层分页（`page`，`page_size` 10–100，默认 20）�
 `on_status`/`channels`；路由仍兼容旧式逗号字符串。Dashboard SSE 的控制台追踪默认关闭，
 仅当 `localStorage['ruok-debug'] === '1'` 时开启。HTMX 请求失败（4xx/5xx）不替换正文，
 因此通过 `htmx:responseError` 弹出错误 toast。
+
+Session 列表上方的批量面板处理**当前筛选命中的整批 Session（跨分页）**：隐藏输入回显
+`filters`，动作单选无默认值，提交按钮在选中动作后启用，`confirm` 时显示「不传播插件影响」
+提示。批量响应重渲染 `#session-content` 的内部并附带 `HX-Trigger` toast（ASCII，HTTP 头
+无法承载中文）；中文结果回执写在 `.bulk-notice`，带 `role="status"` 与 `aria-live="polite"`。
+陈旧待确认面板只在 `RUOK__STALE_PENDING_AFTER_HOURS > 0` 且计数大于 0 时出现。
 
 ## 响应式 + 实时更新契约
 

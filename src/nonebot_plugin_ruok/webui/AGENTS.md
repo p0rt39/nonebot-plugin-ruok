@@ -10,6 +10,12 @@ Scope：`src/nonebot_plugin_ruok/webui/`（路由、认证、SSE、Jinja）。�
   admin-only 依赖 admin 守卫；普通用户账号/报告 action 用 login/bound-user 守卫。
 - 对缺失 Session 的 action 返回 404（与详情页同一 fragment），不要抛进全局 500 处理器；
   `session-note`/`unlink` 不得对未触达目标报告成功。
+- Session 批量维护 action（`sessions-bulk`、`sessions-stale`）是 admin-only。它们处理的是
+  **当前筛选命中的全部 Session**，不只是当前页；必须以 `#session-content` 为 inner swap 目标
+  （容器本身即目标，`outerHTML` 会删掉筛选表单与后续所有目标）。缺少 action、超过
+  `BULK_MAX_SESSIONS`、陈旧阈值为 0 时返回 400；`session_enabled=False` 时返回 403；
+  0 匹配返回 200 并重渲染容器。
+- 批量动作不得有默认值：表单默认不选任何动作，提交按钮初始 disabled，由模板脚本在选中后启用。
 - 模块/通知删除的 `redirect_to` 经 `_safe_redirect_target()`：仅接受本站 `/ruok` 路径，
   其余回退端点默认值（防开放重定向）。
 - 模块/通知详情用 `{name:path}` 与 URL 编码支持特殊字符；保留 `_path_quote` 与编码。

@@ -1,0 +1,74 @@
+<!-- HTMX partial: bulk maintenance panel (filters → one bulk action) -->
+{% set bulk_actions = [
+    ('confirm', '✅ 确认为未解决', 'pending 与 unsolved 变为 unsolved，不传播插件影响'),
+    ('solve', '🟢 标记为已解决', 'pending 与 unsolved 变为 solved'),
+    ('ignore', '⚪ 标记为已忽略（误报）', 'pending 与 unsolved 变为 ignored'),
+] %}
+{% if total %}
+<details class="bulk-panel">
+    <summary>🧹 批量处理当前筛选结果（{{ total }} 条）</summary>
+    <form class="bulk-form"
+          hx-post="/ruok/_actions/sessions-bulk"
+          hx-target="#session-content"
+          hx-confirm="确定批量处理当前筛选匹配的 Session？此操作不可撤销。">
+        {% for name, value in filters.items() %}
+        <input type="hidden" name="{{ name }}" value="{{ value }}">
+        {% endfor %}
+        <input type="hidden" name="page" value="{{ page }}">
+        <input type="hidden" name="page_size" value="{{ page_size }}">
+
+        <p class="bulk-panel__hint">
+            当前筛选匹配 <strong>{{ total }}</strong> 条：待确认
+            {{ matched_by_status.get('pending', 0) }}、未解决
+            {{ matched_by_status.get('unsolved', 0) }}、已解决
+            {{ matched_by_status.get('solved', 0) }}、已忽略
+            {{ matched_by_status.get('ignored', 0) }}。
+            批量操作只改动其中的待确认与未解决记录；单次最多处理 {{ bulk_max }} 条。
+        </p>
+
+        <fieldset class="bulk-actions">
+            <legend>批量动作（必选）</legend>
+            {% for value, label, description in bulk_actions %}
+            <label>
+                <input type="radio" name="action" value="{{ value }}" data-bulk-action>
+                <span class="bulk-actions__label">{{ label }}</span>
+                <small class="bulk-actions__desc">{{ description }}</small>
+            </label>
+            {% endfor %}
+        </fieldset>
+
+        <p class="bulk-panel__hint bulk-panel__hint--warn" data-bulk-confirm-hint hidden>
+            批量确认会把匹配的 Session 置为未解决，但不记录影响插件；需要插件级传播时请在详情页逐条确认。
+        </p>
+
+        <button type="submit" class="secondary outline ruok-button" data-bulk-submit disabled>
+            执行批量操作
+        </button>
+    </form>
+</details>
+{% endif %}
+
+{% if stale_pending_count | default(0) > 0 %}
+<details class="bulk-panel bulk-panel--stale">
+    <summary>⏳ 陈旧待确认 Session（{{ stale_pending_count }} 条）</summary>
+    <form class="bulk-form"
+          hx-post="/ruok/_actions/sessions-stale"
+          hx-target="#session-content"
+          hx-confirm="确定将 {{ stale_pending_count }} 个超过 {{ stale_pending_after_hours }} 小时未更新的待确认 Session 批量标记为{% if stale_pending_resolve_status == 'solved' %}已解决{% else %}已忽略{% endif %}？此操作不可撤销。">
+        {% for name, value in filters.items() %}
+        <input type="hidden" name="{{ name }}" value="{{ value }}">
+        {% endfor %}
+        <input type="hidden" name="page" value="{{ page }}">
+        <input type="hidden" name="page_size" value="{{ page_size }}">
+
+        <p class="bulk-panel__hint">
+            这些 Session 的 <code>last_seen_at</code> 距今已超过
+            {{ stale_pending_after_hours }} 小时，但仍停留在待确认状态。
+            处理后会标记为{% if stale_pending_resolve_status == 'solved' %}已解决{% else %}已忽略{% endif %}。
+        </p>
+        <button type="submit" class="secondary outline ruok-button">
+            处理 {{ stale_pending_count }} 个陈旧 Session
+        </button>
+    </form>
+</details>
+{% endif %}

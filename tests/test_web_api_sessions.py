@@ -635,6 +635,285 @@ def test_webui_list_actions_still_return_session_row(tmp_path: Path) -> None:
     assert '<span class="badge badge-ok">已解决</span>' in response.text
 
 
+def test_bulk_panel_requires_an_explicit_action(tmp_path: Path) -> None:
+    _create_many_sessions(tmp_path, 2)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert response.status_code == 200
+    assert 'hx-post="/ruok/_actions/sessions-bulk"' in response.text
+    assert 'hx-target="#session-content"' in response.text
+    # No action is preselected and the submit button starts disabled.
+    assert 'value="ignore" data-bulk-action checked' not in response.text
+    assert "data-bulk-submit disabled" in response.text
+    assert response.text.count('name="action"') == 3
+
+
+def test_bulk_panel_reports_the_filtered_status_spread(tmp_path: Path) -> None:
+    """The panel describes the filtered set, never the global totals."""
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import (
+        create_session,
+        update_session,
+    )
+
+    _create_many_sessions(tmp_path, 2)
+    solved = create_session(tmp_path, "music", "closed", ReporterInfo(type="user"))
+    update_session(tmp_path, solved.session_id, {"status": "solved"})
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions", params={"status": "pending"})
+
+    assert response.status_code == 200
+    panel = response.text.split('class="bulk-panel__hint"', 1)[1].split("</p>", 1)[0]
+    # The filtered-out solved row must not inflate the panel counts.
+    assert "2</strong> 条" in panel
+    assert "待确认\n            2" in panel
+    assert "已解决\n            0" in panel
+
+
+def test_sessions_list_uses_readable_chip_and_stacked_bulk_labels(
+    tmp_path: Path,
+) -> None:
+    """Chips sit on a button reset, so they need the surface foreground."""
+    _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert response.status_code == 200
+    assert "color: var(--ruok-text);" in response.text
+    # Pico's inverse button colour made the chip text unreadable on the surface.
+    chip_rule = response.text.split(".status-chip {", 1)[1].split("}", 1)[0]
+    assert "var(--pico-color)" not in chip_rule
+    # Mobile: label and explanation stack so neither wraps mid-word.
+    assert ".bulk-actions__label" in response.text
+    assert "flex-basis: 100%;" in response.text
+
+
+def test_bulk_action_ignores_the_whole_filtered_set(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.protocol import ReporterInfo
+    from nonebot_plugin_ruok.collectors.sessions import (
+        list_sessions,
+        create_session,
+        update_session,
+    )
+
+    pending_ids = _create_many_sessions(tmp_path, 3)
+    solved = create_session(
+        tmp_path, "music", "already done", ReporterInfo(type="user")
+    )
+    update_session(tmp_path, solved.session_id, {"status": "solved"})
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/sessions-bulk",
+        data={"action": "ignore", "status": "pending"},
+    )
+
+    assert response.status_code == 200
+    # The container is the swap target, so the body is its inner content.
+    assert 'id="session-content"' not in response.text
+    assert "已批量" in response.text
+    assert "3 changed" in response.headers["HX-Trigger"]
+    statuses = {s.session_id: s.status for s in list_sessions(tmp_path)}
+    assert all(statuses[session_id] == "ignored" for session_id in pending_ids)
+    assert statuses[solved.session_id] == "solved"
+
+
+def test_bulk_action_processes_beyond_the_visible_page(tmp_path: Path) -> None:
+    """A bulk pass acts on the filter, not on the 20 rows currently rendered."""
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    session_ids = _create_many_sessions(tmp_path, 25)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/sessions-bulk",
+        data={"action": "ignore", "page_size": "10"},
+    )
+
+    assert response.status_code == 200
+    statuses = {s.session_id: s.status for s in list_sessions(tmp_path)}
+    assert all(statuses[session_id] == "ignored" for session_id in session_ids)
+
+
+def test_bulk_action_requires_an_action(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    (session_id,) = _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post("/ruok/_actions/sessions-bulk", data={})
+
+    assert response.status_code == 400
+    assert list_sessions(tmp_path)[0].session_id == session_id
+    assert list_sessions(tmp_path)[0].status == "pending"
+
+
+def test_bulk_action_rejects_unknown_action(tmp_path: Path) -> None:
+    _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post("/ruok/_actions/sessions-bulk", data={"action": "delete"})
+
+    assert response.status_code == 400
+
+
+def test_bulk_action_with_no_matches_is_not_an_error(tmp_path: Path) -> None:
+    _create_many_sessions(tmp_path, 2)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/sessions-bulk",
+        data={"action": "ignore", "search": "no-such-text"},
+    )
+
+    assert response.status_code == 200
+    assert "没有匹配" in response.text
+    assert 'class="bulk-notice"' in response.text
+
+
+def test_bulk_action_rejects_oversized_batches(tmp_path: Path, monkeypatch) -> None:
+    from nonebot_plugin_ruok.webui import router as router_module
+
+    _create_many_sessions(tmp_path, 4)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+    monkeypatch.setattr(router_module, "BULK_MAX_SESSIONS", 2)
+
+    response = client.post("/ruok/_actions/sessions-bulk", data={"action": "ignore"})
+
+    assert response.status_code == 400
+    assert "超过单次上限" in response.text
+
+
+def test_bulk_action_requires_session_system(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    (session_id,) = _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(session_enabled=False), tmp_path)
+    _login_admin(client)
+
+    response = client.post("/ruok/_actions/sessions-bulk", data={"action": "ignore"})
+
+    assert response.status_code == 403
+    assert list_sessions(tmp_path)[0].session_id == session_id
+
+
+def test_bulk_action_requires_authentication(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+
+    response = client.post("/ruok/_actions/sessions-bulk", data={"action": "ignore"})
+
+    assert response.status_code == 401
+    assert list_sessions(tmp_path)[0].status == "pending"
+
+
+def test_bulk_action_rejects_non_admin_users(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.webui.auth import WebUIAuth
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    _create_many_sessions(tmp_path, 1)
+    config = _webui_config()
+    WebUIAuth(config, tmp_path).register_user("alice", "secret")
+    client = _client(config, tmp_path)
+    login = client.post(
+        "/ruok/login",
+        data={"username": "alice", "password": "secret"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 302
+
+    response = client.post("/ruok/_actions/sessions-bulk", data={"action": "ignore"})
+
+    assert response.status_code == 403
+    assert list_sessions(tmp_path)[0].status == "pending"
+
+
+def test_bulk_action_rejects_invalid_datetime_filter(tmp_path: Path) -> None:
+    from nonebot_plugin_ruok.collectors.sessions import list_sessions
+
+    _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post(
+        "/ruok/_actions/sessions-bulk",
+        data={"action": "ignore", "after": "not-a-date"},
+    )
+
+    assert response.status_code == 400
+    assert list_sessions(tmp_path)[0].status == "pending"
+
+
+def test_stale_action_requires_the_threshold(tmp_path: Path) -> None:
+    _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.post("/ruok/_actions/sessions-stale", data={})
+
+    assert response.status_code == 400
+    assert "STALE_PENDING_AFTER_HOURS" in response.text
+
+
+def test_stale_panel_and_action_handle_only_stale_rows(tmp_path: Path) -> None:
+    from datetime import datetime, timezone, timedelta
+
+    from nonebot_plugin_ruok.collectors.sessions import (
+        _load_session,
+        _save_session,
+        list_sessions,
+    )
+
+    stale_id, fresh_id = _create_many_sessions(tmp_path, 2)
+    stale = _load_session(tmp_path, stale_id)
+    assert stale is not None
+    stale.last_seen_at = datetime.now(timezone.utc) - timedelta(hours=48)
+    _save_session(tmp_path, stale)
+
+    config = _webui_config(stale_pending_after_hours=24.0)
+    client = _client(config, tmp_path)
+    _login_admin(client)
+
+    page = client.get("/ruok/sessions")
+    assert page.status_code == 200
+    assert 'hx-post="/ruok/_actions/sessions-stale"' in page.text
+    assert "陈旧待确认 Session（1 条）" in page.text
+
+    response = client.post("/ruok/_actions/sessions-stale", data={})
+
+    assert response.status_code == 200
+    assert "已处理 1 个陈旧待确认 Session" in response.text
+    statuses = {s.session_id: s.status for s in list_sessions(tmp_path)}
+    assert statuses[stale_id] == "ignored"
+    assert statuses[fresh_id] == "pending"
+
+
+def test_stale_panel_hidden_when_threshold_is_zero(tmp_path: Path) -> None:
+    _create_many_sessions(tmp_path, 1)
+    client = _client(_webui_config(), tmp_path)
+    _login_admin(client)
+
+    response = client.get("/ruok/sessions")
+
+    assert response.status_code == 200
+    assert 'hx-post="/ruok/_actions/sessions-stale"' not in response.text
+
+
 def test_session_summary_strips_markup_and_truncates() -> None:
     from nonebot_plugin_ruok.webui.jinja import session_summary
 
